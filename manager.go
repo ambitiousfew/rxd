@@ -34,15 +34,12 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 			// Run the method associated with the next state.
 			switch svcResp.NextState {
 			case InitState:
-				// m.logger.Info.Println("next state, init")
 				m.logC <- NewLog(fmt.Sprintf("%s next state, init", service.Name()), Debug)
 				svcResp = service.Init()
 			case IdleState:
-				// m.logger.Info.Println("next state, idle")
 				m.logC <- NewLog(fmt.Sprintf("%s next state, idle", service.Name()), Debug)
 				svcResp = service.Idle()
 			case RunState:
-				// m.logger.Info.Println("next state, run")
 				m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
 				svcResp = service.Run()
 
@@ -68,7 +65,6 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 				}
 
 			case StopState:
-				// m.logger.Info.Println("next state, stop")
 				m.logC <- NewLog(fmt.Sprintf("%s next state, stop", service.Name()), Debug)
 				svcResp = service.Stop()
 				if svcResp.Error != nil {
