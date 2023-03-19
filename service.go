@@ -8,13 +8,13 @@ type State string
 const (
 	// InitState is in the ServiceResponse to inform manager to move us to the Init state
 	InitState State = "init"
-	// IdleState is in the ServiceResponse to inform manager to move us to the Init state
+	// IdleState is in the ServiceResponse to inform manager to move us to the Idle state
 	IdleState State = "idle"
-	// RunState is in the ServiceResponse to inform manager to move us to the Init state
+	// RunState is in the ServiceResponse to inform manager to move us to the Run state
 	RunState State = "run"
-	// StopState is in the ServiceResponse to inform manager to move us to the Init state
+	// StopState is in the ServiceResponse to inform manager to move us to the Stop state
 	StopState State = "stop"
-	// NoopState is in the ServiceResponse to inform manager to move us to the Init state
+	// NoopState is in the ServiceResponse to inform manager to move us to the NoOp state
 	NoopState State = "noop"
 )
 
