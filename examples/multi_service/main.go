@@ -10,11 +10,15 @@ import (
 // Example entrypoint
 func main() {
 	// We create an instance of our ServiceConfig
-	apiCfg := rxd.NewServiceConfig()
+	apiCfg := rxd.NewServiceConfig(
+		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
+	)
 	// We create an instance of our service
 	apiSvc := NewHelloWorldService(apiCfg)
 
-	pollCfg := rxd.NewServiceConfig()
+	pollCfg := rxd.NewServiceConfig(
+		rxd.UsingRunPolicy(rxd.RunOncePolicy),
+	)
 	pollSvc := NewAPIPollingService(pollCfg)
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.

@@ -1,9 +1,5 @@
 package rxd
 
-import (
-	"time"
-)
-
 // ServiceConfig all services will require a config as a *ServiceConfig in their service struct.
 // This config contains preconfigured shutdown channel,
 type ServiceConfig struct {
@@ -35,8 +31,9 @@ func (cfg *ServiceConfig) LogError(message string) {
 func NewServiceConfig(options ...ServiceOption) *ServiceConfig {
 	// Default policy to restart immediately (3s) and always try to restart itself.
 	opts := &ServiceOpts{
-		RestartPolicy:  Always,
-		RestartTimeout: 3 * time.Second,
+		// RestartPolicy:  Always,
+		// RestartTimeout: 3 * time.Second,
+		RunPolicy: RunUntilStoppedPolicy,
 	}
 
 	// Apply all functional options to update defaults.

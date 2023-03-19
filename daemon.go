@@ -13,16 +13,24 @@ type daemon struct {
 	logC     chan LogMessage
 }
 
+// SetLogSeverity allows for the logging to be scoped to severity level
 func (d *daemon) SetLogSeverity(level LogSeverity) {
 	d.logger = NewLogger(level)
 }
 
+// Logger returns the instance of the daemon logger
+func (d *daemon) Logger() *Logger {
+	return d.logger
+}
+
+// NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(services ...Service) *daemon {
 	// default severity to log is Info level and higher.
 	logger := NewLogger(LevelInfo)
 
 	logC := make(chan LogMessage)
 	stopC := make(chan struct{})
+
 	return &daemon{
 		logger:   logger,
 		stoppedC: stopC,

@@ -114,7 +114,9 @@ var _ rxd.Service = &HelloWorldAPIService{}
 // Example entrypoint
 func main() {
 	// We create an instance of our ServiceConfig
-	apiCfg := rxd.NewServiceConfig()
+	apiCfg := rxd.NewServiceConfig(
+		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
+	)
 	// We create an instance of our service
 	apiSvc := NewHelloWorldService(apiCfg)
 

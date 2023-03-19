@@ -3,7 +3,6 @@ package rxd
 import (
 	"fmt"
 	"sync"
-	"time"
 )
 
 type manager struct {
@@ -46,17 +45,41 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 				// m.logger.Info.Println("next state, run")
 				m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
 				svcResp = service.Run()
+
+				// Enforce Run policies
+				switch svcCfg.Opts.RunPolicy {
+				case RunOncePolicy:
+					m.logC <- NewLog("Run Once Policy!", Debug)
+					if svcResp.Error != nil {
+						m.logC <- NewLog(svcResp.Error.Error(), Error)
+					}
+					// regardless of success/fail, we exit
+					return
+
+				case RunOnceIfSuccessPolicy:
+					if svcResp.Error == nil {
+						stopResp := service.Stop()
+						if stopResp.Error != nil {
+							m.logC <- NewLog(stopResp.Error.Error(), Error)
+						}
+						// If Run didnt error, we assume successful run once and stop service.
+						return
+					}
+				}
+
 			case StopState:
 				// m.logger.Info.Println("next state, stop")
 				m.logC <- NewLog(fmt.Sprintf("%s next state, stop", service.Name()), Debug)
 				svcResp = service.Stop()
+				if svcResp.Error != nil {
+					m.logC <- NewLog(svcResp.Error.Error(), Error)
+				}
 				return
 			case NoopState:
 				// Probably not necessary to keep around, really meant for Stop() to use as ServiceResponse
 				// Debating on not using ServiceResponse for stop, just using classic error
 				m.logC <- NewLog(fmt.Sprintf("%s next state, noop", service.Name()), Debug)
 				return
-
 			default:
 				// Shouldn't be possible to end up here. Fallback is to end the service.
 				return
@@ -66,26 +89,8 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 			// Extract the error out and send it to the logging channel.
 			if svcResp.Error != nil {
 				m.logC <- NewLog(svcResp.Error.Error(), Error)
-
-				// Figure out if we should continue to run or not
-				switch svcCfg.Opts.RestartPolicy {
-				case Always:
-					m.logC <- NewLog(fmt.Sprintf("%s %s failed, retrying in %.2f seconds...\n", service.Name(), svcResp.NextState, svcCfg.Opts.RestartTimeout.Seconds()), Error)
-					time.Sleep(svcCfg.Opts.RestartTimeout)
-					continue
-				default:
-					// Currently the only other option is restart policy of: Once
-					// If this service is only meant to run once. Prevent a reiteration/restart.
-					svcResp := service.Stop()
-					if svcResp.Error != nil {
-						m.logC <- NewLog(svcResp.Error.Error(), Error)
-					}
-					// m.logger.Info.Printf("%s has completed successfully, stopping service.\n", svc.Name())
-					m.logC <- NewLog(fmt.Sprintf("%s has completed successfully, stopping service.\n", service.Name()), Debug)
-					return
-				}
+				continue
 			}
-
 		}
 	}
 
