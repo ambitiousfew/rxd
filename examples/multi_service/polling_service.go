@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	rxd "github.com/ambitiousfew/rxdaemon"
+	"github.com/ambitiousfew/rxd"
 )
 
 // APIPollingService create a struct for your service which requires a config field along with any other state

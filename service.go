@@ -1,4 +1,4 @@
-package rxdaemon
+package rxd
 
 // State is used to determine the "next state" the service should enter
 // when the current state has completed/errored returned. State should

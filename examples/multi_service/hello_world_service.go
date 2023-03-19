@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	rxd "github.com/ambitiousfew/rxdaemon"
+	"github.com/ambitiousfew/rxd"
 )
 
 // HelloWorldAPIService create a struct for your service which requires a config field along with any other state

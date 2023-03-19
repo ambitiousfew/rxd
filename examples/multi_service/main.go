@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	rxd "github.com/ambitiousfew/rxdaemon"
+	"github.com/ambitiousfew/rxd"
 )
 
 // Example entrypoint

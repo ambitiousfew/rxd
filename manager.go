@@ -1,4 +1,4 @@
-package rxdaemon
+package rxd
 
 import (
 	"fmt"

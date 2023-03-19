@@ -1,4 +1,4 @@
-package rxdaemon
+package rxd
 
 // ServiceResponse is used as a return response for services to use
 // so the Manager can determine the "next state" based on return and any error
