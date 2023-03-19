@@ -6,15 +6,23 @@ import (
 	"os"
 )
 
+// LogSeverity is a typed int that represents the severity of the logging levels.
 type LogSeverity int
 
 const (
-	LevelAll   LogSeverity = 0
+	// LevelAll will show all severity levels
+	LevelAll LogSeverity = 0
+	// LevelDebug will show all severity levels at Debug and above: Debug, Info, Error
 	LevelDebug LogSeverity = 1
-	LevelInfo  LogSeverity = 2
-	// LevelWarn = 3?
+	// LevelInfo will show all severity levels at Info and above: Info, Error
+	LevelInfo LogSeverity = 2
+	// LevelWarn  LogSeverity = 3
+
+	// LevelError will show all severity levels at Error and above: Error
 	LevelError LogSeverity = 4
-	// LevelFatal = 5?
+	// LevelFatal LogSeverity = 5
+
+	// LevelOff will not show any logs, logging will be off
 	LevelOff LogSeverity = 6
 )
 
@@ -38,6 +46,10 @@ func NewLogger(logSeverity LogSeverity) *Logger {
 	case LevelError:
 		debugOut = io.Discard
 		infoOut = io.Discard
+	case LevelOff:
+		debugOut = io.Discard
+		infoOut = io.Discard
+		errorOut = io.Discard
 	default:
 		break
 	}
