@@ -51,10 +51,3 @@ func NewLogger(logSeverity LogSeverity) *Logger {
 		Error: log.New(errorOut, "[ERROR] ", log.LstdFlags|log.Lshortfile|log.Lmsgprefix),
 	}
 }
-
-func setOutput() io.Writer {
-	if os.Getenv("WF_PROFILE") == "development" {
-		return os.Stdout
-	}
-	return io.Discard
-}
