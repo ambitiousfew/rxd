@@ -1,14 +1,19 @@
 package rxd
 
-import "sync"
+import (
+	"sync"
+)
 
 // ServiceConfig all services will require a config as a *ServiceConfig in their service struct.
 // This config contains preconfigured shutdown channel,
 type ServiceConfig struct {
-	Opts *ServiceOpts
+	opts *serviceOpts
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
 	ShutdownC chan struct{}
+
+	StateC chan State
+
 	// Logging channel for manage to attach to services to use
 	logC chan LogMessage
 
@@ -18,6 +23,28 @@ type ServiceConfig struct {
 	isShutdown bool
 	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
 	mu sync.Mutex
+}
+
+// NotifyStateChange takes a state and iterates over all services added via UsingServiceNotify, if any
+func (cfg *ServiceConfig) NotifyStateChange(state State) {
+	// If we dont have any services to notify, dont try.
+	if cfg.opts.serviceNotify == nil {
+		return
+	}
+
+	cfg.opts.serviceNotify.notify(state, cfg.logC)
+}
+
+func (cfg *ServiceConfig) setIsStopped(value bool) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	cfg.isStopped = value
+}
+
+func (cfg *ServiceConfig) setIsShutdown(value bool) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	cfg.isShutdown = value
 }
 
 // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
@@ -38,10 +65,10 @@ func (cfg *ServiceConfig) LogError(message string) {
 // NewServiceConfig will apply all options in the order given prior to creating the ServiceConfig instance created.
 func NewServiceConfig(options ...ServiceOption) *ServiceConfig {
 	// Default policy to restart immediately (3s) and always try to restart itself.
-	opts := &ServiceOpts{
+	opts := &serviceOpts{
 		// RestartPolicy:  Always,
 		// RestartTimeout: 3 * time.Second,
-		RunPolicy: RunUntilStoppedPolicy,
+		runPolicy: RunUntilStoppedPolicy,
 	}
 
 	// Apply all functional options to update defaults.
@@ -51,7 +78,8 @@ func NewServiceConfig(options ...ServiceOption) *ServiceConfig {
 
 	return &ServiceConfig{
 		ShutdownC:  make(chan struct{}),
-		Opts:       opts,
+		StateC:     make(chan State),
+		opts:       opts,
 		isStopped:  true,
 		isShutdown: false,
 	}

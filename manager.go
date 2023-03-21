@@ -47,7 +47,7 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 				m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
 				svcResp = service.Run()
 				// Enforce Run policies
-				switch svcCfg.Opts.RunPolicy {
+				switch svcCfg.opts.runPolicy {
 				case RunOncePolicy:
 					if svcResp.Error != nil {
 						m.logC <- NewLog(svcResp.Error.Error(), Error)
@@ -74,10 +74,7 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
 				}
 
-				svcCfg.mu.Lock()
-				svcCfg.isStopped = true
-				svcCfg.mu.Unlock()
-
+				svcCfg.setIsStopped(true)
 				return
 			}
 
@@ -90,23 +87,23 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 			if svcResp.NextState == ExitState {
 				// establish lock before reading/writing isStopped/isShutdown
-				svcCfg.mu.Lock()
+
 				if !svcCfg.isStopped {
 					// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 					svcResp = service.Stop()
 					if svcResp.Error != nil {
 						m.logC <- NewLog(svcResp.Error.Error(), Error)
 					}
-					svcCfg.isStopped = true
+					svcCfg.setIsStopped(true)
 				}
 
 				// if a close signal hasnt been sent to the service.
 				if !svcCfg.isShutdown {
 					m.logC <- NewLog(fmt.Sprintf("sending a close signal to %s", service.Name()), Error)
 					close(svcCfg.ShutdownC)
-					svcCfg.isShutdown = true
+					close(svcCfg.StateC)
+					svcCfg.setIsShutdown(true)
 				}
-				svcCfg.mu.Unlock()
 
 				m.logC <- NewLog(fmt.Sprintf("%s is exiting...", service.Name()), Debug)
 				return
@@ -152,13 +149,13 @@ func (m *manager) shutdown() {
 	var totalRunning int
 	for _, service := range m.Services {
 		svcCfg := service.Config()
+
 		if !svcCfg.isShutdown {
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", service.Name()), Debug)
 			// sends a signal to each service to inform them to stop running.
 			close(svcCfg.ShutdownC)
-			svcCfg.mu.Lock()
-			svcCfg.isShutdown = true
-			svcCfg.mu.Unlock()
+			svcCfg.setIsShutdown(true)
+			close(svcCfg.StateC)
 			totalRunning++
 		}
 	}
