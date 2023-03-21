@@ -105,7 +105,7 @@ func (s *HelloWorldAPIService) Run() rxd.ServiceResponse {
 func (s *HelloWorldAPIService) Stop() rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	return rxd.NewResponse(nil, rxd.NoopState)
+	return rxd.NewResponse(nil, rxd.ExitState)
 }
 
 // This line is purely for error checking to ensure we are meeting the Service interface.
@@ -125,9 +125,7 @@ func main() {
 	// We can set the log severity we want to observe, LevelInfo is default
 	daemon.SetLogSeverity(rxd.LevelInfo)
 
-	// tell the daemon to Start - this blocks until the underlying
-	// services manager stops running, which it wont until all services complete.
-	err := daemon.Start()
+	err := daemon.Start() // Blocks main thread
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)

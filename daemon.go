@@ -28,7 +28,7 @@ func NewDaemon(services ...Service) *daemon {
 	// default severity to log is Info level and higher.
 	logger := NewLogger(LevelInfo)
 
-	logC := make(chan LogMessage)
+	logC := make(chan LogMessage, 10)
 	stopC := make(chan struct{})
 
 	return &daemon{
@@ -64,10 +64,8 @@ func (d *daemon) signalWatcher(signalC chan os.Signal) {
 	<-signalC // blocks until a signal is received
 	d.logger.Debug.Println("OS signal received, cancelling context")
 
-	err := d.manager.shutdown()
-	if err != nil {
-		d.logger.Error.Println(err)
-	}
+	// shutdown iterates over all services manager knows about signaling shutdown by closing the ShutdownC in each Service Config
+	d.manager.shutdown()
 }
 
 func (d *daemon) logWatcher(stopLogC chan struct{}) {
@@ -94,16 +92,18 @@ func (d *daemon) logWatcher(stopLogC chan struct{}) {
 //     manager to shutdown all services, blocks until finishes.
 //  2. Log watcher that handles all logging from manager and services through a channel.
 func (d *daemon) Start() error {
+	var err error
+	defer func() error {
+		if err != nil {
+			return err
+		}
+		// Also catch any potential panics as errors
+		err = recover().(error)
+		return err
+	}()
+
 	stopLogC := make(chan struct{})
 	signalC := make(chan os.Signal)
-
-	defer func() {
-		d.logger.Debug.Println("closing signalC channel")
-		close(signalC)
-		d.logger.Debug.Println("signalC channel closed")
-		close(d.logC)
-		d.logger.Debug.Println("logC channel closed")
-	}()
 
 	// OS Signal watcher routine.
 	go d.signalWatcher(signalC)
@@ -112,10 +112,15 @@ func (d *daemon) Start() error {
 
 	// Main thread blocks here until manager stops all services
 	// which can be triggered by the relaying of OS Signal / context.Done()
-	err := d.manager.Start()
+
+	err = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
+
 	if err != nil {
 		d.logger.Error.Println(err)
 	}
-
-	return err
+	close(signalC)
+	d.logger.Debug.Println("signalC channel closed")
+	close(d.logC)
+	d.logger.Debug.Println("logC channel closed")
+	return nil
 }

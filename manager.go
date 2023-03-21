@@ -16,7 +16,8 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	svcCfg := service.Config()
-	svcCfg.isStopped = false
+	// svcCfg.isStopped = false
+	// svcCfg.isShutdown = false
 	// Attach manager logging channel to each service so all services can send logs out
 	svcCfg.logC = m.logC
 
@@ -33,34 +34,36 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 			// Determine the next state the service should be in.
 			// Run the method associated with the next state.
 			switch svcResp.NextState {
+
 			case InitState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, init", service.Name()), Debug)
 				svcResp = service.Init()
+
 			case IdleState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, idle", service.Name()), Debug)
 				svcResp = service.Idle()
+
 			case RunState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
 				svcResp = service.Run()
-
 				// Enforce Run policies
 				switch svcCfg.Opts.RunPolicy {
 				case RunOncePolicy:
-					m.logC <- NewLog("Run Once Policy!", Debug)
 					if svcResp.Error != nil {
 						m.logC <- NewLog(svcResp.Error.Error(), Error)
 					}
 					// regardless of success/fail, we exit
-					return
+					svcResp.NextState = ExitState
 
-				case RunOnceIfSuccessPolicy:
+				case RetryUntilSuccessPolicy:
 					if svcResp.Error == nil {
 						stopResp := service.Stop()
 						if stopResp.Error != nil {
 							m.logC <- NewLog(stopResp.Error.Error(), Error)
 						}
+						svcCfg.isStopped = true
 						// If Run didnt error, we assume successful run once and stop service.
-						return
+						svcResp.NextState = ExitState
 					}
 				}
 
@@ -70,14 +73,11 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
 				}
-				return
-			case NoopState:
-				// Probably not necessary to keep around, really meant for Stop() to use as ServiceResponse
-				// Debating on not using ServiceResponse for stop, just using classic error
-				m.logC <- NewLog(fmt.Sprintf("%s next state, noop", service.Name()), Debug)
-				return
-			default:
-				// Shouldn't be possible to end up here. Fallback is to end the service.
+
+				svcCfg.mu.Lock()
+				svcCfg.isStopped = true
+				svcCfg.mu.Unlock()
+
 				return
 			}
 
@@ -87,16 +87,50 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 				m.logC <- NewLog(svcResp.Error.Error(), Error)
 				continue
 			}
+
+			if svcResp.NextState == ExitState {
+				// establish lock before reading/writing isStopped/isShutdown
+				svcCfg.mu.Lock()
+				if !svcCfg.isStopped {
+					// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
+					svcResp = service.Stop()
+					if svcResp.Error != nil {
+						m.logC <- NewLog(svcResp.Error.Error(), Error)
+					}
+					svcCfg.isStopped = true
+				}
+
+				// if a close signal hasnt been sent to the service.
+				if !svcCfg.isShutdown {
+					m.logC <- NewLog(fmt.Sprintf("sending a close signal to %s", service.Name()), Error)
+					close(svcCfg.ShutdownC)
+					svcCfg.isShutdown = true
+				}
+				svcCfg.mu.Unlock()
+
+				m.logC <- NewLog(fmt.Sprintf("%s is exiting...", service.Name()), Debug)
+				return
+			}
 		}
 	}
 
 }
 
-// Start handles launching each service in its own routine
+// start handles launching each service in its own routine
 // it blocks on the MAIN routine until all services have finished running and
 // notified WaitGroup by calling .Done()
 // The MAIN routine returns control back to the Daemon to finish running.
-func (m *manager) Start() error {
+func (m *manager) start() error {
+	var err error
+	defer func() error {
+		if err != nil {
+			return err
+		}
+		// catch any potential panics from manager to return to daemon
+		err = recover().(error)
+		return err
+	}()
+
 	var wg sync.WaitGroup
 	for _, service := range m.Services {
 		wg.Add(1)
@@ -110,22 +144,27 @@ func (m *manager) Start() error {
 	//  listening for OS Signal and/or errors to print from each service.
 	wg.Wait()
 
+	m.logC <- NewLog("All services have stopped running", Info)
 	return nil
 }
 
-func (m *manager) shutdown() error {
+func (m *manager) shutdown() {
+	var totalRunning int
 	for _, service := range m.Services {
 		svcCfg := service.Config()
-		if !svcCfg.isStopped {
-			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s\n", service.Name()), Debug)
+		if !svcCfg.isShutdown {
+			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", service.Name()), Debug)
 			// sends a signal to each service to inform them to stop running.
 			close(svcCfg.ShutdownC)
+			svcCfg.mu.Lock()
+			svcCfg.isShutdown = true
+			svcCfg.mu.Unlock()
+			totalRunning++
 		}
 	}
 
-	m.logC <- NewLog("All services shut down.", Debug)
+	m.logC <- NewLog(fmt.Sprintf("%d running services have been signaled to shut down.", totalRunning), Debug)
 
 	// sends a close signal back up to inform daemon it has finished.
 	close(m.stoppedC)
-	return nil
 }

@@ -1,15 +1,23 @@
 package rxd
 
+import "sync"
+
 // ServiceConfig all services will require a config as a *ServiceConfig in their service struct.
 // This config contains preconfigured shutdown channel,
 type ServiceConfig struct {
-	ShutdownC chan struct{}
-	Opts      *ServiceOpts
+	Opts *ServiceOpts
 
+	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
+	ShutdownC chan struct{}
 	// Logging channel for manage to attach to services to use
 	logC chan LogMessage
-	// Whether the service is currently in a stopped state or not
+
+	// isStopped is a flag to tell is if we have been asked to run the Stop state
 	isStopped bool
+	// isShutdown is a flag that is true if close() has been called on the ShutdownC for the service in manager shutdown method
+	isShutdown bool
+	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
+	mu sync.Mutex
 }
 
 // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
@@ -42,8 +50,9 @@ func NewServiceConfig(options ...ServiceOption) *ServiceConfig {
 	}
 
 	return &ServiceConfig{
-		ShutdownC: make(chan struct{}),
-		Opts:      opts,
-		isStopped: true,
+		ShutdownC:  make(chan struct{}),
+		Opts:       opts,
+		isStopped:  true,
+		isShutdown: false,
 	}
 }

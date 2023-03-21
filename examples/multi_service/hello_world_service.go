@@ -116,7 +116,7 @@ func (s *HelloWorldAPIService) Stop() rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
 	s.cfg.LogInfo(fmt.Sprintf("%s is stopping", s.Name()))
-	return rxd.NewResponse(nil, rxd.NoopState)
+	return rxd.NewResponse(nil, rxd.ExitState)
 }
 
 // This line is purely for error checking to ensure we are meeting the Service interface.

@@ -6,7 +6,7 @@ package rxd
 type State string
 
 const (
-	// InitState is in the ServiceResponse to inform manager to move us to the Init state
+	// InitState is in the ServiceResponse to inform manager to move us to the Init state (Initial Default).
 	InitState State = "init"
 	// IdleState is in the ServiceResponse to inform manager to move us to the Idle state
 	IdleState State = "idle"
@@ -14,8 +14,8 @@ const (
 	RunState State = "run"
 	// StopState is in the ServiceResponse to inform manager to move us to the Stop state
 	StopState State = "stop"
-	// NoopState is in the ServiceResponse to inform manager to move us to the NoOp state
-	NoopState State = "noop"
+	// ExitState is in the ServiceResponse to inform manager to act as the final response type for Stop.
+	ExitState State = "exit"
 )
 
 // Service is the service interface that all services should implement for Manager to be able to interact properly with it.
@@ -24,7 +24,7 @@ type Service interface {
 	Name() string
 	// Config should return a pointer reference to a ServiceConfig stored within the service
 	Config() *ServiceConfig
-	// Init is the initializaiton service state: any prep your service needs before running
+	// Init is the initializaiton service state: any prep your service needs before running or loading/reloading configs.
 	Init() ServiceResponse
 	// Idle is the idling service state: Status checks, Test connection, etc before running or to fall back to when run fails.
 	Idle() ServiceResponse

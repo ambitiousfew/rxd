@@ -8,8 +8,8 @@ type RunPolicy string
 const (
 	// RunUntilStoppedPolicy will continue to run the service until a StopState is returned at some point
 	RunUntilStoppedPolicy RunPolicy = "until_stopped"
-	// RunOnceIfSuccessPolicy will continue to run the service as long fails happen, use for running a service once successfully
-	RunOnceIfSuccessPolicy RunPolicy = "run_once_success"
+	// RetryUntilSuccessPolicy will continue to re-run the service as long fails happen, use for running a service once successfully
+	RetryUntilSuccessPolicy RunPolicy = "retry_until_success"
 	// RunOncePolicy will only allow the a single Run to take place regardless of success/failure
 	RunOncePolicy RunPolicy = "run_once_unbiased"
 )
