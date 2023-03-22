@@ -33,7 +33,7 @@ func NewAPIPollingService(cfg *rxd.ServiceConfig) *APIPollingService {
 		// We will check every 10s to see if we can establish a connection to the API when Idle retrying.
 		retryDuration: 10 * time.Second,
 		apiBase:       "http://localhost:8000",
-		maxPollCount:  10,
+		maxPollCount:  5,
 	}
 }
 
@@ -57,25 +57,15 @@ func (s *APIPollingService) Init() rxd.ServiceResponse {
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
 func (s *APIPollingService) Idle() rxd.ServiceResponse {
-	timer := time.NewTimer(s.retryDuration)
-	defer timer.Stop()
-
 	for {
 		select {
 		case <-s.cfg.ShutdownC:
 			return rxd.NewResponse(nil, rxd.StopState)
-		case <-timer.C:
-			_, err := s.client.Get(s.apiBase + "/api")
-			if err != nil {
-				s.cfg.LogInfo(fmt.Sprintf("could not reach the API Server, trying again in %.2f seconds", s.retryDuration.Seconds()))
-				s.cfg.LogError(err.Error())
-				// if we error, reset timer and try again...
-				timer.Reset(s.retryDuration)
-				continue
+		case state := <-s.cfg.StateC:
+			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
+			if state == rxd.RunState {
+				return rxd.NewResponse(nil, rxd.RunState)
 			}
-
-			// if we make it here, we succeeded. The API is up, move to run stage.
-			return rxd.NewResponse(nil, rxd.RunState)
 		}
 	}
 }
@@ -125,8 +115,8 @@ func (s *APIPollingService) Run() rxd.ServiceResponse {
 			// Increment polling counter
 			pollCount++
 
-			// Retry every 30s after the first time.
-			timer.Reset(30 * time.Second)
+			// Retry every 10s after the first time.
+			timer.Reset(10 * time.Second)
 		}
 	}
 }

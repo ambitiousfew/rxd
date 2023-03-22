@@ -99,7 +99,7 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 				// if a close signal hasnt been sent to the service.
 				if !svcCfg.isShutdown {
-					m.logC <- NewLog(fmt.Sprintf("sending a close signal to %s", service.Name()), Error)
+					m.logC <- NewLog(fmt.Sprintf("sending a close signal to %s", service.Name()), Debug)
 					close(svcCfg.ShutdownC)
 					close(svcCfg.StateC)
 					svcCfg.setIsShutdown(true)

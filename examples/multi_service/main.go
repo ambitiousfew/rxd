@@ -9,23 +9,29 @@ import (
 
 // Example entrypoint
 func main() {
-	// We create an instance of our ServiceConfig
-	apiCfg := rxd.NewServiceConfig(
-		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
-	)
-	// We create an instance of our service
-	apiSvc := NewHelloWorldService(apiCfg)
-
+	// Create Poll Service config with RunPolicy option.
 	pollCfg := rxd.NewServiceConfig(
 		rxd.UsingRunPolicy(rxd.RunOncePolicy),
 	)
+	// Pass config to instance of service struct
 	pollSvc := NewAPIPollingService(pollCfg)
 
-	// We pass 1 or more potentially long-running services to NewDaemon to run.
-	daemon := rxd.NewDaemon(apiSvc, pollSvc)
+	// Create Hello World config with RunPolicy
+	//  and Service Notifier so Poll Service can listen
+	//  on a channel to be notified of state changes by using
+	// service configs exposed: .NotifyStateChange(<state>) method
+	apiCfg := rxd.NewServiceConfig(
+		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
+		rxd.UsingServiceNotify(pollSvc),
+	)
+	// Create Hello World service passing config to instance of service struct.
+	apiSvc := NewHelloWorldService(apiCfg)
+
+	// Pass N services for daemon to manage and start
+	daemon := rxd.NewDaemon(pollSvc, apiSvc)
 
 	// We can set the log severity we want to observe, LevelInfo is default
-	daemon.SetLogSeverity(rxd.LevelInfo)
+	daemon.SetLogSeverity(rxd.LevelAll)
 
 	// tell the daemon to Start - this blocks until the underlying
 	// services manager stops running, which it wont until all services complete.

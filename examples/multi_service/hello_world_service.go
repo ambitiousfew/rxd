@@ -69,7 +69,7 @@ func (s *HelloWorldAPIService) Idle() rxd.ServiceResponse {
 	timer := time.NewTimer(20 * time.Second)
 	defer timer.Stop()
 
-	s.cfg.LogInfo(fmt.Sprintf("%s delaying for 20s before run begins.", s.Name()))
+	s.cfg.LogInfo(fmt.Sprintf("intentionally delaying %s for 20s before run begins.", s.Name()))
 	for {
 		select {
 		case <-s.cfg.ShutdownC:
@@ -94,6 +94,11 @@ func (s *HelloWorldAPIService) Run() rxd.ServiceResponse {
 		s.cancel()
 		s.server.Shutdown(s.ctx)
 	}()
+
+	// We have made it to Run() of Hello World, we can notify our dependent service (Poll Service) that we made it here.
+	// you can pass any state you want to notify, it makes the most sense to pass the state you are currently on.
+	// But you could pass the state you wish the other service to enter as well.
+	s.cfg.NotifyStateChange(rxd.RunState)
 
 	s.cfg.LogInfo(fmt.Sprintf("%s server starting at %s", s.Name(), s.server.Addr))
 	// ListenAndServe will block forever serving requests/responses
