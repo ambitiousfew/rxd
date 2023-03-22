@@ -2,7 +2,8 @@
 A simple (alpha) reactive services daemon
 
 ## Example Service Template
-```
+
+```go
 package main
 
 import (
@@ -68,7 +69,7 @@ var _ rxd.Service = &YourService{}
 ```
 
 ### Example Daemon Entrypoint
-```
+```go
 // Example entrypoint
 func main() {
 	
