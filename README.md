@@ -7,32 +7,32 @@ A simple (alpha) reactive services daemon
 package main
 
 import (
-	"github.com/ambitiousfew/rxd"
+  "github.com/ambitiousfew/rxd"
 )
 
 type YourService struct {
-	cfg *rxd.ServiceConfig
+  cfg *rxd.ServiceConfig
 }
 
 
 func (s *YourService) Name() string {
-	return "YourServiceName"
+  return "YourServiceName"
 }
 
 func (s *YourService) Config() *rxd.ServiceConfig {
-	return s.cfg
+  return s.cfg
 }
 
 // Init can be used for pre-checks, loading configs, envs, etc
 func (s *YourService) Init() rxd.ServiceResponse {
-	// if all is well here, move to the next state or skip to RunState
-	return rxd.NewResponse(nil, rxd.IdleState)
+  // if all is well here, move to the next state or skip to RunState
+  return rxd.NewResponse(nil, rxd.IdleState)
 }
 
 // Idle can be used for service status checks or used to fallback to a idle/retry state.
 func (s *YourService) Idle() rxd.ServiceResponse {
-	// if all is well here, move to the RunState or retry back to Init if something went wrong.
-	return rxd.NewResponse(nil, rxd.RunState)
+  // if all is well here, move to the RunState or retry back to Init if something went wrong.
+  return rxd.NewResponse(nil, rxd.RunState)
 }
 
 // Run is where you want the main logic of your service to run
@@ -61,7 +61,7 @@ func (s *YourService) Run() rxd.ServiceResponse {
 
 // Stop handles anything you might need to do to clean up before ending your service.
 func (s *YourService) Stop() rxd.ServiceResponse {
-	return rxd.NewResponse(nil, rxd.ExitState)
+  return rxd.NewResponse(nil, rxd.ExitState)
 }
 
 // This line is purely for error checking to ensure we are meeting the Service interface.
@@ -72,28 +72,28 @@ var _ rxd.Service = &YourService{}
 ```go
 // Example entrypoint
 func main() {
-	
+  
   // We create an instance of our ServiceConfig
-	yourSvcCfg := rxd.NewServiceConfig(
+  yourSvcCfg := rxd.NewServiceConfig(
     // set a run policy, RunUntilStoppedPolicy is default
-		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
-	)
+    rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
+  )
 
-	// We create an instance of our service
-	yourSvc := NewHelloWorldService(yourSvcCfg)
+  // We create an instance of our service
+  yourSvc := NewHelloWorldService(yourSvcCfg)
 
-	// We pass 1 or more potentially long-running services to NewDaemon to run.
-	daemon := rxd.NewDaemon(yourSvc)
+  // We pass 1 or more potentially long-running services to NewDaemon to run.
+  daemon := rxd.NewDaemon(yourSvc)
 
-	// We can set the log severity we want to observe, LevelInfo is default
-	daemon.SetLogSeverity(rxd.LevelAll)
+  // We can set the log severity we want to observe, LevelInfo is default
+  daemon.SetLogSeverity(rxd.LevelAll)
 
-	err := daemon.Start() // Blocks main thread
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
+  err := daemon.Start() // Blocks main thread
+  if err != nil {
+    log.Println(err)
+    os.Exit(1)
+  }
 
-	log.Println("successfully stopped daemon")
+  log.Println("successfully stopped daemon")
 }
 ```
