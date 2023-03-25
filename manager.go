@@ -1,23 +1,26 @@
 package rxd
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
 
 type manager struct {
-	logC     chan LogMessage
-	stoppedC chan struct{}
+	ctx      context.Context
+	wg       *sync.WaitGroup
+	services []*Service
 
-	Services []Service
+	logC chan LogMessage
+
+	stopCh     chan struct{}
+	completeCh chan struct{}
 }
 
-func (m *manager) startService(service Service, wg *sync.WaitGroup) {
-	defer wg.Done()
+func (m *manager) startService(service *Service) {
+	defer m.wg.Done()
 
-	svcCfg := service.Config()
-	// svcCfg.isStopped = false
-	// svcCfg.isShutdown = false
+	svcCfg := service.cfg
 	// Attach manager logging channel to each service so all services can send logs out
 	svcCfg.logC = m.logC
 
@@ -26,9 +29,12 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 	for {
 		select {
-		case <-svcCfg.ShutdownC:
-			m.logC <- NewLog(fmt.Sprintf("%s received shutdown signal", service.Name()), Debug)
-			return
+		case <-m.ctx.Done():
+			// NOTE: This cancel comes from daemon which bypasses manager to force an exit state if signal is caught.
+			// not sure if I like this approach since it should always be managers job to control underlying services.
+			// But we are still in a wait group for service shutdown so maybe its okay? Needs testing.
+			m.logC <- NewLog(fmt.Sprintf("%s received context done signal", service.Name()), Debug)
+			svcResp = NewResponse(nil, ExitState)
 
 		default:
 			// Determine the next state the service should be in.
@@ -37,15 +43,15 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 			case InitState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, init", service.Name()), Debug)
-				svcResp = service.Init()
+				svcResp = service.init()
 
 			case IdleState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, idle", service.Name()), Debug)
-				svcResp = service.Idle()
+				svcResp = service.idle()
 
 			case RunState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
-				svcResp = service.Run()
+				svcResp = service.run()
 				// Enforce Run policies
 				switch svcCfg.opts.runPolicy {
 				case RunOncePolicy:
@@ -57,7 +63,7 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 				case RetryUntilSuccessPolicy:
 					if svcResp.Error == nil {
-						stopResp := service.Stop()
+						stopResp := service.stop()
 						if stopResp.Error != nil {
 							m.logC <- NewLog(stopResp.Error.Error(), Error)
 						}
@@ -69,7 +75,7 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 			case StopState:
 				m.logC <- NewLog(fmt.Sprintf("%s next state, stop", service.Name()), Debug)
-				svcResp = service.Stop()
+				svcResp = service.stop()
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
 				}
@@ -90,7 +96,7 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 
 				if !svcCfg.isStopped {
 					// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
-					svcResp = service.Stop()
+					svcResp = service.stop()
 					if svcResp.Error != nil {
 						m.logC <- NewLog(svcResp.Error.Error(), Error)
 					}
@@ -117,39 +123,43 @@ func (m *manager) startService(service Service, wg *sync.WaitGroup) {
 // it blocks on the MAIN routine until all services have finished running and
 // notified WaitGroup by calling .Done()
 // The MAIN routine returns control back to the Daemon to finish running.
-func (m *manager) start() error {
-	var err error
-	defer func() error {
-		if err != nil {
-			return err
+func (m *manager) start() (exitErr error) {
+	defer func() {
+		// capture any panics, convert to error to return
+		if rErr := recover(); rErr != nil {
+			exitErr = fmt.Errorf("%s", rErr)
 		}
-		// catch any potential panics from manager to return to daemon
-		err = recover().(error)
-		return err
 	}()
 
-	var wg sync.WaitGroup
-	for _, service := range m.Services {
-		wg.Add(1)
+	go func() {
+		// Watch for stop signal, perform shutdown
+		m.logC <- NewLog("manager watching for stop signal....", Debug)
+		<-m.stopCh
+		m.logC <- NewLog("manager received stop signal", Debug)
+		m.shutdown()
+	}()
+
+	for _, service := range m.services {
+		m.wg.Add(1)
 		// Start each service in its own routine logic / conditional lifecycle.
-		go m.startService(service, &wg)
+		go m.startService(service)
 	}
 
 	m.logC <- NewLog("Started all services...", Info)
 
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
-	wg.Wait()
+	m.wg.Wait()
 
 	m.logC <- NewLog("All services have stopped running", Info)
-	return nil
+	close(m.completeCh)
+	return exitErr
 }
 
 func (m *manager) shutdown() {
 	var totalRunning int
-	for _, service := range m.Services {
-		svcCfg := service.Config()
-
+	for _, service := range m.services {
+		svcCfg := service.cfg
 		if !svcCfg.isShutdown {
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", service.Name()), Debug)
 			// sends a signal to each service to inform them to stop running.
@@ -161,7 +171,4 @@ func (m *manager) shutdown() {
 	}
 
 	m.logC <- NewLog(fmt.Sprintf("%d running services have been signaled to shut down.", totalRunning), Debug)
-
-	// sends a close signal back up to inform daemon it has finished.
-	close(m.stoppedC)
 }

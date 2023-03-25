@@ -18,18 +18,125 @@ const (
 	ExitState State = "exit"
 )
 
-// Service is the service interface that all services should implement for Manager to be able to interact properly with it.
-type Service interface {
-	// Name is just a user-friendly or logging-friendly representation of the service name
-	Name() string
-	// Config should return a pointer reference to a ServiceConfig stored within the service
-	Config() *ServiceConfig
-	// Init is the initializaiton service state: any prep your service needs before running or loading/reloading configs.
-	Init() ServiceResponse
-	// Idle is the idling service state: Status checks, Test connection, etc before running or to fall back to when run fails.
-	Idle() ServiceResponse
-	// Run is the running service state: The heart of your service code is here, primary functionality should be done in this state.
-	Run() ServiceResponse
-	// Stop is the stop service state: Here you would do any cleanup of your service as your service is about to stop running.
-	Stop() ServiceResponse
+type stageFunc func(*ServiceConfig) ServiceResponse
+type Service struct {
+	cfg *ServiceConfig
+
+	initFunc   stageFunc
+	idleFunc   stageFunc
+	runFunc    stageFunc
+	stopFunc   stageFunc
+	reloadFunc stageFunc
+}
+
+func NewService(cfg *ServiceConfig) *Service {
+	return &Service{
+		cfg: cfg,
+
+		initFunc:   initialize,
+		idleFunc:   idle,
+		runFunc:    run,
+		stopFunc:   stop,
+		reloadFunc: reload,
+	}
+}
+
+func (s *Service) Name() string {
+	return s.cfg.name
+}
+
+func (s *Service) UsingInitFunc(f stageFunc) {
+	s.initFunc = f
+}
+
+func (s *Service) UsingIdleFunc(f stageFunc) {
+	s.idleFunc = f
+}
+
+func (s *Service) UsingRunFunc(f stageFunc) {
+	s.runFunc = f
+}
+
+func (s *Service) UsingStopFunc(f stageFunc) {
+	s.stopFunc = f
+}
+
+func (s *Service) UsingReloadFunc(f stageFunc) {
+	s.reloadFunc = f
+}
+
+func (s *Service) init() ServiceResponse {
+	return s.initFunc(s.cfg)
+}
+
+func (s *Service) idle() ServiceResponse {
+	return s.idleFunc(s.cfg)
+}
+
+func (s *Service) run() ServiceResponse {
+	return s.runFunc(s.cfg)
+}
+
+func (s *Service) stop() ServiceResponse {
+	return s.stopFunc(s.cfg)
+}
+
+func (s *Service) reload() ServiceResponse {
+	return s.reloadFunc(s.cfg)
+}
+
+// Fallback lifecycle stage funcs
+func initialize(cfg *ServiceConfig) ServiceResponse {
+	for {
+		select {
+		case <-cfg.ShutdownC:
+			return NewResponse(nil, ExitState)
+		default:
+			return NewResponse(nil, IdleState)
+		}
+	}
+}
+
+func idle(cfg *ServiceConfig) ServiceResponse {
+	for {
+		select {
+		case <-cfg.ShutdownC:
+			return NewResponse(nil, ExitState)
+		default:
+			return NewResponse(nil, RunState)
+		}
+	}
+}
+
+func run(cfg *ServiceConfig) ServiceResponse {
+	for {
+		select {
+		case <-cfg.ShutdownC:
+			return NewResponse(nil, ExitState)
+		default:
+			return NewResponse(nil, StopState)
+		}
+	}
+}
+
+func stop(cfg *ServiceConfig) ServiceResponse {
+	for {
+		select {
+		case <-cfg.ShutdownC:
+			return NewResponse(nil, ExitState)
+		default:
+			return NewResponse(nil, ExitState)
+		}
+	}
+}
+
+func reload(cfg *ServiceConfig) ServiceResponse {
+	for {
+		select {
+		case <-cfg.ShutdownC:
+			return NewResponse(nil, ExitState)
+		default:
+			return NewResponse(nil, InitState)
+		}
+	}
 }

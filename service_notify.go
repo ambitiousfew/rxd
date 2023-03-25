@@ -3,12 +3,12 @@ package rxd
 import "fmt"
 
 type serviceNotify struct {
-	services []Service
+	services []*Service
 }
 
 func (n *serviceNotify) notify(state State, logChannel chan LogMessage) {
 	for _, service := range n.services {
-		svcCfg := service.Config()
+		svcCfg := service.cfg
 		select {
 		case svcCfg.StateC <- state:
 			logChannel <- NewLog(fmt.Sprintf("%s was informed of %s state change", service.Name(), state), Debug)

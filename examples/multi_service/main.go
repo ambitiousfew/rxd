@@ -11,21 +11,27 @@ import (
 func main() {
 	// Create Poll Service config with RunPolicy option.
 	pollCfg := rxd.NewServiceConfig(
+		"PollService",
 		rxd.UsingRunPolicy(rxd.RunOncePolicy),
 	)
 	// Pass config to instance of service struct
-	pollSvc := NewAPIPollingService(pollCfg)
+	pollClient := NewAPIPollingService()
 
-	// Create Hello World config with RunPolicy
-	//  and Service Notifier so Poll Service can listen
-	//  on a channel to be notified of state changes by using
-	// service configs exposed: .NotifyStateChange(<state>) method
+	pollSvc := rxd.NewService(pollCfg)
+	pollSvc.UsingIdleFunc(pollClient.Idle)
+	pollSvc.UsingRunFunc(pollClient.Run)
+
 	apiCfg := rxd.NewServiceConfig(
+		"HelloWorldAPI",
 		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
 		rxd.UsingServiceNotify(pollSvc),
 	)
 	// Create Hello World service passing config to instance of service struct.
-	apiSvc := NewHelloWorldService(apiCfg)
+	apiServer := NewHelloWorldService()
+	apiSvc := rxd.NewService(apiCfg)
+	apiSvc.UsingInitFunc(apiServer.Idle)
+	apiSvc.UsingRunFunc(apiServer.Run)
+	apiSvc.UsingStopFunc(apiServer.Stop)
 
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon(pollSvc, apiSvc)

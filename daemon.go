@@ -1,16 +1,26 @@
 package rxd
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 )
 
 type daemon struct {
-	logger   *Logger
-	manager  *manager
-	stoppedC chan struct{}
-	logC     chan LogMessage
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     *sync.WaitGroup
+
+	manager *manager
+
+	logger *Logger
+	logCh  chan LogMessage
+
+	stopCh    chan struct{}
+	stopLogCh chan struct{}
 }
 
 // SetLogSeverity allows for the logging to be scoped to severity level
@@ -24,57 +34,124 @@ func (d *daemon) Logger() *Logger {
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
-func NewDaemon(services ...Service) *daemon {
+func NewDaemon(services ...*Service) *daemon {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// default severity to log is Info level and higher.
 	logger := NewLogger(LevelInfo)
 
 	logC := make(chan LogMessage, 10)
-	stopC := make(chan struct{})
 
 	return &daemon{
-		logger:   logger,
-		stoppedC: stopC,
-		logC:     logC,
+		ctx:    ctx,
+		cancel: cancel,
+		wg:     new(sync.WaitGroup),
 		manager: &manager{
-			Services: services,
+			ctx:      ctx,
+			wg:       new(sync.WaitGroup),
+			services: services,
 			logC:     logC,
-			stoppedC: stopC,
+			// stopCh is closed by daemon to signal to manager to stop services
+			stopCh: make(chan struct{}),
+			// completeCh is closed by manager to signal to daemon it has finished - not sure its necessary
+			completeCh: make(chan struct{}),
 		},
+
+		logger: logger,
+		logCh:  logC,
+
+		stopCh: make(chan struct{}),
+		// stopLogCh is closed by daemon to signal to log watcher to stop.
+		stopLogCh: make(chan struct{}),
 	}
 }
 
-func (d *daemon) signalWatcher(signalC chan os.Signal) {
-	stopLogC := make(chan struct{})
+// Start the entrypoint for the reactive daemon. It launches 2 watcher routines.
+//  1. Watching specifically for OS Signals which when received will inform the
+//     manager to shutdown all services, blocks until finishes.
+//  2. Log watcher that handles all logging from manager and services through a channel.
+func (d *daemon) Start() (exitErr error) {
+	defer func() {
+		// capture any panics, convert to error to return
+		if rErr := recover(); rErr != nil {
+			exitErr = fmt.Errorf("%s", rErr)
+		}
+	}()
 
+	d.wg.Add(2)
+	// OS Signal watcher routine.
+	go d.signalWatcher()
+	// Logging routine.
+	go d.logWatcher()
+
+	// Main thread blocks here until manager stops all services
+	// which can be triggered by the relaying of OS Signal / context.Done()
+	exitErr = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
+	if exitErr != nil {
+		d.logger.Error.Println(exitErr)
+	}
+
+	// signal stopping of daemon
+	close(d.stopCh)
+	// Signal stop of Logging routine
+	close(d.stopLogCh)
+
+	d.wg.Wait()
+
+	// close the logging channel - logC cannot be used after this point.
+	close(d.logCh)
+	d.logger.Debug.Println("logging channel closed")
+	return exitErr
+}
+
+func (d *daemon) AddService(service *Service) {
+	d.manager.services = append(d.manager.services, service)
+}
+
+func (d *daemon) signalWatcher() {
 	defer func() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
 		d.logger.Debug.Println("Waiting for manager to finish...")
-		<-d.stoppedC
+		<-d.manager.completeCh
 		d.logger.Debug.Println("Manager stop signal received")
-		close(stopLogC)
-		d.logger.Debug.Println("stopLogC channel closed")
+
+		d.wg.Done()
 	}()
 
+	signalC := make(chan os.Signal)
 	// Watch for OS Signals in separate go routine so we dont block main thread.
 	d.logger.Info.Println("Daemon: starting OS signal watcher")
 
 	signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
 
-	<-signalC // blocks until a signal is received
-	d.logger.Debug.Println("OS signal received, cancelling context")
-
-	// shutdown iterates over all services manager knows about signaling shutdown by closing the ShutdownC in each Service Config
-	d.manager.shutdown()
-}
-
-func (d *daemon) logWatcher(stopLogC chan struct{}) {
 	for {
 		select {
-		case <-stopLogC:
+		case <-signalC:
+			d.logger.Debug.Println("OS signal received, cancelling context")
+			// if we get an OS signal, we need to end.
+			d.cancel()
+			close(d.manager.stopCh)
+			return
+		case <-d.stopCh:
+			// if manager completes we are done running...
+			d.logger.Debug.Println("daemon received stop signal")
+			return
+		}
+	}
+	// shutdown iterates over all services manager knows about signaling shutdown by closing the ShutdownC in each Service Config
+
+}
+
+func (d *daemon) logWatcher() {
+	defer d.wg.Done()
+
+	for {
+		select {
+		case <-d.stopLogCh:
 			d.logger.Debug.Println("stopping log watcher routine")
 			return
-		case logMsg := <-d.logC:
+		case logMsg := <-d.logCh:
 			switch logMsg.Level {
 			case Debug:
 				d.logger.Debug.Println(logMsg.Message)
@@ -85,42 +162,4 @@ func (d *daemon) logWatcher(stopLogC chan struct{}) {
 			}
 		}
 	}
-}
-
-// Start the entrypoint for the reactive daemon. It launches 2 watcher routines.
-//  1. Watching specifically for OS Signals which when received will inform the
-//     manager to shutdown all services, blocks until finishes.
-//  2. Log watcher that handles all logging from manager and services through a channel.
-func (d *daemon) Start() error {
-	var err error
-	defer func() error {
-		if err != nil {
-			return err
-		}
-		// Also catch any potential panics as errors
-		err = recover().(error)
-		return err
-	}()
-
-	stopLogC := make(chan struct{})
-	signalC := make(chan os.Signal)
-
-	// OS Signal watcher routine.
-	go d.signalWatcher(signalC)
-	// Logging routine.
-	go d.logWatcher(stopLogC)
-
-	// Main thread blocks here until manager stops all services
-	// which can be triggered by the relaying of OS Signal / context.Done()
-
-	err = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
-
-	if err != nil {
-		d.logger.Error.Println(err)
-	}
-	close(signalC)
-	d.logger.Debug.Println("signalC channel closed")
-	close(d.logC)
-	d.logger.Debug.Println("logC channel closed")
-	return nil
 }

@@ -7,6 +7,8 @@ import (
 // ServiceConfig all services will require a config as a *ServiceConfig in their service struct.
 // This config contains preconfigured shutdown channel,
 type ServiceConfig struct {
+	name string
+
 	opts *serviceOpts
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
@@ -63,7 +65,7 @@ func (cfg *ServiceConfig) LogError(message string) {
 }
 
 // NewServiceConfig will apply all options in the order given prior to creating the ServiceConfig instance created.
-func NewServiceConfig(options ...ServiceOption) *ServiceConfig {
+func NewServiceConfig(name string, options ...ServiceOption) *ServiceConfig {
 	// Default policy to restart immediately (3s) and always try to restart itself.
 	opts := &serviceOpts{
 		// RestartPolicy:  Always,
@@ -77,6 +79,7 @@ func NewServiceConfig(options ...ServiceOption) *ServiceConfig {
 	}
 
 	return &ServiceConfig{
+		name:       name,
 		ShutdownC:  make(chan struct{}),
 		StateC:     make(chan State),
 		opts:       opts,

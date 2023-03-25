@@ -26,12 +26,12 @@ func UsingRunPolicy(policy RunPolicy) ServiceOption {
 }
 
 // UsingServiceNotify applies ServiceNotify to the ServiceOption instance
-func UsingServiceNotify(service Service) ServiceOption {
+func UsingServiceNotify(svc *Service) ServiceOption {
 	return func(so *serviceOpts) {
 		if so.serviceNotify != nil {
-			so.serviceNotify.services = append(so.serviceNotify.services, service)
+			so.serviceNotify.services = append(so.serviceNotify.services, svc)
 		} else {
-			so.serviceNotify = &serviceNotify{services: []Service{service}}
+			so.serviceNotify = &serviceNotify{services: []*Service{svc}}
 		}
 
 	}

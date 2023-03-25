@@ -13,9 +13,6 @@ import (
 // APIPollingService create a struct for your service which requires a config field along with any other state
 // your service might need to maintain throughout the life of the service.
 type APIPollingService struct {
-	// cfg can be named anything but it MUST exist as *rxdaemon.ServiceConfig, Config() method will return it.
-	cfg *rxd.ServiceConfig
-
 	// fields this specific server uses
 	client        *http.Client
 	apiBase       string
@@ -24,9 +21,8 @@ type APIPollingService struct {
 }
 
 // NewAPIPollingService just a factory helper function to help create and return a new instance of the service.
-func NewAPIPollingService(cfg *rxd.ServiceConfig) *APIPollingService {
+func NewAPIPollingService() *APIPollingService {
 	return &APIPollingService{
-		cfg: cfg,
 		client: &http.Client{
 			Timeout: 3 * time.Second,
 		},
@@ -37,31 +33,13 @@ func NewAPIPollingService(cfg *rxd.ServiceConfig) *APIPollingService {
 	}
 }
 
-// Name give your service a log friendly name
-func (s *APIPollingService) Name() string {
-	return "APIPoller"
-}
-
-// Config should always return the ServiceConfig instance stored in the service struct.
-// The rxdaemon manager needs this to access things like the service shutdown channel
-func (s *APIPollingService) Config() *rxd.ServiceConfig {
-	return s.cfg
-}
-
-// Init can be used to do any preparation that maybe doesnt belong in instance creation
-// but sometime between instance creation and before you start your pre-checks to run.
-func (s *APIPollingService) Init() rxd.ServiceResponse {
-	// if all is well here, move to the next state or skip to RunState
-	return rxd.NewResponse(nil, rxd.IdleState)
-}
-
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *APIPollingService) Idle() rxd.ServiceResponse {
+func (s *APIPollingService) Idle(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 	for {
 		select {
-		case <-s.cfg.ShutdownC:
+		case <-cfg.ShutdownC:
 			return rxd.NewResponse(nil, rxd.StopState)
-		case state := <-s.cfg.StateC:
+		case state := <-cfg.StateC:
 			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
 			if state == rxd.RunState {
 				return rxd.NewResponse(nil, rxd.RunState)
@@ -72,25 +50,25 @@ func (s *APIPollingService) Idle() rxd.ServiceResponse {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *APIPollingService) Run() rxd.ServiceResponse {
+func (s *APIPollingService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
-	s.cfg.LogInfo(fmt.Sprintf("%s has started to poll", s.Name()))
+	cfg.LogInfo(fmt.Sprintf("has started to poll"))
 	var pollCount int
 	for {
 		select {
-		case <-s.cfg.ShutdownC:
+		case <-cfg.ShutdownC:
 			return rxd.NewResponse(nil, rxd.StopState)
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				s.cfg.LogInfo(fmt.Sprintf("%s has reached its maximum poll count, stopping service", s.Name()))
+				cfg.LogInfo(fmt.Sprintf("has reached its maximum poll count, stopping service"))
 				return rxd.NewResponse(nil, rxd.StopState)
 			}
 
 			resp, err := s.client.Get(s.apiBase + "/api")
 			if err != nil {
-				s.cfg.LogError(err.Error())
+				cfg.LogError(err.Error())
 				// if we error, reset timer and try again...
 				timer.Reset(s.retryDuration)
 				continue
@@ -100,18 +78,18 @@ func (s *APIPollingService) Run() rxd.ServiceResponse {
 			resp.Body.Close()
 
 			if err != nil {
-				s.cfg.LogError(err.Error())
+				cfg.LogError(err.Error())
 				// we could return to new state: idle or stop or just continue
 			}
 
 			var respBody map[string]any
 			err = json.Unmarshal(respBytes, &respBody)
 			if err != nil {
-				s.cfg.LogError(err.Error())
+				cfg.LogError(err.Error())
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			s.cfg.LogInfo(fmt.Sprintf("%s received response from the API: %v", s.Name(), respBody))
+			cfg.LogInfo(fmt.Sprintf("%s received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 
@@ -127,6 +105,3 @@ func (s *APIPollingService) Stop() rxd.ServiceResponse {
 	// using StopState would try to recall Stop again.
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
-
-// This line is purely for error checking to ensure we are meeting the Service interface.
-var _ rxd.Service = &APIPollingService{}
