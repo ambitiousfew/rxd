@@ -44,10 +44,14 @@ func (cfg *ServiceConfig) setIsStopped(value bool) {
 	cfg.isStopped = value
 }
 
-func (cfg *ServiceConfig) setIsShutdown(value bool) {
+func (cfg *ServiceConfig) shutdown() {
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
-	cfg.isShutdown = value
+	if !cfg.isShutdown {
+		close(cfg.ShutdownC)
+		close(cfg.StateC)
+		cfg.isShutdown = true
+	}
 }
 
 // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info

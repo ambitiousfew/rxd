@@ -106,9 +106,7 @@ func (m *manager) startService(service *Service) {
 				// if a close signal hasnt been sent to the service.
 				if !svcCfg.isShutdown {
 					m.logC <- NewLog(fmt.Sprintf("sending a close signal to %s", service.Name()), Debug)
-					close(svcCfg.ShutdownC)
-					close(svcCfg.StateC)
-					svcCfg.setIsShutdown(true)
+					svcCfg.shutdown()
 				}
 
 				m.logC <- NewLog(fmt.Sprintf("%s is exiting...", service.Name()), Debug)
@@ -163,9 +161,7 @@ func (m *manager) shutdown() {
 		if !svcCfg.isShutdown {
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", service.Name()), Debug)
 			// sends a signal to each service to inform them to stop running.
-			close(svcCfg.ShutdownC)
-			svcCfg.setIsShutdown(true)
-			close(svcCfg.StateC)
+			svcCfg.shutdown()
 			totalRunning++
 		}
 	}
