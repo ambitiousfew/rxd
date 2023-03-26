@@ -1,6 +1,7 @@
 package rxd
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -51,17 +52,22 @@ func (cfg *ServiceConfig) setIsShutdown(value bool) {
 
 // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
 func (cfg *ServiceConfig) LogInfo(message string) {
-	cfg.logC <- NewLog(message, Info)
+	cfg.logC <- NewLog(serviceLog(cfg, message), Info)
 }
 
 // LogDebug takes a string message and sends it down the logC channel as a LogMessage type with log level of Debug
 func (cfg *ServiceConfig) LogDebug(message string) {
-	cfg.logC <- NewLog(message, Debug)
+	cfg.logC <- NewLog(serviceLog(cfg, message), Debug)
 }
 
 // LogError takes a string message and sends it down the logC channel as a LogMessage type with log level of Error
 func (cfg *ServiceConfig) LogError(message string) {
-	cfg.logC <- NewLog(message, Error)
+	cfg.logC <- NewLog(serviceLog(cfg, message), Error)
+}
+
+// serviceLog is a helper that prefixes log string messages with the service name
+func serviceLog(cfg *ServiceConfig, message string) string {
+	return fmt.Sprintf("%s %s", cfg.name, message)
 }
 
 // NewServiceConfig will apply all options in the order given prior to creating the ServiceConfig instance created.
