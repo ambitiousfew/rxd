@@ -47,7 +47,6 @@ func NewDaemon(services ...*Service) *daemon {
 		cancel: cancel,
 		wg:     new(sync.WaitGroup),
 		manager: &manager{
-			ctx:      ctx,
 			wg:       new(sync.WaitGroup),
 			services: services,
 			logC:     logC,
