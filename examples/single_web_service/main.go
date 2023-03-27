@@ -14,9 +14,6 @@ import (
 // HelloWorldAPIService create a struct for your service which requires a config field along with any other state
 // your service might need to maintain throughout the life of the service.
 type HelloWorldAPIService struct {
-	// cfg can be named anything but it MUST exist as *rxdaemon.ServiceConfig, Config() method will return it.
-	cfg *rxd.ServiceConfig
-
 	// fields this specific server uses
 	server *http.Server
 	ctx    context.Context
@@ -47,18 +44,18 @@ func NewHelloWorldService() *HelloWorldAPIService {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 	go func() {
 		// We should always watch for this signal, must use goroutine here
 		// since ListenAndServe will block and we need a way to end the
 		// server as well as inform the server to stop all requests ASAP.
-		<-cfg.ShutdownC
-		cfg.LogInfo(fmt.Sprintf("received a shutdown signal, cancel server context to stop server gracefully"))
+		<-c.ShutdownSignal()
+		c.LogInfo(fmt.Sprintf("received a shutdown signal, cancel server context to stop server gracefully"))
 		s.cancel()
 		s.server.Shutdown(s.ctx)
 	}()
 
-	cfg.LogInfo(fmt.Sprintf("server starting at %s", s.server.Addr))
+	c.LogInfo(fmt.Sprintf("server starting at %s", s.server.Addr))
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 
@@ -67,7 +64,7 @@ func (s *HelloWorldAPIService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.IdleState)
 	}
 
-	cfg.LogInfo(fmt.Sprintf("server shutdown"))
+	c.LogInfo(fmt.Sprintf("server shutdown"))
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
@@ -80,7 +77,7 @@ func main() {
 	helloWorld := NewHelloWorldService()
 
 	// We create an instance of our ServiceConfig
-	apiCfg := rxd.NewServiceConfig(
+	apiCfg := rxd.NewServiceContext(
 		"HelloWorldAPI",
 		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
 	)

@@ -10,7 +10,7 @@ import (
 // Example entrypoint
 func main() {
 	// Create Poll Service config with RunPolicy option.
-	pollCfg := rxd.NewServiceConfig(
+	pollCfg := rxd.NewServiceContext(
 		"PollService",
 		rxd.UsingRunPolicy(rxd.RunOncePolicy),
 	)
@@ -21,7 +21,7 @@ func main() {
 	pollSvc.UsingIdleFunc(pollClient.Idle)
 	pollSvc.UsingRunFunc(pollClient.Run)
 
-	apiCfg := rxd.NewServiceConfig(
+	apiCfg := rxd.NewServiceContext(
 		"HelloWorldAPI",
 		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
 		rxd.UsingServiceNotify(pollSvc),

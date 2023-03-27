@@ -40,15 +40,15 @@ func NewHelloWorldService() *HelloWorldAPIService {
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *HelloWorldAPIService) Idle(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// if all is well here, move to the RunState or retry back to Init if something went wrong.
 	timer := time.NewTimer(20 * time.Second)
 	defer timer.Stop()
 
-	cfg.LogInfo(fmt.Sprintf("intentionally delaying for 20s before run begins."))
+	c.LogInfo(fmt.Sprintf("intentionally delaying for 20s before run begins."))
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-c.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
 		case <-timer.C:
 			// Intentional 20s delay so polling service can react to failed attempts to this API.
@@ -59,14 +59,14 @@ func (s *HelloWorldAPIService) Idle(cfg *rxd.ServiceConfig) rxd.ServiceResponse 
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 
 	go func() {
 		// We should always watch for this signal, must use goroutine here
 		// since ListenAndServe will block and we need a way to end the
 		// server as well as inform the server to stop all requests ASAP.
-		<-cfg.ShutdownC
-		cfg.LogInfo(fmt.Sprintf("received a shutdown signal, cancel server context to stop server gracefully"))
+		<-c.ShutdownSignal()
+		c.LogInfo(fmt.Sprintf("received a shutdown signal, cancel server context to stop server gracefully"))
 		s.cancel()
 		s.server.Shutdown(s.ctx)
 	}()
@@ -74,9 +74,9 @@ func (s *HelloWorldAPIService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 	// We have made it to Run() of Hello World, we can notify our dependent service (Poll Service) that we made it here.
 	// you can pass any state you want to notify, it makes the most sense to pass the state you are currently on.
 	// But you could pass the state you wish the other service to enter as well.
-	cfg.NotifyStateChange(rxd.RunState)
+	c.NotifyStateChange(rxd.RunState)
 
-	cfg.LogInfo(fmt.Sprintf("server starting at %s", s.server.Addr))
+	c.LogInfo(fmt.Sprintf("server starting at %s", s.server.Addr))
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 
@@ -85,7 +85,7 @@ func (s *HelloWorldAPIService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.IdleState)
 	}
 
-	cfg.LogInfo(fmt.Sprintf("server shutdown"))
+	c.LogInfo(fmt.Sprintf("server shutdown"))
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
@@ -93,9 +93,9 @@ func (s *HelloWorldAPIService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 }
 
 // Stop handles anything you might need to do to clean up before ending your service.
-func (s *HelloWorldAPIService) Stop(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	cfg.LogInfo(fmt.Sprintf("is stopping"))
+	c.LogInfo(fmt.Sprintf("is stopping"))
 	return rxd.NewResponse(nil, rxd.ExitState)
 }

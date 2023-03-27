@@ -17,10 +17,8 @@ type manager struct {
 
 func (m *manager) startService(service *Service) {
 	defer m.wg.Done()
-	svcCfg := service.cfg
 	// Attach manager logging channel to each service so all services can send logs out
-	svcCfg.logC = m.logC
-
+	service.ctx.setLogChannel(m.logC)
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
 
@@ -41,7 +39,7 @@ func (m *manager) startService(service *Service) {
 			m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
 			svcResp = service.run()
 			// Enforce Run policies
-			switch svcCfg.opts.runPolicy {
+			switch service.ctx.opts.runPolicy {
 			case RunOncePolicy:
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
@@ -55,7 +53,7 @@ func (m *manager) startService(service *Service) {
 					if stopResp.Error != nil {
 						m.logC <- NewLog(stopResp.Error.Error(), Error)
 					}
-					svcCfg.isStopped = true
+					service.ctx.isStopped = true
 					// If Run didnt error, we assume successful run once and stop service.
 					svcResp.NextState = ExitState
 				}
@@ -68,7 +66,7 @@ func (m *manager) startService(service *Service) {
 				m.logC <- NewLog(svcResp.Error.Error(), Error)
 			}
 
-			svcCfg.setIsStopped(true)
+			service.ctx.setIsStopped(true)
 			return
 		}
 
@@ -81,18 +79,18 @@ func (m *manager) startService(service *Service) {
 
 		if svcResp.NextState == ExitState {
 			// establish lock before reading/writing isStopped/isShutdown
-			svcCfg.LogDebug("entering ExitState")
-			if !svcCfg.isStopped {
+			service.ctx.LogDebug("entering ExitState")
+			if !service.ctx.isStopped {
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 				svcResp = service.stop()
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
 				}
-				svcCfg.setIsStopped(true)
+				service.ctx.setIsStopped(true)
 			}
-			svcCfg.LogDebug("shutting down")
+			service.ctx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
-			svcCfg.shutdown()
+			service.ctx.shutdown()
 			return
 		}
 	}
@@ -140,10 +138,9 @@ func (m *manager) shutdown() {
 	var totalRunning int
 	// sends a signal to each service to inform them to stop running.
 	for _, service := range m.services {
-		svcCfg := service.cfg
-		if !svcCfg.isShutdown {
+		if !service.ctx.isShutdown {
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", service.Name()), Debug)
-			svcCfg.shutdown()
+			service.ctx.shutdown()
 			totalRunning++
 		}
 	}

@@ -18,9 +18,9 @@ const (
 	ExitState State = "exit"
 )
 
-type stageFunc func(*ServiceConfig) ServiceResponse
+type stageFunc func(*ServiceContext) ServiceResponse
 type Service struct {
-	cfg *ServiceConfig
+	ctx *ServiceContext
 
 	initFunc   stageFunc
 	idleFunc   stageFunc
@@ -29,10 +29,9 @@ type Service struct {
 	reloadFunc stageFunc
 }
 
-func NewService(cfg *ServiceConfig) *Service {
+func NewService(ctx *ServiceContext) *Service {
 	return &Service{
-		cfg: cfg,
-
+		ctx:        ctx,
 		initFunc:   initialize,
 		idleFunc:   idle,
 		runFunc:    run,
@@ -42,7 +41,7 @@ func NewService(cfg *ServiceConfig) *Service {
 }
 
 func (s *Service) Name() string {
-	return s.cfg.name
+	return s.ctx.name
 }
 
 func (s *Service) UsingInitFunc(f stageFunc) {
@@ -66,30 +65,30 @@ func (s *Service) UsingReloadFunc(f stageFunc) {
 }
 
 func (s *Service) init() ServiceResponse {
-	return s.initFunc(s.cfg)
+	return s.initFunc(s.ctx)
 }
 
 func (s *Service) idle() ServiceResponse {
-	return s.idleFunc(s.cfg)
+	return s.idleFunc(s.ctx)
 }
 
 func (s *Service) run() ServiceResponse {
-	return s.runFunc(s.cfg)
+	return s.runFunc(s.ctx)
 }
 
 func (s *Service) stop() ServiceResponse {
-	return s.stopFunc(s.cfg)
+	return s.stopFunc(s.ctx)
 }
 
 func (s *Service) reload() ServiceResponse {
-	return s.reloadFunc(s.cfg)
+	return s.reloadFunc(s.ctx)
 }
 
 // Fallback lifecycle stage funcs
-func initialize(cfg *ServiceConfig) ServiceResponse {
+func initialize(ctx *ServiceContext) ServiceResponse {
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-ctx.shutdownC:
 			return NewResponse(nil, ExitState)
 		default:
 			return NewResponse(nil, IdleState)
@@ -97,10 +96,10 @@ func initialize(cfg *ServiceConfig) ServiceResponse {
 	}
 }
 
-func idle(cfg *ServiceConfig) ServiceResponse {
+func idle(ctx *ServiceContext) ServiceResponse {
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-ctx.shutdownC:
 			return NewResponse(nil, ExitState)
 		default:
 			return NewResponse(nil, RunState)
@@ -108,10 +107,10 @@ func idle(cfg *ServiceConfig) ServiceResponse {
 	}
 }
 
-func run(cfg *ServiceConfig) ServiceResponse {
+func run(ctx *ServiceContext) ServiceResponse {
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-ctx.shutdownC:
 			return NewResponse(nil, ExitState)
 		default:
 			return NewResponse(nil, StopState)
@@ -119,10 +118,10 @@ func run(cfg *ServiceConfig) ServiceResponse {
 	}
 }
 
-func stop(cfg *ServiceConfig) ServiceResponse {
+func stop(ctx *ServiceContext) ServiceResponse {
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-ctx.shutdownC:
 			return NewResponse(nil, ExitState)
 		default:
 			return NewResponse(nil, ExitState)
@@ -130,10 +129,10 @@ func stop(cfg *ServiceConfig) ServiceResponse {
 	}
 }
 
-func reload(cfg *ServiceConfig) ServiceResponse {
+func reload(ctx *ServiceContext) ServiceResponse {
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-ctx.shutdownC:
 			return NewResponse(nil, ExitState)
 		default:
 			return NewResponse(nil, InitState)

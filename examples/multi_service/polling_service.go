@@ -34,12 +34,12 @@ func NewAPIPollingService() *APIPollingService {
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *APIPollingService) Idle(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
+func (s *APIPollingService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-c.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
-		case state := <-cfg.StateC:
+		case state := <-c.ChangeStateSignal():
 			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
 			if state == rxd.RunState {
 				return rxd.NewResponse(nil, rxd.RunState)
@@ -50,25 +50,25 @@ func (s *APIPollingService) Idle(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *APIPollingService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
+func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
-	cfg.LogInfo(fmt.Sprintf("has started to poll"))
+	c.LogInfo(fmt.Sprintf("has started to poll"))
 	var pollCount int
 	for {
 		select {
-		case <-cfg.ShutdownC:
+		case <-c.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				cfg.LogInfo(fmt.Sprintf("has reached its maximum poll count, stopping service"))
+				c.LogInfo(fmt.Sprintf("has reached its maximum poll count, stopping service"))
 				return rxd.NewResponse(nil, rxd.StopState)
 			}
 
 			resp, err := s.client.Get(s.apiBase + "/api")
 			if err != nil {
-				cfg.LogError(err.Error())
+				c.LogError(err.Error())
 				// if we error, reset timer and try again...
 				timer.Reset(s.retryDuration)
 				continue
@@ -78,18 +78,18 @@ func (s *APIPollingService) Run(cfg *rxd.ServiceConfig) rxd.ServiceResponse {
 			resp.Body.Close()
 
 			if err != nil {
-				cfg.LogError(err.Error())
+				c.LogError(err.Error())
 				// we could return to new state: idle or stop or just continue
 			}
 
 			var respBody map[string]any
 			err = json.Unmarshal(respBytes, &respBody)
 			if err != nil {
-				cfg.LogError(err.Error())
+				c.LogError(err.Error())
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			cfg.LogInfo(fmt.Sprintf("%s received response from the API: %v", respBody))
+			c.LogInfo(fmt.Sprintf("%s received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 
