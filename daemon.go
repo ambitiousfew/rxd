@@ -16,20 +16,22 @@ type daemon struct {
 
 	manager *manager
 
-	logger *Logger
-	logCh  chan LogMessage
+	// logger *Logger
+	logger Logging
+
+	logCh chan LogMessage
 
 	stopCh    chan struct{}
 	stopLogCh chan struct{}
 }
 
 // SetLogSeverity allows for the logging to be scoped to severity level
-func (d *daemon) SetLogSeverity(level LogSeverity) {
-	d.logger = NewLogger(level)
+func (d *daemon) SetLogger(logger Logging) {
+	d.logger = logger
 }
 
 // Logger returns the instance of the daemon logger
-func (d *daemon) Logger() *Logger {
+func (d *daemon) Logger() Logging {
 	return d.logger
 }
 
@@ -38,7 +40,7 @@ func NewDaemon(services ...*Service) *daemon {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// default severity to log is Info level and higher.
-	logger := NewLogger(LevelInfo)
+	logger := NewLogger(LevelDebug)
 
 	logC := make(chan LogMessage, 10)
 
@@ -87,7 +89,7 @@ func (d *daemon) Start() (exitErr error) {
 	// which can be triggered by the relaying of OS Signal / context.Done()
 	exitErr = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
 	if exitErr != nil {
-		d.logger.Error.Println(exitErr)
+		d.logger.Error(exitErr.Error())
 	}
 
 	// signal stopping of daemon
@@ -99,7 +101,7 @@ func (d *daemon) Start() (exitErr error) {
 
 	// close the logging channel - logC cannot be used after this point.
 	close(d.logCh)
-	d.logger.Debug.Println("logging channel closed")
+	d.logger.Debug("logging channel closed")
 	return exitErr
 }
 
@@ -111,30 +113,30 @@ func (d *daemon) signalWatcher() {
 	defer func() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
-		d.logger.Debug.Println("Waiting for manager to finish...")
+		d.logger.Debug("Waiting for manager to finish...")
 		<-d.manager.completeCh
-		d.logger.Debug.Println("Manager stop signal received")
+		d.logger.Debug("Manager stop signal received")
 
 		d.wg.Done()
 	}()
 
 	signalC := make(chan os.Signal)
 	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.logger.Info.Println("Daemon: starting OS signal watcher")
+	d.logger.Info("Daemon: starting OS signal watcher")
 
 	signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
 
 	for {
 		select {
 		case <-signalC:
-			d.logger.Debug.Println("OS signal received, cancelling context")
+			d.logger.Debug("OS signal received, cancelling context")
 			// if we get an OS signal, we need to end.
 			d.cancel()
 			close(d.manager.stopCh)
 			return
 		case <-d.stopCh:
 			// if manager completes we are done running...
-			d.logger.Debug.Println("daemon received stop signal")
+			d.logger.Debug("daemon received stop signal")
 			return
 		}
 	}
@@ -148,16 +150,16 @@ func (d *daemon) logWatcher() {
 	for {
 		select {
 		case <-d.stopLogCh:
-			d.logger.Debug.Println("stopping log watcher routine")
+			d.logger.Debug("stopping log watcher routine")
 			return
 		case logMsg := <-d.logCh:
 			switch logMsg.Level {
 			case Debug:
-				d.logger.Debug.Println(logMsg.Message)
+				d.logger.Debug(logMsg.Message)
 			case Info:
-				d.logger.Info.Println(logMsg.Message)
+				d.logger.Info(logMsg.Message)
 			case Error:
-				d.logger.Error.Println(logMsg.Message)
+				d.logger.Error(logMsg.Message)
 			}
 		}
 	}

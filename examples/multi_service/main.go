@@ -36,9 +36,6 @@ func main() {
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon(pollSvc, apiSvc)
 
-	// We can set the log severity we want to observe, LevelInfo is default
-	daemon.SetLogSeverity(rxd.LevelAll)
-
 	// tell the daemon to Start - this blocks until the underlying
 	// services manager stops running, which it wont until all services complete.
 	err := daemon.Start()

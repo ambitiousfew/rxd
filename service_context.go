@@ -30,10 +30,7 @@ type ServiceContext struct {
 
 // NewServiceContext will apply all options in the order given prior to creating the ServiceContext instance created.
 func NewServiceContext(name string, options ...ServiceOption) *ServiceContext {
-	// Default policy to restart immediately (3s) and always try to restart itself.
 	opts := &serviceOpts{
-		// RestartPolicy:  Always,
-		// RestartTimeout: 3 * time.Second,
 		runPolicy: RunUntilStoppedPolicy,
 	}
 
@@ -52,19 +49,21 @@ func NewServiceContext(name string, options ...ServiceOption) *ServiceContext {
 	}
 }
 
+// ShutdownSignal returns the channel the side implementing the service should use and watch to be notified
+// when the daemon/manager are attempting to shutdown services.
 func (ctx *ServiceContext) ShutdownSignal() chan struct{} {
 	return ctx.shutdownC
 }
 
-// ChangeStateSignal returns the channel the service listens for state changes of the service it depends on
+// ChangeState returns the channel the service listens for state changes of the service it depends on
 // defined by UsingServiceNotify option on creation of the ServiceContext.
-func (ctx *ServiceContext) ChangeStateSignal() chan State {
+func (ctx *ServiceContext) ChangeState() chan State {
 	return ctx.stateC
 }
 
 // NotifyStateChange takes a state and iterates over all child services added via UsingServiceNotify, if any
 // to notify them of the state change that occured against the service they subscribed to watch.
-func (ctx *ServiceContext) NotifyStateChange(state State) {
+func (ctx *ServiceContext) notifyStateChange(state State) {
 	// If we dont have any services to notify, dont try.
 	if ctx.opts.serviceNotify == nil {
 		return

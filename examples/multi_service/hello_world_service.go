@@ -71,11 +71,6 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		s.server.Shutdown(s.ctx)
 	}()
 
-	// We have made it to Run() of Hello World, we can notify our dependent service (Poll Service) that we made it here.
-	// you can pass any state you want to notify, it makes the most sense to pass the state you are currently on.
-	// But you could pass the state you wish the other service to enter as well.
-	c.NotifyStateChange(rxd.RunState)
-
 	c.LogInfo(fmt.Sprintf("server starting at %s", s.server.Addr))
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()

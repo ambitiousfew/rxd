@@ -88,7 +88,6 @@ func main() {
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
 	daemon := rxd.NewDaemon(apiSvc)
 	// We can set the log severity we want to observe, LevelInfo is default
-	daemon.SetLogSeverity(rxd.LevelInfo)
 
 	err := daemon.Start() // Blocks main thread
 	if err != nil {

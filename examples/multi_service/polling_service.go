@@ -39,7 +39,7 @@ func (s *APIPollingService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
 		select {
 		case <-c.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
-		case state := <-c.ChangeStateSignal():
+		case state := <-c.ChangeState():
 			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
 			if state == rxd.RunState {
 				return rxd.NewResponse(nil, rxd.RunState)

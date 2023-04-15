@@ -23,6 +23,9 @@ func (m *manager) startService(service *Service) {
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
 
 	for {
+		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
+		service.ctx.notifyStateChange(svcResp.NextState)
+
 		// Determine the next state the service should be in.
 		// Run the method associated with the next state.
 		switch svcResp.NextState {
@@ -80,6 +83,8 @@ func (m *manager) startService(service *Service) {
 		if svcResp.NextState == ExitState {
 			// establish lock before reading/writing isStopped/isShutdown
 			service.ctx.LogDebug("entering ExitState")
+			service.ctx.notifyStateChange(StopState)
+
 			if !service.ctx.isStopped {
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 				svcResp = service.stop()
@@ -88,6 +93,7 @@ func (m *manager) startService(service *Service) {
 				}
 				service.ctx.setIsStopped(true)
 			}
+
 			service.ctx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
 			service.ctx.shutdown()

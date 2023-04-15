@@ -27,9 +27,27 @@ const (
 )
 
 type Logger struct {
-	Debug *log.Logger
-	Info  *log.Logger
-	Error *log.Logger
+	debug *log.Logger
+	info  *log.Logger
+	err   *log.Logger
+}
+
+func (l *Logger) Debug(v any) {
+	l.debug.Println(v)
+}
+
+func (l *Logger) Info(v any) {
+	l.info.Println(v)
+}
+
+func (l *Logger) Error(v any) {
+	l.err.Println(v)
+}
+
+type Logging interface {
+	Debug(v any)
+	Info(v any)
+	Error(v any)
 }
 
 // NewLogger returns an instance of Logger with Debug, Info and Error loggers.
@@ -56,10 +74,10 @@ func NewLogger(logSeverity LogSeverity) *Logger {
 
 	return &Logger{
 		// 2022/10/23 09:21:45 main.go:8: [DEBUG] This is a DEBUG
-		Debug: log.New(debugOut, "[DEBUG] ", log.LstdFlags|log.Lmsgprefix|log.Lshortfile),
+		debug: log.New(debugOut, "[DEBUG] ", log.LstdFlags|log.Lmsgprefix|log.Lshortfile),
 		// 2022/10/23 09:21:45 [INFO] This is an INFO
-		Info: log.New(infoOut, "[INFO] ", log.LstdFlags|log.Lmsgprefix),
+		info: log.New(infoOut, "[INFO] ", log.LstdFlags|log.Lmsgprefix),
 		// 2022/10/23 09:44:16 main.go:11: [ERROR] This is an ERROR
-		Error: log.New(errorOut, "[ERROR] ", log.LstdFlags|log.Lshortfile|log.Lmsgprefix),
+		err: log.New(errorOut, "[ERROR] ", log.LstdFlags|log.Lshortfile|log.Lmsgprefix),
 	}
 }
