@@ -40,7 +40,6 @@ func NewServiceContext(name string, options ...ServiceOption) *ServiceContext {
 	}
 
 	return &ServiceContext{
-		name:       name,
 		shutdownC:  make(chan struct{}),
 		stateC:     make(chan State),
 		opts:       opts,

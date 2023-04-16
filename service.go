@@ -29,7 +29,17 @@ type Service struct {
 	reloadFunc stageFunc
 }
 
-func NewService(ctx *ServiceContext) *Service {
+// NewService creates a new service instance given a name and options.
+func NewService(name string, opts *serviceOpts) *Service {
+	ctx := &ServiceContext{
+		name:       name,
+		shutdownC:  make(chan struct{}),
+		stateC:     make(chan State),
+		opts:       opts,
+		isStopped:  true,
+		isShutdown: false,
+	}
+
 	return &Service{
 		ctx:        ctx,
 		initFunc:   initialize,
@@ -44,23 +54,24 @@ func (s *Service) Name() string {
 	return s.ctx.name
 }
 
-func (s *Service) UsingInitFunc(f stageFunc) {
+func (s *Service) UsingInitStage(f stageFunc) {
 	s.initFunc = f
 }
 
-func (s *Service) UsingIdleFunc(f stageFunc) {
+func (s *Service) UsingIdleStage(f stageFunc) {
 	s.idleFunc = f
 }
 
-func (s *Service) UsingRunFunc(f stageFunc) {
+func (s *Service) UsingRunStage(f stageFunc) {
 	s.runFunc = f
 }
 
-func (s *Service) UsingStopFunc(f stageFunc) {
+func (s *Service) UsingStopStage(f stageFunc) {
 	s.stopFunc = f
 }
 
-func (s *Service) UsingReloadFunc(f stageFunc) {
+// UsingReloadStage is not implemented yet.
+func (s *Service) UsingReloadStage(f stageFunc) {
 	s.reloadFunc = f
 }
 

@@ -18,6 +18,20 @@ const (
 // such as restart policies, timeouts for a given service and how it should run.
 type ServiceOption func(*serviceOpts)
 
+// NewServiceOpts will apply all options in the order given and return the final options back.
+func NewServiceOpts(options ...ServiceOption) *serviceOpts {
+	opts := &serviceOpts{
+		runPolicy: RunUntilStoppedPolicy,
+	}
+
+	// Apply all functional options to update defaults.
+	for _, option := range options {
+		option(opts)
+	}
+
+	return opts
+}
+
 // UsingRunPolicy applies a given policy to the ServiceOption instance
 func UsingRunPolicy(policy RunPolicy) ServiceOption {
 	return func(so *serviceOpts) {

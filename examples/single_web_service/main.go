@@ -77,13 +77,12 @@ func main() {
 	helloWorld := NewHelloWorldService()
 
 	// We create an instance of our ServiceConfig
-	apiCfg := rxd.NewServiceContext(
-		"HelloWorldAPI",
+	apiOpts := rxd.NewServiceOpts(
 		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
 	)
 
-	apiSvc := rxd.NewService(apiCfg)
-	apiSvc.UsingRunFunc(helloWorld.Run)
+	apiSvc := rxd.NewService("HelloWorldAPI", apiOpts)
+	apiSvc.UsingRunStage(helloWorld.Run)
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
 	daemon := rxd.NewDaemon(apiSvc)
