@@ -28,26 +28,6 @@ type ServiceContext struct {
 	mu sync.Mutex
 }
 
-// NewServiceContext will apply all options in the order given prior to creating the ServiceContext instance created.
-func NewServiceContext(name string, options ...ServiceOption) *ServiceContext {
-	opts := &serviceOpts{
-		runPolicy: RunUntilStoppedPolicy,
-	}
-
-	// Apply all functional options to update defaults.
-	for _, option := range options {
-		option(opts)
-	}
-
-	return &ServiceContext{
-		shutdownC:  make(chan struct{}),
-		stateC:     make(chan State),
-		opts:       opts,
-		isStopped:  true,
-		isShutdown: false,
-	}
-}
-
 // ShutdownSignal returns the channel the side implementing the service should use and watch to be notified
 // when the daemon/manager are attempting to shutdown services.
 func (ctx *ServiceContext) ShutdownSignal() chan struct{} {

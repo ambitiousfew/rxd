@@ -89,7 +89,7 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			c.LogInfo(fmt.Sprintf("%s received response from the API: %v", respBody))
+			c.LogInfo(fmt.Sprintf("received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 
