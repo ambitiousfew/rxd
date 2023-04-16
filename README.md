@@ -67,20 +67,19 @@ func main() {
 	// We create an instance of our service
 	simpleService := NewSimpleService()
 
-	// We create an instance of our ServiceConfig
-	svcCtx := rxd.NewServiceContext(
-		"SimpleService",
+	// Customize our service options
+	svcCtx := rxd.NewServiceOpts(
 		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
 	)
 
-	svc := rxd.NewService(svcCtx)
+	svc := rxd.NewService(svcOpts)
 
 	// We could have used a pure function or you can pass receiver function
 	// as long as it meets the interface for stageFunc
-	svc.UsingRunFunc(simpleService.Run)
+	svc.UsingRunStage(simpleService.Run)
 
 	// We can even use an inline function instead of a receiver method
-	svc.UsingStopFunc(func(c *rxd.ServiceContext) rxd.ServiceResponse {
+	svc.UsingStopStage(func(c *rxd.ServiceContext) rxd.ServiceResponse {
 		c.LogInfo("we are stopping now...")
 		return rxd.NewResponse(nil, rxd.ExitState)
 	})
