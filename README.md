@@ -72,7 +72,8 @@ func main() {
 		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
 	)
 
-	svc := rxd.NewService(svcOpts)
+  // Create our service with a name and customized options.
+	svc := rxd.NewService("SimpleService", svcOpts)
 
 	// We could have used a pure function or you can pass receiver function
 	// as long as it meets the interface for stageFunc
