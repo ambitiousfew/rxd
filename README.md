@@ -94,11 +94,11 @@ func main() {
 
 	err := daemon.Start() // Blocks main thread
 	if err != nil {
-		log.Println(err)
+		logger.Error(err)
 		os.Exit(1)
 	}
 
-	log.Println("successfully stopped daemon")
+	logger.Info("successfully stopped daemon")
 }
 
 ```
