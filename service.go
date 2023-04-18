@@ -20,7 +20,7 @@ const (
 
 type stageFunc func(*ServiceContext) ServiceResponse
 type Service struct {
-	ctx *ServiceContext
+	serviceCtx *ServiceContext
 
 	initFunc   stageFunc
 	idleFunc   stageFunc
@@ -41,7 +41,7 @@ func NewService(name string, opts *serviceOpts) *Service {
 	}
 
 	return &Service{
-		ctx:        ctx,
+		serviceCtx: ctx,
 		initFunc:   initialize,
 		idleFunc:   idle,
 		runFunc:    run,
@@ -51,7 +51,7 @@ func NewService(name string, opts *serviceOpts) *Service {
 }
 
 func (s *Service) Name() string {
-	return s.ctx.name
+	return s.serviceCtx.name
 }
 
 func (s *Service) UsingInitStage(f stageFunc) {
@@ -76,23 +76,23 @@ func (s *Service) UsingReloadStage(f stageFunc) {
 }
 
 func (s *Service) init() ServiceResponse {
-	return s.initFunc(s.ctx)
+	return s.initFunc(s.serviceCtx)
 }
 
 func (s *Service) idle() ServiceResponse {
-	return s.idleFunc(s.ctx)
+	return s.idleFunc(s.serviceCtx)
 }
 
 func (s *Service) run() ServiceResponse {
-	return s.runFunc(s.ctx)
+	return s.runFunc(s.serviceCtx)
 }
 
 func (s *Service) stop() ServiceResponse {
-	return s.stopFunc(s.ctx)
+	return s.stopFunc(s.serviceCtx)
 }
 
 func (s *Service) reload() ServiceResponse {
-	return s.reloadFunc(s.ctx)
+	return s.reloadFunc(s.serviceCtx)
 }
 
 // Fallback lifecycle stage funcs

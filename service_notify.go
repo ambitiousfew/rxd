@@ -9,8 +9,8 @@ type serviceNotify struct {
 func (n *serviceNotify) notify(state State, logChannel chan LogMessage) {
 	for _, service := range n.services {
 		// to ensure we dont attempt to send over a close stateC for services that might have stopped.
-		if !service.ctx.isShutdown {
-			service.ctx.stateC <- state
+		if !service.serviceCtx.isShutdown {
+			service.serviceCtx.stateC <- state
 			logChannel <- NewLog(fmt.Sprintf("%s was informed of %s state change", service.Name(), state), Debug)
 		}
 	}

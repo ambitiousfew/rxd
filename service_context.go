@@ -1,6 +1,7 @@
 package rxd
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
@@ -8,9 +9,10 @@ import (
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.
 // This config contains preconfigured shutdown channel,
 type ServiceContext struct {
-	name string
-
-	opts *serviceOpts
+	Ctx       context.Context
+	cancelCtx context.CancelFunc
+	name      string
+	opts      *serviceOpts
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
 	shutdownC chan struct{}
@@ -30,65 +32,66 @@ type ServiceContext struct {
 
 // ShutdownSignal returns the channel the side implementing the service should use and watch to be notified
 // when the daemon/manager are attempting to shutdown services.
-func (ctx *ServiceContext) ShutdownSignal() chan struct{} {
-	return ctx.shutdownC
+func (sc *ServiceContext) ShutdownSignal() <-chan struct{} {
+	return sc.Ctx.Done()
 }
 
 // ChangeState returns the channel the service listens for state changes of the service it depends on
 // defined by UsingServiceNotify option on creation of the ServiceContext.
-func (ctx *ServiceContext) ChangeState() chan State {
-	return ctx.stateC
+func (sc *ServiceContext) ChangeState() chan State {
+	return sc.stateC
 }
 
 // NotifyStateChange takes a state and iterates over all child services added via UsingServiceNotify, if any
 // to notify them of the state change that occured against the service they subscribed to watch.
-func (ctx *ServiceContext) notifyStateChange(state State) {
+func (sc *ServiceContext) notifyStateChange(state State) {
 	// If we dont have any services to notify, dont try.
-	if ctx.opts.serviceNotify == nil {
+	if sc.opts.serviceNotify == nil {
 		return
 	}
 
-	ctx.opts.serviceNotify.notify(state, ctx.logC)
+	sc.opts.serviceNotify.notify(state, sc.logC)
 }
 
-func (ctx *ServiceContext) setIsStopped(value bool) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	ctx.isStopped = value
+func (sc *ServiceContext) setIsStopped(value bool) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.isStopped = value
 }
 
-func (ctx *ServiceContext) setLogChannel(logC chan LogMessage) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	ctx.logC = logC
+func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.logC = logC
 }
 
-func (ctx *ServiceContext) shutdown() {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
-	if !ctx.isShutdown {
-		close(ctx.shutdownC)
-		close(ctx.stateC)
-		ctx.isShutdown = true
+func (sc *ServiceContext) shutdown() {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if !sc.isShutdown {
+		close(sc.shutdownC)
+		close(sc.stateC)
+		sc.cancelCtx()
+		sc.isShutdown = true
 	}
 }
 
 // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
-func (ctx *ServiceContext) LogInfo(message string) {
-	ctx.logC <- NewLog(serviceLog(ctx, message), Info)
+func (sc *ServiceContext) LogInfo(message string) {
+	sc.logC <- NewLog(serviceLog(sc, message), Info)
 }
 
 // LogDebug takes a string message and sends it down the logC channel as a LogMessage type with log level of Debug
-func (ctx *ServiceContext) LogDebug(message string) {
-	ctx.logC <- NewLog(serviceLog(ctx, message), Debug)
+func (sc *ServiceContext) LogDebug(message string) {
+	sc.logC <- NewLog(serviceLog(sc, message), Debug)
 }
 
 // LogError takes a string message and sends it down the logC channel as a LogMessage type with log level of Error
-func (ctx *ServiceContext) LogError(message string) {
-	ctx.logC <- NewLog(serviceLog(ctx, message), Error)
+func (sc *ServiceContext) LogError(message string) {
+	sc.logC <- NewLog(serviceLog(sc, message), Error)
 }
 
 // serviceLog is a helper that prefixes log string messages with the service name
-func serviceLog(ctx *ServiceContext, message string) string {
-	return fmt.Sprintf("%s %s", ctx.name, message)
+func serviceLog(sc *ServiceContext, message string) string {
+	return fmt.Sprintf("%s %s", sc.name, message)
 }
