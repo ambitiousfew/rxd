@@ -7,43 +7,68 @@ import (
 )
 
 type manager struct {
-	wg       *sync.WaitGroup
-	services []*Service
+	ctx       context.Context
+	cancelCtx context.CancelFunc
+
+	wg *sync.WaitGroup
+
+	services []*ServiceContext
 
 	logC chan LogMessage
 
-	stopCh     chan struct{}
-	completeCh chan struct{}
+	stopCh chan struct{}
+
+	svcCtx    context.Context
+	svcCancel context.CancelFunc
 }
 
-func (m *manager) startService(service *Service) {
+func NewManager(services []*ServiceContext) *manager {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &manager{
+		ctx:       ctx,
+		cancelCtx: cancel,
+		services:  services,
+		wg:        new(sync.WaitGroup),
+		// stopCh is closed by daemon to signal to manager to stop services
+		stopCh: make(chan struct{}),
+	}
+}
+
+func (m *manager) setLogCh(logC chan LogMessage) {
+	m.logC = logC
+}
+
+func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
-	// Attach manager logging channel to each service so all services can send logs out
-	service.serviceCtx.setLogChannel(m.logC)
+
+	serviceCtx.setLogChannel(m.logC)
+
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
+	service := serviceCtx.service
 
 	for {
 		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
-		service.serviceCtx.notifyStateChange(svcResp.NextState)
+		serviceCtx.notifyStateChange(svcResp.NextState)
 
 		// Determine the next state the service should be in.
 		// Run the method associated with the next state.
 		switch svcResp.NextState {
 
 		case InitState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, init", service.Name()), Debug)
-			svcResp = service.init()
+			m.logC <- NewLog(fmt.Sprintf("%s next state, init", serviceCtx.name), Debug)
+			svcResp = service.Init(serviceCtx)
 
 		case IdleState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, idle", service.Name()), Debug)
-			svcResp = service.idle()
+			m.logC <- NewLog(fmt.Sprintf("%s next state, idle", serviceCtx.name), Debug)
+			svcResp = service.Idle(serviceCtx)
 
 		case RunState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, run", service.Name()), Debug)
-			svcResp = service.run()
+			m.logC <- NewLog(fmt.Sprintf("%s next state, run", serviceCtx.name), Debug)
+			svcResp = service.Run(serviceCtx)
 			// Enforce Run policies
-			switch service.serviceCtx.opts.runPolicy {
+			switch serviceCtx.opts.runPolicy {
 			case RunOncePolicy:
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
@@ -53,24 +78,24 @@ func (m *manager) startService(service *Service) {
 
 			case RetryUntilSuccessPolicy:
 				if svcResp.Error == nil {
-					stopResp := service.stop()
+					stopResp := service.Stop(serviceCtx)
 					if stopResp.Error != nil {
 						m.logC <- NewLog(stopResp.Error.Error(), Error)
 					}
-					service.serviceCtx.isStopped = true
+					serviceCtx.isStopped = true
 					// If Run didnt error, we assume successful run once and stop service.
 					svcResp.NextState = ExitState
 				}
 			}
 
 		case StopState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, stop", service.Name()), Debug)
-			svcResp = service.stop()
+			m.logC <- NewLog(fmt.Sprintf("%s next state, stop", serviceCtx.name), Debug)
+			svcResp = service.Stop(serviceCtx)
 			if svcResp.Error != nil {
 				m.logC <- NewLog(svcResp.Error.Error(), Error)
 			}
 
-			service.serviceCtx.setIsStopped(true)
+			serviceCtx.setIsStopped(true)
 			return
 		}
 
@@ -83,21 +108,21 @@ func (m *manager) startService(service *Service) {
 
 		if svcResp.NextState == ExitState {
 			// establish lock before reading/writing isStopped/isShutdown
-			service.serviceCtx.LogDebug("entering ExitState")
-			service.serviceCtx.notifyStateChange(StopState)
+			serviceCtx.LogDebug("entering ExitState")
+			serviceCtx.notifyStateChange(StopState)
 
-			if !service.serviceCtx.isStopped {
+			if !serviceCtx.isStopped {
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
-				svcResp = service.stop()
+				svcResp = service.Stop(serviceCtx)
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
 				}
-				service.serviceCtx.setIsStopped(true)
+				serviceCtx.setIsStopped(true)
 			}
 
-			service.serviceCtx.LogDebug("shutting down")
+			serviceCtx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
-			service.serviceCtx.shutdown()
+			serviceCtx.shutdown()
 			return
 		}
 	}
@@ -125,10 +150,6 @@ func (m *manager) start() (exitErr error) {
 	}()
 
 	for _, service := range m.services {
-		ctx, cancel := context.WithCancel(context.Background())
-		service.serviceCtx.Ctx = ctx
-		service.serviceCtx.cancelCtx = cancel
-
 		m.wg.Add(1)
 		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(service)
@@ -141,17 +162,18 @@ func (m *manager) start() (exitErr error) {
 	m.wg.Wait()
 
 	m.logC <- NewLog("All services have stopped running", Info)
-	close(m.completeCh)
+	// signal complete using context
+	m.cancelCtx()
 	return exitErr
 }
 
 func (m *manager) shutdown() {
 	var totalRunning int
 	// sends a signal to each service to inform them to stop running.
-	for _, service := range m.services {
-		if !service.serviceCtx.isShutdown {
-			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", service.Name()), Debug)
-			service.serviceCtx.shutdown()
+	for _, serviceCtx := range m.services {
+		if !serviceCtx.isShutdown {
+			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", serviceCtx.name), Debug)
+			serviceCtx.shutdown()
 			totalRunning++
 		}
 	}

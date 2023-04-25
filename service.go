@@ -1,5 +1,7 @@
 package rxd
 
+import "context"
+
 // State is used to determine the "next state" the service should enter
 // when the current state has completed/errored returned. State should
 // reflect different states that the interface can enter.
@@ -19,81 +21,87 @@ const (
 )
 
 type stageFunc func(*ServiceContext) ServiceResponse
-type Service struct {
-	serviceCtx *ServiceContext
 
-	initFunc   stageFunc
-	idleFunc   stageFunc
-	runFunc    stageFunc
-	stopFunc   stageFunc
-	reloadFunc stageFunc
+type Service interface {
+	// Name() string
+	Init(*ServiceContext) ServiceResponse
+	Idle(*ServiceContext) ServiceResponse
+	Run(*ServiceContext) ServiceResponse
+	Stop(*ServiceContext) ServiceResponse
+	// Reload(*ServiceContext) ServiceResponse
 }
 
+// type Service struct {
+// 	serviceCtx *ServiceContext
+
+// 	initFunc   stageFunc
+// 	idleFunc   stageFunc
+// 	runFunc    stageFunc
+// 	stopFunc   stageFunc
+// 	reloadFunc stageFunc
+// }
+
 // NewService creates a new service instance given a name and options.
-func NewService(name string, opts *serviceOpts) *Service {
-	ctx := &ServiceContext{
+func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &ServiceContext{
+		Ctx:        ctx,
+		cancelCtx:  cancel,
 		name:       name,
 		shutdownC:  make(chan struct{}),
 		stateC:     make(chan State),
 		opts:       opts,
 		isStopped:  true,
 		isShutdown: false,
-	}
-
-	return &Service{
-		serviceCtx: ctx,
-		initFunc:   initialize,
-		idleFunc:   idle,
-		runFunc:    run,
-		stopFunc:   stop,
-		reloadFunc: reload,
+		service:    service,
+		dependents: make(map[State][]*ServiceContext),
 	}
 }
 
-func (s *Service) Name() string {
-	return s.serviceCtx.name
-}
+// func (s *Service) Name() string {
+// 	return s.serviceCtx.name
+// }
 
-func (s *Service) UsingInitStage(f stageFunc) {
-	s.initFunc = f
-}
+// func (s *Service) UsingInitStage(f stageFunc) {
+// 	s.initFunc = f
+// }
 
-func (s *Service) UsingIdleStage(f stageFunc) {
-	s.idleFunc = f
-}
+// func (s *Service) UsingIdleStage(f stageFunc) {
+// 	s.idleFunc = f
+// }
 
-func (s *Service) UsingRunStage(f stageFunc) {
-	s.runFunc = f
-}
+// func (s *Service) UsingRunStage(f stageFunc) {
+// 	s.runFunc = f
+// }
 
-func (s *Service) UsingStopStage(f stageFunc) {
-	s.stopFunc = f
-}
+// func (s *Service) UsingStopStage(f stageFunc) {
+// 	s.stopFunc = f
+// }
 
 // UsingReloadStage is not implemented yet.
-func (s *Service) UsingReloadStage(f stageFunc) {
-	s.reloadFunc = f
-}
+// func (s *Service) UsingReloadStage(f stageFunc) {
+// 	s.reloadFunc = f
+// }
 
-func (s *Service) init() ServiceResponse {
-	return s.initFunc(s.serviceCtx)
-}
+// func (s *Service) init() ServiceResponse {
+// 	return s.initFunc(s.serviceCtx)
+// }
 
-func (s *Service) idle() ServiceResponse {
-	return s.idleFunc(s.serviceCtx)
-}
+// func (s *Service) idle() ServiceResponse {
+// 	return s.idleFunc(s.serviceCtx)
+// }
 
-func (s *Service) run() ServiceResponse {
-	return s.runFunc(s.serviceCtx)
-}
+// func (s *Service) run() ServiceResponse {
+// 	return s.runFunc(s.serviceCtx)
+// }
 
-func (s *Service) stop() ServiceResponse {
-	return s.stopFunc(s.serviceCtx)
-}
+// func (s *Service) stop() ServiceResponse {
+// 	return s.stopFunc(s.serviceCtx)
+// }
 
-func (s *Service) reload() ServiceResponse {
-	return s.reloadFunc(s.serviceCtx)
-}
+// func (s *Service) reload() ServiceResponse {
+// 	return s.reloadFunc(s.serviceCtx)
+// }
 
 // Fallback lifecycle stage funcs
 func initialize(ctx *ServiceContext) ServiceResponse {

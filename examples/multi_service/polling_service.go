@@ -100,8 +100,15 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 }
 
 // Stop handles anything you might need to do to clean up before ending your service.
-func (s *APIPollingService) Stop() rxd.ServiceResponse {
+func (s *APIPollingService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
+
+func (s *APIPollingService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.IdleState)
+}
+
+// Ensure we meet the interface or error.
+var _ rxd.Service = &APIPollingService{}

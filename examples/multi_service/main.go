@@ -10,26 +10,15 @@ import (
 // Example entrypoint
 func main() {
 	// Create Poll Service config with RunPolicy option.
-	pollOpts := rxd.NewServiceOpts(
-		rxd.UsingRunPolicy(rxd.RunOncePolicy),
-	)
+	pollOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunOncePolicy))
 	// Pass config to instance of service struct
 	pollClient := NewAPIPollingService()
+	pollSvc := rxd.NewService("PollService", pollClient, pollOpts)
 
-	pollSvc := rxd.NewService("PollService", pollOpts)
-	pollSvc.UsingIdleStage(pollClient.Idle)
-	pollSvc.UsingRunStage(pollClient.Run)
-
-	apiOpts := rxd.NewServiceOpts(
-		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
-		rxd.UsingServiceNotify(pollSvc),
-	)
+	apiOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy))
 	// Create Hello World service passing config to instance of service struct.
 	apiServer := NewHelloWorldService()
-	apiSvc := rxd.NewService("HelloWorldAPI", apiOpts)
-	apiSvc.UsingInitStage(apiServer.Idle)
-	apiSvc.UsingRunStage(apiServer.Run)
-	apiSvc.UsingStopStage(apiServer.Stop)
+	apiSvc := rxd.NewService("HelloWorldAPI", apiServer, apiOpts)
 
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon(pollSvc, apiSvc)

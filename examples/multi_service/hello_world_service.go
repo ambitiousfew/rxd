@@ -94,3 +94,10 @@ func (s *HelloWorldAPIService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	c.LogInfo(fmt.Sprintf("is stopping"))
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
+
+func (s *HelloWorldAPIService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.IdleState)
+}
+
+// Ensure we meet the interface or error.
+var _ rxd.Service = &HelloWorldAPIService{}

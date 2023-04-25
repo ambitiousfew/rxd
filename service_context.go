@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.
@@ -11,8 +12,12 @@ import (
 type ServiceContext struct {
 	Ctx       context.Context
 	cancelCtx context.CancelFunc
-	name      string
-	opts      *serviceOpts
+
+	name string
+
+	service    Service
+	opts       *serviceOpts
+	dependents map[State][]*ServiceContext
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
 	shutdownC chan struct{}
@@ -42,15 +47,55 @@ func (sc *ServiceContext) ChangeState() chan State {
 	return sc.stateC
 }
 
+// AddDependentService adds a service that depends on the current service and the states the dependent service is interested in.
+func (sc *ServiceContext) AddDependentService(s *ServiceContext, states []State) error {
+	if sc == s {
+		return fmt.Errorf("cannot add service %s as a dependent service to itself", sc.name)
+	}
+
+	for _, state := range states {
+		children, ok := sc.dependents[state]
+		if !ok {
+			sc.dependents[state] = []*ServiceContext{s}
+			continue
+		}
+
+		children = append(children, s)
+		sc.dependents[state] = children
+	}
+
+	// sc.LogDebug(fmt.Sprintf("%v", sc.dependents))
+	return nil
+}
+
 // NotifyStateChange takes a state and iterates over all child services added via UsingServiceNotify, if any
 // to notify them of the state change that occured against the service they subscribed to watch.
 func (sc *ServiceContext) notifyStateChange(state State) {
 	// If we dont have any services to notify, dont try.
-	if sc.opts.serviceNotify == nil {
+	if len(sc.dependents) == 0 {
 		return
 	}
 
-	sc.opts.serviceNotify.notify(state, sc.logC)
+	svcs, ok := sc.dependents[state]
+	if !ok {
+		return
+	}
+
+	timer := time.NewTimer(250 * time.Millisecond)
+
+	for _, svc := range svcs {
+		if !svc.isShutdown {
+			select {
+			case <-timer.C:
+				sc.LogDebug(fmt.Sprintf("took too longer to notify state change from %s to -> %s", sc.name, svc.name))
+				continue
+			case svc.stateC <- state:
+				// attempt to send down channel, timeout if takes longer than 500ms
+			}
+			timer.Reset(250 * time.Millisecond)
+		}
+	}
+	// sc.opts.serviceNotify.notify(state, sc.logC)
 }
 
 func (sc *ServiceContext) setIsStopped(value bool) {

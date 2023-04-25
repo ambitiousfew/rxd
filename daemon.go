@@ -36,7 +36,7 @@ func (d *daemon) Logger() Logging {
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
-func NewDaemon(services ...*Service) *daemon {
+func NewDaemon(services ...*ServiceContext) *daemon {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// default severity to log is Info level and higher.
@@ -44,22 +44,16 @@ func NewDaemon(services ...*Service) *daemon {
 
 	logC := make(chan LogMessage, 10)
 
-	return &daemon{
-		ctx:    ctx,
-		cancel: cancel,
-		wg:     new(sync.WaitGroup),
-		manager: &manager{
-			wg:       new(sync.WaitGroup),
-			services: services,
-			logC:     logC,
-			// stopCh is closed by daemon to signal to manager to stop services
-			stopCh: make(chan struct{}),
-			// completeCh is closed by manager to signal to daemon it has finished - not sure its necessary
-			completeCh: make(chan struct{}),
-		},
+	manager := NewManager(services)
+	manager.setLogCh(logC)
 
-		logger: logger,
-		logCh:  logC,
+	return &daemon{
+		ctx:     ctx,
+		cancel:  cancel,
+		wg:      new(sync.WaitGroup),
+		manager: manager,
+		logger:  logger,
+		logCh:   logC,
 
 		stopCh: make(chan struct{}),
 		// stopLogCh is closed by daemon to signal to log watcher to stop.
@@ -79,33 +73,41 @@ func (d *daemon) Start() (exitErr error) {
 		}
 	}()
 
-	d.wg.Add(2)
+	d.wg.Add(3)
 	// OS Signal watcher routine.
 	go d.signalWatcher()
 	// Logging routine.
 	go d.logWatcher()
 
-	// Main thread blocks here until manager stops all services
-	// which can be triggered by the relaying of OS Signal / context.Done()
-	exitErr = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
-	if exitErr != nil {
-		d.logger.Error(exitErr.Error())
-	}
+	// Run manager in its own thread so all wait using waitgroup
+	go func() {
+		defer func() {
+			d.wg.Done()
 
-	// signal stopping of daemon
-	close(d.stopCh)
-	// Signal stop of Logging routine
-	close(d.stopLogCh)
+			d.logger.Debug("daemon closing stopCh and stopLogCh")
+			// signal stopping of daemon
+			close(d.stopCh)
+			// Signal stop of Logging routine
+			close(d.stopLogCh)
+		}()
 
+		exitErr = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
+		if exitErr != nil {
+			d.logger.Error(exitErr.Error())
+		}
+		d.logger.Debug("manager routine ending")
+
+	}()
+
+	// Blocks the main thread, d.wg.Done() must finish all routines before we can continue beyond.
 	d.wg.Wait()
-
 	// close the logging channel - logC cannot be used after this point.
 	close(d.logCh)
 	d.logger.Debug("logging channel closed")
 	return exitErr
 }
 
-func (d *daemon) AddService(service *Service) {
+func (d *daemon) AddService(service *ServiceContext) {
 	d.manager.services = append(d.manager.services, service)
 }
 
@@ -113,9 +115,9 @@ func (d *daemon) signalWatcher() {
 	defer func() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
-		d.logger.Debug("Waiting for manager to finish...")
-		<-d.manager.completeCh
-		d.logger.Debug("Manager stop signal received")
+		d.logger.Debug("signalWatcher waiting for manager to finish...")
+		<-d.manager.ctx.Done()
+		d.logger.Debug("signalWatcher manager stop signal received")
 
 		d.wg.Done()
 	}()
@@ -133,6 +135,10 @@ func (d *daemon) signalWatcher() {
 			// if we get an OS signal, we need to end.
 			d.cancel()
 			close(d.manager.stopCh)
+			return
+		case <-d.manager.ctx.Done():
+			d.logger.Debug("manager context has been cancelled")
+			// if manager ctx has been cancelled
 			return
 		case <-d.stopCh:
 			// if manager completes we are done running...
