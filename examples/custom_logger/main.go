@@ -38,30 +38,31 @@ func (s *SimpleService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 	}
 }
 
+func (s *SimpleService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.IdleState)
+}
+
+func (s *SimpleService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.RunState)
+}
+
+func (s *SimpleService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.ExitState)
+}
+
+// SimpleService must meet Service interface or line below errors.
+var _ rxd.Service = &SimpleService{}
+
 // Example entrypoint
 func main() {
 	// We create an instance of our service
 	simpleService := NewSimpleService()
-
 	// We create an instance of our ServiceConfig
-	svcOpts := rxd.NewServiceOpts(
-		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
-	)
-
-	svc := rxd.NewService("SimpleService", svcOpts)
-
-	// We could have used a pure function or you can pass receiver function
-	// as long as it meets the interface for stageFunc
-	svc.UsingRunStage(simpleService.Run)
-
-	// can even use an inline function
-	svc.UsingStopStage(func(c *rxd.ServiceContext) rxd.ServiceResponse {
-		c.LogInfo("we are stopping now...")
-		return rxd.NewResponse(nil, rxd.ExitState)
-	})
+	svcOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy))
+	simpleRxdService := rxd.NewService("SimpleService", simpleService, svcOpts)
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
-	daemon := rxd.NewDaemon(svc)
+	daemon := rxd.NewDaemon(simpleRxdService)
 
 	// since MyLogger meets the Logging interface we can allow the daemon to use it.
 	logger := &MyLogger{}

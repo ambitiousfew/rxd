@@ -71,21 +71,33 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 	return rxd.NewResponse(nil, rxd.StopState)
 }
 
+func (s *HelloWorldAPIService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.IdleState)
+}
+
+func (s *HelloWorldAPIService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.RunState)
+}
+
+func (s *HelloWorldAPIService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.ExitState)
+}
+
+// HelloWorldAPIService must meet Service interface or line below errors.
+var _ rxd.Service = &HelloWorldAPIService{}
+
 // Example entrypoint
 func main() {
 	// We create an instance of our service
 	helloWorld := NewHelloWorldService()
-
 	// We create an instance of our ServiceConfig
-	apiOpts := rxd.NewServiceOpts(
-		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
-	)
+	apiOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy))
 
-	apiSvc := rxd.NewService("HelloWorldAPI", apiOpts)
-	apiSvc.UsingRunStage(helloWorld.Run)
+	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld, apiOpts)
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
 	daemon := rxd.NewDaemon(apiSvc)
+
 	// We can set the log severity we want to observe, LevelInfo is default
 
 	err := daemon.Start() // Blocks main thread

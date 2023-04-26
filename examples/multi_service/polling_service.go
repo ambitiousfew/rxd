@@ -60,6 +60,12 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		select {
 		case <-c.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
+		case state := <-c.ChangeState():
+			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
+			if state == rxd.StopState {
+				// if the parent we depend on says they are stopping we will move to exit which also calls Stop() first.
+				return rxd.NewResponse(nil, rxd.ExitState)
+			}
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
 				c.LogInfo(fmt.Sprintf("has reached its maximum poll count, stopping service"))

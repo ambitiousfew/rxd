@@ -9,13 +9,12 @@ A simple (alpha) reactive services daemon
 // Though you only need to implement the methods you want to customize if they need to do something.
 type SimpleService struct{}
 
-func NewSimpleService() *SimpleService {
-	return &SimpleService{}
-}
-
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *SimpleService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
+
+	c.LogInfo("has entered the run state")
+
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 
@@ -39,6 +38,21 @@ func (s *SimpleService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 
 	}
 }
+
+func (s *SimpleService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.IdleState)
+}
+
+func (s *SimpleService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.RunState)
+}
+
+func (s *SimpleService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
+	return rxd.NewResponse(nil, rxd.ExitState)
+}
+
+// SimpleService must meet Service interface or line below errors.
+var _ rxd.Service = &SimpleService{}
 ```
 
 ### Example Daemon Entrypoint with Custom Logger
@@ -65,40 +79,24 @@ func (ml *MyLogger) Error(v any) {
 // Example entrypoint
 func main() {
 	// We create an instance of our service
-	simpleService := NewSimpleService()
-
-	// Customize our service options
-	svcCtx := rxd.NewServiceOpts(
-		rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy),
-	)
-
-  // Create our service with a name and customized options.
-	svc := rxd.NewService("SimpleService", svcOpts)
-
-	// We could have used a pure function or you can pass receiver function
-	// as long as it meets the interface for stageFunc
-	svc.UsingRunStage(simpleService.Run)
-
-	// We can even use an inline function instead of a receiver method
-	svc.UsingStopStage(func(c *rxd.ServiceContext) rxd.ServiceResponse {
-		c.LogInfo("we are stopping now...")
-		return rxd.NewResponse(nil, rxd.ExitState)
-	})
+	simpleService := &SimpleService{}
+	// We create an instance of our ServiceConfig
+	svcOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy))
+	simpleRxdService := rxd.NewService("SimpleService", simpleService, svcOpts)
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
-	daemon := rxd.NewDaemon(svc)
+	daemon := rxd.NewDaemon(simpleRxdService)
 
-  // If you wish to use your own logger, ensure you meet the logging interface
+	// since MyLogger meets the Logging interface we can allow the daemon to use it.
 	logger := &MyLogger{}
 	daemon.SetLogger(logger)
 
 	err := daemon.Start() // Blocks main thread
 	if err != nil {
-		logger.Error(err)
+		log.Println(err)
 		os.Exit(1)
 	}
 
-	logger.Info("successfully stopped daemon")
+	log.Println("successfully stopped daemon")
 }
-
 ```
