@@ -43,6 +43,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
 	serviceCtx.setLogChannel(m.logC)
+	serviceCtx.setIsStopped(false)
 
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
@@ -57,61 +58,58 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 		switch svcResp.NextState {
 
 		case InitState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, init", serviceCtx.name), Debug)
+			serviceCtx.LogDebug("next state, init")
 			svcResp = service.Init(serviceCtx)
+			if svcResp.Error != nil {
+				m.logC <- NewLog(svcResp.Error.Error(), Error)
+			}
 
 		case IdleState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, idle", serviceCtx.name), Debug)
+			m.logC <- NewLog(fmt.Sprintf("%s ", serviceCtx.name), Debug)
+			serviceCtx.LogDebug("next state, idle")
 			svcResp = service.Idle(serviceCtx)
+			if svcResp.Error != nil {
+				serviceCtx.LogError(svcResp.Error.Error())
+			}
 
 		case RunState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, run", serviceCtx.name), Debug)
+			serviceCtx.LogDebug("next state, run")
 			svcResp = service.Run(serviceCtx)
 			// Enforce Run policies
 			switch serviceCtx.opts.runPolicy {
 			case RunOncePolicy:
 				if svcResp.Error != nil {
-					m.logC <- NewLog(svcResp.Error.Error(), Error)
+					serviceCtx.LogError(svcResp.Error.Error())
 				}
 				// regardless of success/fail, we exit
 				svcResp.NextState = ExitState
 
 			case RetryUntilSuccessPolicy:
 				if svcResp.Error == nil {
-					stopResp := service.Stop(serviceCtx)
-					if stopResp.Error != nil {
-						m.logC <- NewLog(stopResp.Error.Error(), Error)
+					svcResp := service.Stop(serviceCtx)
+					if svcResp.Error != nil {
+						serviceCtx.LogError(svcResp.Error.Error())
+						continue
 					}
-					serviceCtx.isStopped = true
+					serviceCtx.setIsStopped(true)
 					// If Run didnt error, we assume successful run once and stop service.
 					svcResp.NextState = ExitState
 				}
 			}
-
 		case StopState:
-			m.logC <- NewLog(fmt.Sprintf("%s next state, stop", serviceCtx.name), Debug)
+			serviceCtx.LogDebug("next state, stop")
 			svcResp = service.Stop(serviceCtx)
 			if svcResp.Error != nil {
-				m.logC <- NewLog(svcResp.Error.Error(), Error)
+				serviceCtx.LogError(svcResp.Error.Error())
 			}
-
 			serviceCtx.setIsStopped(true)
-			return
-		}
+			// Always force Exit after Stop is called.
+			svcResp.NextState = ExitState
 
-		// No matter what stage ran above, whatever it returned for a ServiceResponse
-		// Extract the error out and send it to the logging channel.
-		if svcResp.Error != nil {
-			m.logC <- NewLog(svcResp.Error.Error(), Error)
-			continue
-		}
-
-		if svcResp.NextState == ExitState {
-			// establish lock before reading/writing isStopped/isShutdown
-			serviceCtx.LogDebug("entering ExitState")
-			serviceCtx.notifyStateChange(StopState)
-
+		case ExitState:
 			if !serviceCtx.isStopped {
+				serviceCtx.LogDebug("next state, stop")
+				serviceCtx.notifyStateChange(StopState)
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 				svcResp = service.Stop(serviceCtx)
 				if svcResp.Error != nil {
@@ -119,7 +117,8 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				}
 				serviceCtx.setIsStopped(true)
 			}
-
+			serviceCtx.LogDebug("next state, exit")
+			serviceCtx.notifyStateChange(ExitState)
 			serviceCtx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
 			serviceCtx.shutdown()
@@ -145,8 +144,9 @@ func (m *manager) start() (exitErr error) {
 		m.logC <- NewLog("manager watching for stop signal....", Debug)
 		<-m.stopCh
 		m.logC <- NewLog("manager received stop signal", Debug)
-		// iterates over all service goroutines to signal them to shutdown.
-		m.shutdown()
+		// m.shutdown()
+		// signal complete using context
+		m.cancelCtx()
 	}()
 
 	for _, service := range m.services {
@@ -160,10 +160,6 @@ func (m *manager) start() (exitErr error) {
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
 	m.wg.Wait()
-
-	m.logC <- NewLog("All services have stopped running", Info)
-	// signal complete using context
-	m.cancelCtx()
 	return exitErr
 }
 
@@ -178,5 +174,11 @@ func (m *manager) shutdown() {
 		}
 	}
 
-	m.logC <- NewLog(fmt.Sprintf("%d running services have been signaled to shut down.", totalRunning), Debug)
+	if totalRunning > 0 {
+		m.logC <- NewLog(fmt.Sprintf("%d running services have been signaled to shut down.", totalRunning), Debug)
+	}
+
+	m.logC <- NewLog("All services have stopped running", Info)
+	// signal manager to stop
+	close(m.stopCh)
 }

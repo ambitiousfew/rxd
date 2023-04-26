@@ -82,13 +82,12 @@ func (d *daemon) Start() (exitErr error) {
 	// Run manager in its own thread so all wait using waitgroup
 	go func() {
 		defer func() {
-			d.wg.Done()
-
 			d.logger.Debug("daemon closing stopCh and stopLogCh")
 			// signal stopping of daemon
 			close(d.stopCh)
 			// Signal stop of Logging routine
 			close(d.stopLogCh)
+			d.wg.Done()
 		}()
 
 		exitErr = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
@@ -116,6 +115,7 @@ func (d *daemon) signalWatcher() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
 		d.logger.Debug("signalWatcher waiting for manager to finish...")
+		d.manager.shutdown()
 		<-d.manager.ctx.Done()
 		d.logger.Debug("signalWatcher manager stop signal received")
 
@@ -134,12 +134,11 @@ func (d *daemon) signalWatcher() {
 			d.logger.Debug("OS signal received, cancelling context")
 			// if we get an OS signal, we need to end.
 			d.cancel()
-			close(d.manager.stopCh)
 			return
-		case <-d.manager.ctx.Done():
-			d.logger.Debug("manager context has been cancelled")
-			// if manager ctx has been cancelled
-			return
+		// case <-d.manager.ctx.Done():
+		// 	d.logger.Debug("manager context has been cancelled")
+		// 	// if manager ctx has been cancelled
+		// 	return
 		case <-d.stopCh:
 			// if manager completes we are done running...
 			d.logger.Debug("daemon received stop signal")

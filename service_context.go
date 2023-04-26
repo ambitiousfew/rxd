@@ -63,8 +63,6 @@ func (sc *ServiceContext) AddDependentService(s *ServiceContext, states []State)
 		children = append(children, s)
 		sc.dependents[state] = children
 	}
-
-	// sc.LogDebug(fmt.Sprintf("%v", sc.dependents))
 	return nil
 }
 
@@ -82,20 +80,21 @@ func (sc *ServiceContext) notifyStateChange(state State) {
 	}
 
 	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
 
 	for _, svc := range svcs {
 		if !svc.isShutdown {
 			select {
 			case <-timer.C:
-				sc.LogDebug(fmt.Sprintf("took too longer to notify state change from %s to -> %s", sc.name, svc.name))
+				sc.LogDebug(fmt.Sprintf("could not inform %s of state change to %s, may not be watching", svc.name, state))
 				continue
 			case svc.stateC <- state:
 				// attempt to send down channel, timeout if takes longer than 500ms
+				sc.LogDebug(fmt.Sprintf("notification sent to dependent: %s", svc.name))
 			}
 			timer.Reset(250 * time.Millisecond)
 		}
 	}
-	// sc.opts.serviceNotify.notify(state, sc.logC)
 }
 
 func (sc *ServiceContext) setIsStopped(value bool) {
@@ -126,14 +125,29 @@ func (sc *ServiceContext) LogInfo(message string) {
 	sc.logC <- NewLog(serviceLog(sc, message), Info)
 }
 
+// LogInfof takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
+func (sc *ServiceContext) LogInfof(msg string, v ...any) {
+	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Info)
+}
+
 // LogDebug takes a string message and sends it down the logC channel as a LogMessage type with log level of Debug
 func (sc *ServiceContext) LogDebug(message string) {
 	sc.logC <- NewLog(serviceLog(sc, message), Debug)
 }
 
+// LogDebugf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
+func (sc *ServiceContext) LogDebugf(msg string, v ...any) {
+	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Debug)
+}
+
 // LogError takes a string message and sends it down the logC channel as a LogMessage type with log level of Error
 func (sc *ServiceContext) LogError(message string) {
 	sc.logC <- NewLog(serviceLog(sc, message), Error)
+}
+
+// LogErrorf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
+func (sc *ServiceContext) LogErrorf(msg string, v ...any) {
+	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Error)
 }
 
 // serviceLog is a helper that prefixes log string messages with the service name
