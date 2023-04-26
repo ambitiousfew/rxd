@@ -137,6 +137,8 @@ func (m *manager) start() (exitErr error) {
 		if rErr := recover(); rErr != nil {
 			exitErr = fmt.Errorf("%s", rErr)
 		}
+
+		close(m.stopCh)
 	}()
 
 	go func() {
@@ -144,7 +146,7 @@ func (m *manager) start() (exitErr error) {
 		m.logC <- NewLog("manager watching for stop signal....", Debug)
 		<-m.stopCh
 		m.logC <- NewLog("manager received stop signal", Debug)
-		// m.shutdown()
+		m.shutdown()
 		// signal complete using context
 		m.cancelCtx()
 	}()
@@ -160,6 +162,7 @@ func (m *manager) start() (exitErr error) {
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
 	m.wg.Wait()
+	m.logC <- NewLog("All services have stopped running", Info)
 	return exitErr
 }
 
@@ -175,10 +178,6 @@ func (m *manager) shutdown() {
 	}
 
 	if totalRunning > 0 {
-		m.logC <- NewLog(fmt.Sprintf("%d running services have been signaled to shut down.", totalRunning), Debug)
+		m.logC <- NewLog(fmt.Sprintf("%d remaining services signaled to shut down.", totalRunning), Debug)
 	}
-
-	m.logC <- NewLog("All services have stopped running", Info)
-	// signal manager to stop
-	close(m.stopCh)
 }

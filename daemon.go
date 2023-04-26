@@ -117,8 +117,7 @@ func (d *daemon) signalWatcher() {
 		d.logger.Debug("signalWatcher waiting for manager to finish...")
 		d.manager.shutdown()
 		<-d.manager.ctx.Done()
-		d.logger.Debug("signalWatcher manager stop signal received")
-
+		d.logger.Debug("signalWatcher manager done signal received")
 		d.wg.Done()
 	}()
 
