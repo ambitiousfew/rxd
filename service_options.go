@@ -20,6 +20,7 @@ type ServiceOption func(*serviceOpts)
 
 // NewServiceOpts will apply all options in the order given and return the final options back.
 func NewServiceOpts(options ...ServiceOption) *serviceOpts {
+	// Default runPolicy unless overridden
 	opts := &serviceOpts{
 		runPolicy: RunUntilStoppedPolicy,
 	}
@@ -39,22 +40,9 @@ func UsingRunPolicy(policy RunPolicy) ServiceOption {
 	}
 }
 
-// UsingServiceNotify applies ServiceNotify to the ServiceOption instance
-func UsingServiceNotify(svcCtx *ServiceContext) ServiceOption {
-	return func(so *serviceOpts) {
-		if so.serviceNotify != nil {
-			so.serviceNotify.services = append(so.serviceNotify.services, svcCtx)
-		} else {
-			so.serviceNotify = &serviceNotify{services: []*ServiceContext{svcCtx}}
-		}
-
-	}
-}
-
 // ServiceOpts will allow for customizations of how a service runs and should always have
 // a reasonable default to fallback if the case one isnt provided.
 // This would be set by the ServiceConfig upon creation.
 type serviceOpts struct {
-	runPolicy     RunPolicy
-	serviceNotify *serviceNotify
+	runPolicy RunPolicy
 }

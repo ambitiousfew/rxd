@@ -22,6 +22,8 @@ type manager struct {
 	svcCancel context.CancelFunc
 }
 
+// informed is a struct used by the manager notifier routine
+// to track whether a parent services depedent children have been informed or not.
 type informed struct {
 	stopC     chan struct{}
 	completed bool
@@ -72,6 +74,9 @@ func (m *manager) setLogCh(logC chan LogMessage) {
 	m.logC = logC
 }
 
+// startService is run by manager in its own routine
+// its a service wrapper so lifecycle stages can be controlled
+// and relayed behind the scenes.
 func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
@@ -85,35 +90,31 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	for {
 		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
 		serviceCtx.notifyStateChange(svcResp.NextState)
-
 		// Determine the next state the service should be in.
 		// Run the method associated with the next state.
 		switch svcResp.NextState {
 
 		case InitState:
-			serviceCtx.LogDebug("next state, init")
 			svcResp = service.Init(serviceCtx)
 			if svcResp.Error != nil {
 				m.logC <- NewLog(svcResp.Error.Error(), Error)
 			}
 
 		case IdleState:
-			m.logC <- NewLog(fmt.Sprintf("%s ", serviceCtx.name), Debug)
-			serviceCtx.LogDebug("next state, idle")
 			svcResp = service.Idle(serviceCtx)
 			if svcResp.Error != nil {
 				serviceCtx.LogError(svcResp.Error.Error())
 			}
 
 		case RunState:
-			serviceCtx.LogDebug("next state, run")
 			svcResp = service.Run(serviceCtx)
+			if svcResp.Error != nil {
+				serviceCtx.LogError(svcResp.Error.Error())
+			}
+
 			// Enforce Run policies
 			switch serviceCtx.opts.runPolicy {
 			case RunOncePolicy:
-				if svcResp.Error != nil {
-					serviceCtx.LogError(svcResp.Error.Error())
-				}
 				// regardless of success/fail, we exit
 				svcResp.NextState = ExitState
 
@@ -121,7 +122,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				if svcResp.Error == nil {
 					svcResp := service.Stop(serviceCtx)
 					if svcResp.Error != nil {
-						serviceCtx.LogError(svcResp.Error.Error())
 						continue
 					}
 					serviceCtx.setIsStopped(true)
@@ -130,7 +130,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				}
 			}
 		case StopState:
-			serviceCtx.LogDebug("next state, stop")
 			svcResp = service.Stop(serviceCtx)
 			if svcResp.Error != nil {
 				serviceCtx.LogError(svcResp.Error.Error())
@@ -141,7 +140,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 
 		case ExitState:
 			if !serviceCtx.isStopped {
-				serviceCtx.LogDebug("next state, stop")
 				serviceCtx.notifyStateChange(StopState)
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 				svcResp = service.Stop(serviceCtx)
@@ -150,7 +148,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				}
 				serviceCtx.setIsStopped(true)
 			}
-			serviceCtx.LogDebug("next state, exit")
 			serviceCtx.notifyStateChange(ExitState)
 			serviceCtx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
@@ -160,10 +157,11 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	}
 }
 
-// start handles launching each service in its own routine
-// it blocks on the MAIN routine until all services have finished running and
-// notified WaitGroup by calling .Done()
-// The MAIN routine returns control back to the Daemon to finish running.
+// start is run by daemon in its own routine
+// manager also handles spinning up each service in its own routine
+// as well as a notifier routine per each service that is considered
+// a parent with dependent services, any service that AddDependentService()
+// was called on.
 func (m *manager) start() (exitErr error) {
 	defer func() {
 		// capture any panics, convert to error to return
@@ -186,7 +184,6 @@ func (m *manager) start() (exitErr error) {
 
 	for _, service := range m.services {
 		m.wg.Add(1)
-
 		if len(service.dependents) > 0 {
 			// start a notifier watcher routine only for services that have children to notify of state change.
 			go m.notifier(service)
@@ -204,6 +201,9 @@ func (m *manager) start() (exitErr error) {
 	return exitErr
 }
 
+// shutdown handles iterating over any remaining services that still may be running
+// calling each services shutdown method if it hasnt already been called by the service itself
+// on a manual Stop/Exit state before manager began its own shutdown.
 func (m *manager) shutdown() {
 	var totalRunning int
 	// sends a signal to each service to inform them to stop running.
@@ -220,6 +220,13 @@ func (m *manager) shutdown() {
 	}
 }
 
+// notifier is a goroutine launched only per parent with dependent services
+// it holds some last known state of parent and state of which dependent
+// services have been informed or have yet to be informed which is uses
+// its own routines to actively attempt relaying that state across a channel.
+// Since that channel blocks until the dependent receives it, if the parent state changes
+// between that time, to prevent out-of-sync issue we kill the go routine immediately on
+// state change and launch a new one.
 func (m *manager) notifier(parent *ServiceContext) {
 	lastState := InitState
 	informedChildren := make(map[*ServiceContext]*informed)
@@ -255,7 +262,7 @@ func (m *manager) notifier(parent *ServiceContext) {
 				// Go routine that always attempts to send the last known state.
 				go func(svc *ServiceContext, ls State, i *informed) {
 					defer func() {
-						close(i.stopC)
+						i.close()
 						i.setComplete(true)
 					}()
 

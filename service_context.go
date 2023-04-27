@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 )
 
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.
@@ -77,13 +76,13 @@ func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State
 // NotifyStateChange takes a state and iterates over all child services added via UsingServiceNotify, if any
 // to notify them of the state change that occured against the service they subscribed to watch.
 func (sc *ServiceContext) notifyStateChange(state State) {
+	sc.LogDebugf("next state, %s", string(state))
+
 	// If we dont have any services to notify, dont try.
 	if len(sc.dependents) == 0 {
 		return
 	}
 
-	timer := time.NewTimer(250 * time.Millisecond)
-	defer timer.Stop()
 	select {
 	case <-sc.Ctx.Done():
 		// parent service is shutting down, exit.

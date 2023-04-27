@@ -61,10 +61,11 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 	}
 }
 
-// Start the entrypoint for the reactive daemon. It launches 2 watcher routines.
+// Start the entrypoint for the reactive daemon. It launches 3 routines for its wait group.
 //  1. Watching specifically for OS Signals which when received will inform the
 //     manager to shutdown all services, blocks until finishes.
 //  2. Log watcher that handles all logging from manager and services through a channel.
+//  3. Manager routine to handle running and managing services.
 func (d *daemon) Start() (exitErr error) {
 	defer func() {
 		// capture any panics, convert to error to return
@@ -111,6 +112,9 @@ func (d *daemon) AddService(service *ServiceContext) {
 }
 
 func (d *daemon) signalWatcher() {
+	// Watch for OS Signals in separate go routine so we dont block main thread.
+	d.logger.Info("Daemon: starting OS signal watcher")
+
 	defer func() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
@@ -122,9 +126,6 @@ func (d *daemon) signalWatcher() {
 	}()
 
 	signalC := make(chan os.Signal)
-	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.logger.Info("Daemon: starting OS signal watcher")
-
 	signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
 
 	for {
@@ -134,18 +135,12 @@ func (d *daemon) signalWatcher() {
 			// if we get an OS signal, we need to end.
 			d.cancel()
 			return
-		// case <-d.manager.ctx.Done():
-		// 	d.logger.Debug("manager context has been cancelled")
-		// 	// if manager ctx has been cancelled
-		// 	return
 		case <-d.stopCh:
 			// if manager completes we are done running...
 			d.logger.Debug("daemon received stop signal")
 			return
 		}
 	}
-	// shutdown iterates over all services manager knows about signaling shutdown by closing the ShutdownC in each Service Config
-
 }
 
 func (d *daemon) logWatcher() {
