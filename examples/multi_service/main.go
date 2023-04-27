@@ -23,7 +23,7 @@ func main() {
 	// We can add polling client as a dependent of API Server so
 	// any stage polling client is interested in observing of API Server
 	// will be reported down to poll client when API Server reaches that stage.
-	apiSvc.AddDependentService(pollRxdSvc, []rxd.State{rxd.RunState, rxd.StopState})
+	apiSvc.AddDependentService(pollRxdSvc, rxd.RunState, rxd.StopState)
 	// We are interested in when API Server reaches a RunState and when its reached a StopState
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 

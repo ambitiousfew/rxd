@@ -15,14 +15,16 @@ type ServiceContext struct {
 
 	name string
 
-	service    Service
-	opts       *serviceOpts
-	dependents map[State][]*ServiceContext
+	service Service
+	opts    *serviceOpts
+
+	dependents map[*ServiceContext]map[State]struct{}
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
 	shutdownC chan struct{}
 
-	stateC chan State
+	stateC       chan State // parent state channel
+	stateChangeC chan State // child state channel
 
 	// Logging channel for manage to attach to services to use
 	logC chan LogMessage
@@ -44,25 +46,31 @@ func (sc *ServiceContext) ShutdownSignal() <-chan struct{} {
 // ChangeState returns the channel the service listens for state changes of the service it depends on
 // defined by UsingServiceNotify option on creation of the ServiceContext.
 func (sc *ServiceContext) ChangeState() chan State {
-	return sc.stateC
+	return sc.stateChangeC
 }
 
 // AddDependentService adds a service that depends on the current service and the states the dependent service is interested in.
-func (sc *ServiceContext) AddDependentService(s *ServiceContext, states []State) error {
+func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State) error {
 	if sc == s {
 		return fmt.Errorf("cannot add service %s as a dependent service to itself", sc.name)
 	}
 
-	for _, state := range states {
-		children, ok := sc.dependents[state]
-		if !ok {
-			sc.dependents[state] = []*ServiceContext{s}
-			continue
-		}
-
-		children = append(children, s)
-		sc.dependents[state] = children
+	if len(states) == 0 {
+		return fmt.Errorf("cannot add dependent service %s with no interested states", sc.name)
 	}
+
+	if len(sc.dependents) == 0 {
+		sc.dependents = make(map[*ServiceContext]map[State]struct{})
+	}
+
+	interested := make(map[State]struct{})
+
+	for _, state := range states {
+		interested[state] = struct{}{}
+	}
+
+	sc.dependents[s] = interested
+
 	return nil
 }
 
@@ -74,27 +82,18 @@ func (sc *ServiceContext) notifyStateChange(state State) {
 		return
 	}
 
-	svcs, ok := sc.dependents[state]
-	if !ok {
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-sc.Ctx.Done():
+		// parent service is shutting down, exit.
+		return
+	case sc.stateC <- state:
+		// send parent state up channel so notifier routine can hold it
+		// to send down to all children that care and wait.
 		return
 	}
 
-	timer := time.NewTimer(250 * time.Millisecond)
-	defer timer.Stop()
-
-	for _, svc := range svcs {
-		if !svc.isShutdown {
-			select {
-			case <-timer.C:
-				sc.LogDebug(fmt.Sprintf("could not inform %s of state change to %s, may not be watching", svc.name, state))
-				continue
-			case svc.stateC <- state:
-				// attempt to send down channel, timeout if takes longer than 500ms
-				sc.LogDebug(fmt.Sprintf("notification sent to dependent: %s", svc.name))
-			}
-			timer.Reset(250 * time.Millisecond)
-		}
-	}
 }
 
 func (sc *ServiceContext) setIsStopped(value bool) {
@@ -114,9 +113,9 @@ func (sc *ServiceContext) shutdown() {
 	defer sc.mu.Unlock()
 	if !sc.isShutdown {
 		close(sc.shutdownC)
-		close(sc.stateC)
 		sc.cancelCtx()
 		sc.isShutdown = true
+		close(sc.stateC)
 	}
 }
 

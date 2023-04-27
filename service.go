@@ -45,16 +45,17 @@ type Service interface {
 func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ServiceContext{
-		Ctx:        ctx,
-		cancelCtx:  cancel,
-		name:       name,
-		shutdownC:  make(chan struct{}),
-		stateC:     make(chan State),
-		opts:       opts,
-		isStopped:  true,
-		isShutdown: false,
-		service:    service,
-		dependents: make(map[State][]*ServiceContext),
+		Ctx:          ctx,
+		cancelCtx:    cancel,
+		name:         name,
+		shutdownC:    make(chan struct{}),
+		stateC:       make(chan State),
+		stateChangeC: make(chan State),
+		opts:         opts,
+		isStopped:    true,
+		isShutdown:   false,
+		service:      service,
+		dependents:   make(map[*ServiceContext]map[State]struct{}),
 	}
 }
 

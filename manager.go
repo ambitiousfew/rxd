@@ -22,6 +22,39 @@ type manager struct {
 	svcCancel context.CancelFunc
 }
 
+type informed struct {
+	stopC     chan struct{}
+	completed bool
+	mu        *sync.Mutex
+}
+
+func newInformed() *informed {
+	return &informed{
+		stopC:     make(chan struct{}),
+		completed: true,
+		mu:        new(sync.Mutex),
+	}
+}
+
+func (i *informed) reset() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.stopC = make(chan struct{})
+	i.completed = true
+}
+
+func (i *informed) close() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	close(i.stopC)
+}
+
+func (i *informed) setComplete(v bool) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.completed = v
+}
+
 func NewManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -153,6 +186,11 @@ func (m *manager) start() (exitErr error) {
 
 	for _, service := range m.services {
 		m.wg.Add(1)
+
+		if len(service.dependents) > 0 {
+			// start a notifier watcher routine only for services that have children to notify of state change.
+			go m.notifier(service)
+		}
 		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(service)
 	}
@@ -180,4 +218,65 @@ func (m *manager) shutdown() {
 	if totalRunning > 0 {
 		m.logC <- NewLog(fmt.Sprintf("%d remaining services signaled to shut down.", totalRunning), Debug)
 	}
+}
+
+func (m *manager) notifier(parent *ServiceContext) {
+	lastState := InitState
+	informedChildren := make(map[*ServiceContext]*informed)
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case state := <-parent.stateC:
+			lastState = state
+			// always watch for parent state change
+			for childSvc, interestedStates := range parent.dependents {
+
+				if _, ok := interestedStates[state]; !ok {
+					// if its not a state we care about, skip it.
+					continue
+				}
+
+				informedChild, exists := informedChildren[childSvc]
+				if !exists {
+					informedChild = newInformed()
+					informedChildren[childSvc] = informedChild
+				}
+
+				if !informedChild.completed {
+					// if we are doing a state change and my previous routine is still hanging.
+					// kill it and send the newer state change.
+					informedChild.close()
+				}
+				// it has completed, so send the next update.
+				informedChild.reset()
+
+				// Go routine that always attempts to send the last known state.
+				go func(svc *ServiceContext, ls State, i *informed) {
+					defer func() {
+						close(i.stopC)
+						i.setComplete(true)
+					}()
+
+					if svc.isShutdown {
+						// if the svc is already shutdown dont bother.
+						return
+					}
+					select {
+					case <-m.ctx.Done():
+						return
+					case <-i.stopC:
+						// so we can kill this routine if we are stuck hanging and another update came in while no one was listening.
+						return
+					case svc.stateChangeC <- state:
+						// hold open forever until childSvc is ready to receive.
+						i.setComplete(true)
+						return
+					}
+				}(childSvc, lastState, informedChild)
+			}
+		}
+	}
+
 }
