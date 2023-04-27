@@ -44,7 +44,7 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 
 	logC := make(chan LogMessage, 10)
 
-	manager := NewManager(services)
+	manager := newManager(services)
 	manager.setLogCh(logC)
 
 	return &daemon{

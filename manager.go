@@ -57,7 +57,7 @@ func (i *informed) setComplete(v bool) {
 	i.completed = v
 }
 
-func NewManager(services []*ServiceContext) *manager {
+func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &manager{
