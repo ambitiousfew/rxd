@@ -76,23 +76,37 @@ func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State
 // NotifyStateChange takes a state and iterates over all child services added via UsingServiceNotify, if any
 // to notify them of the state change that occured against the service they subscribed to watch.
 func (sc *ServiceContext) notifyStateChange(state State) {
-	sc.LogDebugf("next state, %s", string(state))
 
 	// If we dont have any services to notify, dont try.
 	if len(sc.dependents) == 0 {
 		return
 	}
 
+	sc.LogDebugf("notifying dependents of next state, %s", string(state))
+
 	select {
 	case <-sc.Ctx.Done():
 		// parent service is shutting down, exit.
 		return
 	case sc.stateC <- state:
+		sc.LogDebugf("state: %s sent to %s stateC", state, sc.name)
 		// send parent state up channel so notifier routine can hold it
 		// to send down to all children that care and wait.
 		return
 	}
 
+}
+
+func (sc *ServiceContext) hasStopped() bool {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.isStopped
+}
+
+func (sc *ServiceContext) hasShutdown() bool {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.isShutdown
 }
 
 func (sc *ServiceContext) setIsStopped(value bool) {
@@ -114,7 +128,6 @@ func (sc *ServiceContext) shutdown() {
 		close(sc.shutdownC)
 		sc.cancelCtx()
 		sc.isShutdown = true
-		close(sc.stateC)
 	}
 }
 

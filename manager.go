@@ -139,7 +139,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 			svcResp.NextState = ExitState
 
 		case ExitState:
-			if !serviceCtx.isStopped {
+			if !serviceCtx.hasStopped() {
 				serviceCtx.notifyStateChange(StopState)
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 				svcResp = service.Stop(serviceCtx)
@@ -152,6 +152,8 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 			serviceCtx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
 			serviceCtx.shutdown()
+
+			close(serviceCtx.stateC)
 			return
 		}
 	}
@@ -208,7 +210,7 @@ func (m *manager) shutdown() {
 	var totalRunning int
 	// sends a signal to each service to inform them to stop running.
 	for _, serviceCtx := range m.services {
-		if !serviceCtx.isShutdown {
+		if !serviceCtx.hasShutdown() {
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", serviceCtx.name), Debug)
 			serviceCtx.shutdown()
 			totalRunning++
@@ -236,6 +238,7 @@ func (m *manager) notifier(parent *ServiceContext) {
 		case <-m.ctx.Done():
 			return
 		case state := <-parent.stateC:
+			parent.LogDebugf("notifier received state: %s for parent: %s", state, parent.name)
 			lastState = state
 			// always watch for parent state change
 			for childSvc, interestedStates := range parent.dependents {
@@ -245,7 +248,7 @@ func (m *manager) notifier(parent *ServiceContext) {
 					continue
 				}
 
-				if childSvc.isShutdown {
+				if childSvc.hasShutdown() {
 					// if the child service is already shutdown, skip...
 					continue
 				}
@@ -271,10 +274,12 @@ func (m *manager) notifier(parent *ServiceContext) {
 						i.setComplete(true)
 					}()
 
-					if svc.isShutdown {
+					if svc.hasShutdown() {
 						// if the svc is already shutdown dont bother.
 						return
 					}
+
+					// TODO: We could possible warn about a child service taking too long to receive the parents state change.
 					select {
 					case <-m.ctx.Done():
 						return
