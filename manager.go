@@ -245,6 +245,11 @@ func (m *manager) notifier(parent *ServiceContext) {
 					continue
 				}
 
+				if childSvc.isShutdown {
+					// if the child service is already shutdown, skip...
+					continue
+				}
+
 				informedChild, exists := informedChildren[childSvc]
 				if !exists {
 					informedChild = newInformed()
