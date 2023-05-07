@@ -218,7 +218,7 @@ func (m *manager) shutdown() {
 	}
 
 	if totalRunning > 0 {
-		m.logC <- NewLog(fmt.Sprintf("%d remaining services signaled to shut down.", totalRunning), Debug)
+		m.logC <- NewLog(fmt.Sprintf("%d services signaled to shut down.", totalRunning), Debug)
 	}
 }
 
@@ -230,7 +230,7 @@ func (m *manager) shutdown() {
 // between that time, to prevent out-of-sync issue we kill the go routine immediately on
 // state change and launch a new one.
 func (m *manager) notifier(parent *ServiceContext) {
-	lastState := InitState
+
 	informedChildren := make(map[*ServiceContext]*informed)
 
 	for {
@@ -238,12 +238,19 @@ func (m *manager) notifier(parent *ServiceContext) {
 		case <-m.ctx.Done():
 			return
 		case state := <-parent.stateC:
-			parent.LogDebugf("notifier received state: %s for parent: %s", state, parent.name)
-			lastState = state
-			// always watch for parent state change
-			for childSvc, interestedStates := range parent.dependents {
+			// Every service announces its own state change.
+			// notifier listens to any service considered a parent for these changes.
+			if state == "" {
+				// if we receive a close(), a nil would be sent which becomes nil of State which is ""
+				return
+			}
 
-				if _, ok := interestedStates[state]; !ok {
+			// Store the current state as our last known state.
+			lastState := state
+
+			for childSvc, interestedStates := range parent.dependents {
+				// Figure out if the dependent children care about the current state change.
+				if _, ok := interestedStates[lastState]; !ok {
 					// if its not a state we care about, skip it.
 					continue
 				}
@@ -267,11 +274,11 @@ func (m *manager) notifier(parent *ServiceContext) {
 				// it has completed, so send the next update.
 				informedChild.reset()
 
-				// Go routine that always attempts to send the last known state.
+				// Go routine that always attempts to send the last known state of parent to dependent service.
 				go func(svc *ServiceContext, ls State, i *informed) {
 					defer func() {
-						i.close()
 						i.setComplete(true)
+						i.close()
 					}()
 
 					if svc.hasShutdown() {
@@ -286,7 +293,7 @@ func (m *manager) notifier(parent *ServiceContext) {
 					case <-i.stopC:
 						// so we can kill this routine if we are stuck hanging and another update came in while no one was listening.
 						return
-					case svc.stateChangeC <- state:
+					case svc.stateChangeC <- ls:
 						// hold open forever until childSvc is ready to receive.
 						i.setComplete(true)
 						return
