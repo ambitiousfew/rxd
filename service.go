@@ -27,7 +27,7 @@ type Service interface {
 	Idle(*ServiceContext) ServiceResponse
 	Run(*ServiceContext) ServiceResponse
 	Stop(*ServiceContext) ServiceResponse
-	// TODO: Could use Init as a reloading config/env mechanism or do we want explicit Reload?
+	// TODO: Other possible states!
 	// Reload(*ServiceContext) ServiceResponse
 }
 

@@ -11,7 +11,7 @@ const (
 	// RetryUntilSuccessPolicy will continue to re-run the service as long fails happen, use for running a service once successfully
 	RetryUntilSuccessPolicy RunPolicy = "retry_until_success"
 	// RunOncePolicy will only allow the a single Run to take place regardless of success/failure
-	RunOncePolicy RunPolicy = "run_once_unbiased"
+	RunOncePolicy RunPolicy = "run_once"
 )
 
 // ServiceOption are simply using an Option pattern to customize options

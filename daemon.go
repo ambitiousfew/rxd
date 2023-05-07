@@ -14,14 +14,18 @@ type daemon struct {
 	cancel context.CancelFunc
 	wg     *sync.WaitGroup
 
+	// manager handles all service related operations: context wrapper, state changes, notifiers
 	manager *manager
 
 	// logger *Logger
 	logger Logging
 
+	// logCh is a shared logging channel daemon handles watching and logging as are running.
 	logCh chan LogMessage
 
-	stopCh    chan struct{}
+	// stopCh is used to signal to the signal watcher routine to stop.
+	stopCh chan struct{}
+	// stopLogCh is closed when daemon is exiting to stop the log watcher routine to stop.
 	stopLogCh chan struct{}
 }
 
@@ -55,8 +59,9 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 		logger:  logger,
 		logCh:   logC,
 
+		// stopCh is closed by daemon to signal the signalwatcher daemon wants to stop.
 		stopCh: make(chan struct{}),
-		// stopLogCh is closed by daemon to signal to log watcher to stop.
+		// stopLogCh
 		stopLogCh: make(chan struct{}),
 	}
 }

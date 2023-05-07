@@ -14,12 +14,10 @@ type manager struct {
 
 	services []*ServiceContext
 
+	// logC is a shared logging channel passed down from daemon and closed by daemon after manager shutdown.
 	logC chan LogMessage
-
+	// used to signal that manager has exited start() therefore is trying to stop which triggers shutdown()
 	stopCh chan struct{}
-
-	svcCtx    context.Context
-	svcCancel context.CancelFunc
 }
 
 // informed is a struct used by the manager notifier routine

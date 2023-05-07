@@ -22,8 +22,10 @@ type ServiceContext struct {
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
 	shutdownC chan struct{}
 
-	stateC       chan State // parent state channel
-	stateChangeC chan State // child state channel
+	// stateC all services report their own state changes up this channel
+	stateC chan State
+	// stateChangeC all dependent services receive parent state changes on this channel.
+	stateChangeC chan State
 
 	// Logging channel for manage to attach to services to use
 	logC chan LogMessage
@@ -51,23 +53,28 @@ func (sc *ServiceContext) ChangeState() chan State {
 // AddDependentService adds a service that depends on the current service and the states the dependent service is interested in.
 func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State) error {
 	if sc == s {
+		// a parent service should not be trying to add itself as a dependent to itself.
 		return fmt.Errorf("cannot add service %s as a dependent service to itself", sc.name)
 	}
 
 	if len(states) == 0 {
+		// since states is variadic, make sure we have at least 1 otherwise why bother calling this method.
 		return fmt.Errorf("cannot add dependent service %s with no interested states", sc.name)
 	}
 
 	if len(sc.dependents) == 0 {
+		// ensure our map isnt a nil map.
 		sc.dependents = make(map[*ServiceContext]map[State]struct{})
 	}
 
+	// hold onto the states that we were interested in.
 	interested := make(map[State]struct{})
 
 	for _, state := range states {
 		interested[state] = struct{}{}
 	}
 
+	// creating a mapping of dependent services to the states they claimed to be interested in.
 	sc.dependents[s] = interested
 
 	return nil
