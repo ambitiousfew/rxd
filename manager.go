@@ -31,7 +31,7 @@ type informed struct {
 func newInformed() *informed {
 	return &informed{
 		stopC:     make(chan struct{}),
-		completed: true,
+		completed: false,
 		mu:        new(sync.Mutex),
 	}
 }
@@ -40,20 +40,23 @@ func (i *informed) reset() {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.stopC = make(chan struct{})
-	i.completed = true
+	i.completed = false
 }
 
 func (i *informed) close() {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	close(i.stopC)
+	if !i.completed {
+		close(i.stopC)
+	}
+	i.completed = true
 }
 
-func (i *informed) setComplete(v bool) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	i.completed = v
-}
+// func (i *informed) setComplete(v bool) {
+// 	i.mu.Lock()
+// 	defer i.mu.Unlock()
+// 	i.completed = v
+// }
 
 func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -147,7 +150,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				serviceCtx.setIsStopped(true)
 			}
 			serviceCtx.notifyStateChange(ExitState)
-			serviceCtx.LogDebug("shutting down")
 			// if a close signal hasnt been sent to the service.
 			serviceCtx.shutdown()
 
@@ -262,20 +264,20 @@ func (m *manager) notifier(parent *ServiceContext) {
 				if !exists {
 					informedChild = newInformed()
 					informedChildren[childSvc] = informedChild
-				}
-
-				if !informedChild.completed {
-					// if we are doing a state change and my previous routine is still hanging.
-					// kill it and send the newer state change.
+				} else {
+					// informedChild has already been created before, its still running using outdated state
+					// and its likely still hanging waiting to send that state. We want to signal it to stop
+					// trying so we can send the newer (current) state transition being notified for now.
+					// state change.
 					informedChild.close()
+					// reset channel/completed so send the next update.
+					informedChild.reset()
 				}
-				// it has completed, so send the next update.
-				informedChild.reset()
 
 				// Go routine that always attempts to send the last known state of parent to dependent service.
 				go func(svc *ServiceContext, ls State, i *informed) {
 					defer func() {
-						i.setComplete(true)
+						// i.setComplete(true)
 						i.close()
 					}()
 
@@ -293,7 +295,7 @@ func (m *manager) notifier(parent *ServiceContext) {
 						return
 					case svc.stateChangeC <- ls:
 						// hold open forever until childSvc is ready to receive.
-						i.setComplete(true)
+						// i.setComplete(true)
 						return
 					}
 				}(childSvc, lastState, informedChild)

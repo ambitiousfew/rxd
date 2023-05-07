@@ -131,6 +131,13 @@ func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
 func (sc *ServiceContext) shutdown() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
+	// if the current service has dependents, shut them down first.
+	for dsvc := range sc.dependents {
+		sc.LogDebugf("signaling shutdown of %s dependent first", dsvc.name)
+		dsvc.shutdown()
+	}
+
+	sc.LogDebug("shutting down...")
 	if !sc.isShutdown {
 		close(sc.shutdownC)
 		sc.cancelCtx()
