@@ -212,6 +212,7 @@ func (m *manager) shutdown() {
 	var totalRunning int
 	for _, serviceCtx := range m.services {
 		if !serviceCtx.hasShutdown() && !serviceCtx.isDependent {
+			wg.Add(1)
 			// When shutting down only look for services who are not added as a dependent.
 			// This lets us signal shutdown to any parent service or individual service.
 			// Parent services will signal shutdown to all their child dependents.
