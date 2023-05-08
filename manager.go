@@ -207,6 +207,8 @@ func (m *manager) start() (exitErr error) {
 // calling each services shutdown method if it hasnt already been called by the service itself
 // on a manual Stop/Exit state before manager began its own shutdown.
 func (m *manager) shutdown() {
+	var wg sync.WaitGroup
+
 	var totalRunning int
 	for _, serviceCtx := range m.services {
 		if !serviceCtx.hasShutdown() && !serviceCtx.isDependent {
@@ -214,10 +216,19 @@ func (m *manager) shutdown() {
 			// This lets us signal shutdown to any parent service or individual service.
 			// Parent services will signal shutdown to all their child dependents.
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", serviceCtx.name), Debug)
-			serviceCtx.shutdown()
+
+			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
+			go func() {
+				defer wg.Done()
+				serviceCtx.shutdown()
+			}()
+
 			totalRunning++
 		}
 	}
+
+	// wait for all shutdown routine calls to finish.
+	wg.Wait()
 
 	if totalRunning > 0 {
 		m.logC <- NewLog(fmt.Sprintf("%d services signaled to shut down.", totalRunning), Debug)
