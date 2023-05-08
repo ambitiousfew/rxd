@@ -208,9 +208,11 @@ func (m *manager) start() (exitErr error) {
 // on a manual Stop/Exit state before manager began its own shutdown.
 func (m *manager) shutdown() {
 	var totalRunning int
-	// sends a signal to each service to inform them to stop running.
 	for _, serviceCtx := range m.services {
-		if !serviceCtx.hasShutdown() {
+		if !serviceCtx.hasShutdown() && !serviceCtx.isDependent {
+			// When shutting down only look for services who are not added as a dependent.
+			// This lets us signal shutdown to any parent service or individual service.
+			// Parent services will signal shutdown to all their child dependents.
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", serviceCtx.name), Debug)
 			serviceCtx.shutdown()
 			totalRunning++

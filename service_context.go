@@ -17,7 +17,8 @@ type ServiceContext struct {
 	service Service
 	opts    *serviceOpts
 
-	dependents map[*ServiceContext]map[State]struct{}
+	dependents  map[*ServiceContext]map[State]struct{}
+	isDependent bool
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
 	shutdownC chan struct{}
@@ -74,6 +75,7 @@ func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State
 		interested[state] = struct{}{}
 	}
 
+	s.isDependent = true
 	// creating a mapping of dependent services to the states they claimed to be interested in.
 	sc.dependents[s] = interested
 
