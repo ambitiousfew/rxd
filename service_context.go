@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.
@@ -33,8 +34,10 @@ type ServiceContext struct {
 
 	// isStopped is a flag to tell is if we have been asked to run the Stop state
 	isStopped bool
-	// isShutdown is a flag that is true if close() has been called on the ShutdownC for the service in manager shutdown method
-	isShutdown bool
+
+	// ensure a service shutdown cannot be called twice
+	shutdownCalled atomic.Int32
+
 	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
 	mu sync.Mutex
 }
@@ -113,9 +116,8 @@ func (sc *ServiceContext) hasStopped() bool {
 }
 
 func (sc *ServiceContext) hasShutdown() bool {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	return sc.isShutdown
+	// 0 has not shutdown, 1 has shutdown
+	return sc.shutdownCalled.Load() == 0
 }
 
 func (sc *ServiceContext) setIsStopped(value bool) {
@@ -131,6 +133,11 @@ func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
 }
 
 func (sc *ServiceContext) shutdown() {
+	if sc.shutdownCalled.Swap(1) == 1 {
+		// if we swap and the old value is already 1, shutdown was already called.
+		return
+	}
+
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	// if the current service has dependents, shut them down first.
@@ -140,11 +147,9 @@ func (sc *ServiceContext) shutdown() {
 	}
 
 	sc.LogDebug("shutting down...")
-	if !sc.isShutdown {
-		close(sc.shutdownC)
-		sc.cancelCtx()
-		sc.isShutdown = true
-	}
+	close(sc.shutdownC)
+	sc.cancelCtx()
+	sc.shutdownCalled.Swap(1)
 }
 
 // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info

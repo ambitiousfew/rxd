@@ -220,10 +220,10 @@ func (m *manager) shutdown() {
 
 			svc := serviceCtx // rebind loop variable
 			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
-			go func() {
+			go func(svc *ServiceContext) {
 				defer wg.Done()
 				svc.shutdown()
-			}()
+			}(svc)
 
 			totalRunning++
 		}

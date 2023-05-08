@@ -1,6 +1,9 @@
 package rxd
 
-import "context"
+import (
+	"context"
+	"sync/atomic"
+)
 
 // State is used to determine the "next state" the service should enter
 // when the current state has completed/errored returned. State should
@@ -43,8 +46,10 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		stateChangeC: make(chan State),
 		opts:         opts,
 		isStopped:    true,
-		isShutdown:   false,
-		service:      service,
-		dependents:   make(map[*ServiceContext]map[State]struct{}),
+
+		// 0 = not called, 1 = called
+		shutdownCalled: atomic.Int32{},
+		service:        service,
+		dependents:     make(map[*ServiceContext]map[State]struct{}),
 	}
 }
