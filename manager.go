@@ -217,10 +217,11 @@ func (m *manager) shutdown() {
 			// Parent services will signal shutdown to all their child dependents.
 			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", serviceCtx.name), Debug)
 
+			svc := serviceCtx // rebind loop variable
 			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
 			go func() {
 				defer wg.Done()
-				serviceCtx.shutdown()
+				svc.shutdown()
 			}()
 
 			totalRunning++
