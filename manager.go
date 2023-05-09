@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 type manager struct {
@@ -18,6 +19,8 @@ type manager struct {
 	logC chan LogMessage
 	// used to signal that manager has exited start() therefore is trying to stop which triggers shutdown()
 	stopCh chan struct{}
+
+	shutdownCalled atomic.Int32
 }
 
 // informed is a struct used by the manager notifier routine
@@ -52,12 +55,6 @@ func (i *informed) close() {
 	i.completed = true
 }
 
-// func (i *informed) setComplete(v bool) {
-// 	i.mu.Lock()
-// 	defer i.mu.Unlock()
-// 	i.completed = v
-// }
-
 func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -82,7 +79,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
 	serviceCtx.setLogChannel(m.logC)
-	serviceCtx.setIsStopped(false)
 
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
@@ -125,7 +121,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 					if svcResp.Error != nil {
 						continue
 					}
-					serviceCtx.setIsStopped(true)
+					serviceCtx.stopCalled.Store(1)
 					// If Run didnt error, we assume successful run once and stop service.
 					svcResp.NextState = ExitState
 				}
@@ -135,7 +131,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 			if svcResp.Error != nil {
 				serviceCtx.LogError(svcResp.Error.Error())
 			}
-			serviceCtx.setIsStopped(true)
+			serviceCtx.stopCalled.Store(1)
 			// Always force Exit after Stop is called.
 			svcResp.NextState = ExitState
 
@@ -147,7 +143,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				if svcResp.Error != nil {
 					m.logC <- NewLog(svcResp.Error.Error(), Error)
 				}
-				serviceCtx.setIsStopped(true)
+				serviceCtx.stopCalled.Store(1)
 			}
 			serviceCtx.notifyStateChange(ExitState)
 			// if a close signal hasnt been sent to the service.
@@ -179,22 +175,33 @@ func (m *manager) start() (exitErr error) {
 		m.logC <- NewLog("manager watching for stop signal....", Debug)
 		<-m.stopCh
 		m.logC <- NewLog("manager received stop signal", Debug)
-		m.shutdown()
-		// signal complete using context
+
+		if !m.hasShutdown() {
+			// if manager shutdown hasn't been called. call it.
+			m.shutdown()
+		}
+
+		// signal manager complete using context
 		m.cancelCtx()
 	}()
+
+	var parents int
+	var dependents int
 
 	for _, service := range m.services {
 		m.wg.Add(1)
 		if len(service.dependents) > 0 {
 			// start a notifier watcher routine only for services that have children to notify of state change.
+			parents++
 			go m.notifier(service)
+		} else {
+			dependents++
 		}
 		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(service)
 	}
 
-	m.logC <- NewLog("Started all services...", Info)
+	m.logC <- NewLog(fmt.Sprintf("Started %d services: %d parent and %d dependent", parents+dependents, parents, dependents), Debug)
 
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
@@ -203,10 +210,19 @@ func (m *manager) start() (exitErr error) {
 	return exitErr
 }
 
+func (m *manager) hasShutdown() bool {
+	return m.shutdownCalled.Load() == 1
+}
+
 // shutdown handles iterating over any remaining services that still may be running
 // calling each services shutdown method if it hasnt already been called by the service itself
 // on a manual Stop/Exit state before manager began its own shutdown.
 func (m *manager) shutdown() {
+	if m.shutdownCalled.Swap(1) == 1 {
+		// if the old val is already 1, then shutdown has already been called before, dont run twice.
+		m.logC <- NewLog("SHUTDOWN CALLED TWICE...............", Debug)
+		return
+	}
 	var wg sync.WaitGroup
 
 	var totalRunning int
@@ -229,12 +245,13 @@ func (m *manager) shutdown() {
 		}
 	}
 
+	if totalRunning > 0 {
+		m.logC <- NewLog(fmt.Sprintf("%d parent services signaled to shut down.", totalRunning), Debug)
+	}
+
 	// wait for all shutdown routine calls to finish.
 	wg.Wait()
 
-	if totalRunning > 0 {
-		m.logC <- NewLog(fmt.Sprintf("%d services signaled to shut down.", totalRunning), Debug)
-	}
 }
 
 // notifier is a goroutine launched only per parent with dependent services

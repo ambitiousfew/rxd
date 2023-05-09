@@ -100,15 +100,13 @@ func (d *daemon) Start() (exitErr error) {
 		if exitErr != nil {
 			d.logger.Error(exitErr.Error())
 		}
-		d.logger.Debug("manager routine ending")
-
 	}()
 
 	// Blocks the main thread, d.wg.Done() must finish all routines before we can continue beyond.
 	d.wg.Wait()
 	// close the logging channel - logC cannot be used after this point.
 	close(d.logCh)
-	d.logger.Debug("logging channel closed")
+	d.logger.Debug("daemon logging channel closed")
 	return exitErr
 }
 
@@ -118,7 +116,7 @@ func (d *daemon) AddService(service *ServiceContext) {
 
 func (d *daemon) signalWatcher() {
 	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.logger.Info("Daemon: starting OS signal watcher")
+	d.logger.Debug("daemon: starting OS signal watcher")
 
 	defer func() {
 		// wait to hear from manager before returning

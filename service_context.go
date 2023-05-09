@@ -36,6 +36,7 @@ type ServiceContext struct {
 	isStopped bool
 
 	// ensure a service shutdown cannot be called twice
+	stopCalled     atomic.Int32
 	shutdownCalled atomic.Int32
 
 	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
@@ -101,7 +102,6 @@ func (sc *ServiceContext) notifyStateChange(state State) {
 		// parent service is shutting down, exit.
 		return
 	case sc.stateC <- state:
-		sc.LogDebugf("state: %s sent to %s stateC", state, sc.name)
 		// send parent state up channel so notifier routine can hold it
 		// to send down to all children that care and wait.
 		return
@@ -110,20 +110,12 @@ func (sc *ServiceContext) notifyStateChange(state State) {
 }
 
 func (sc *ServiceContext) hasStopped() bool {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	return sc.isStopped
+	return sc.stopCalled.Load() == 1
 }
 
 func (sc *ServiceContext) hasShutdown() bool {
 	// 0 has not shutdown, 1 has shutdown
-	return sc.shutdownCalled.Load() == 0
-}
-
-func (sc *ServiceContext) setIsStopped(value bool) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.isStopped = value
+	return sc.shutdownCalled.Load() == 1
 }
 
 func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
@@ -138,11 +130,9 @@ func (sc *ServiceContext) shutdown() {
 		return
 	}
 
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
 	// if the current service has dependents, shut them down first.
 	for dsvc := range sc.dependents {
-		sc.LogDebugf("signaling shutdown of %s dependent first", dsvc.name)
+		sc.LogDebugf("signaling shutdown of dependent service: %s", dsvc.name)
 		dsvc.shutdown()
 	}
 
