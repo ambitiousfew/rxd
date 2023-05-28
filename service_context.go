@@ -89,7 +89,6 @@ func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State
 // NotifyStateChange takes a state and iterates over all child services added via UsingServiceNotify, if any
 // to notify them of the state change that occured against the service they subscribed to watch.
 func (sc *ServiceContext) notifyStateChange(state State) {
-
 	// If we dont have any services to notify, dont try.
 	if len(sc.dependents) == 0 {
 		return
