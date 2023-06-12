@@ -1,7 +1,6 @@
 package rxd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,9 +9,7 @@ import (
 )
 
 type daemon struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     *sync.WaitGroup
+	wg *sync.WaitGroup
 
 	// manager handles all service related operations: context wrapper, state changes, notifiers
 	manager *manager
@@ -41,8 +38,6 @@ func (d *daemon) Logger() Logging {
 
 // NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(services ...*ServiceContext) *daemon {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// default severity to log is Info level and higher.
 	logger := NewLogger(LevelDebug)
 
@@ -52,14 +47,12 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 	manager.setLogCh(logC)
 
 	return &daemon{
-		ctx:     ctx,
-		cancel:  cancel,
 		wg:      new(sync.WaitGroup),
 		manager: manager,
 		logger:  logger,
 		logCh:   logC,
 
-		// stopCh is closed by daemon to signal the signalwatcher daemon wants to stop.
+		// stopCh is closed by daemon to signal the signal watcher daemon wants to stop.
 		stopCh: make(chan struct{}),
 		// stopLogCh
 		stopLogCh: make(chan struct{}),
@@ -91,8 +84,6 @@ func (d *daemon) Start() (exitErr error) {
 			d.logger.Debug("daemon closing stopCh and stopLogCh")
 			// signal stopping of daemon
 			close(d.stopCh)
-			// Signal stop of Logging routine
-			close(d.stopLogCh)
 			d.wg.Done()
 		}()
 
@@ -116,15 +107,21 @@ func (d *daemon) AddService(service *ServiceContext) {
 
 func (d *daemon) signalWatcher() {
 	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.logger.Debug("daemon: starting OS signal watcher")
+	d.logger.Debug("daemon: starting system signal watcher")
 
 	defer func() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
-		d.logger.Debug("signalWatcher waiting for manager to finish...")
 		d.manager.shutdown()
+		d.logger.Debug("daemon signal watcher waiting for manager to finish...")
 		<-d.manager.ctx.Done()
-		d.logger.Debug("signalWatcher manager done signal received")
+		d.logger.Debug("daemon signal watcher manager done signal received")
+		// wait for signal that manager exited start()
+		<-d.manager.stopCh
+		// logging routine stays open until manager signals it finished running start().
+		// Signal stop of Logging routine
+		close(d.stopLogCh)
+
 		d.wg.Done()
 	}()
 
@@ -135,8 +132,6 @@ func (d *daemon) signalWatcher() {
 		select {
 		case <-signalC:
 			d.logger.Debug("OS signal received, cancelling context")
-			// if we get an OS signal, we need to end.
-			d.cancel()
 			return
 		case <-d.stopCh:
 			// if manager completes we are done running...

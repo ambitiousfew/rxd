@@ -177,21 +177,6 @@ func (m *manager) start() (exitErr error) {
 		close(m.stopCh)
 	}()
 
-	go func() {
-		// Watch for stop signal, perform shutdown
-		m.logC <- NewLog("manager watching for stop signal....", Debug)
-		<-m.stopCh
-		m.logC <- NewLog("manager received stop signal", Debug)
-
-		if !m.hasShutdown() {
-			// if manager shutdown hasn't been called. call it.
-			m.shutdown()
-		}
-
-		// signal manager complete using context
-		m.cancelCtx()
-	}()
-
 	var parents int
 	var dependents int
 
@@ -243,10 +228,10 @@ func (m *manager) shutdown() {
 
 			svc := serviceCtx // rebind loop variable
 			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
-			go func(svc *ServiceContext) {
+			go func() {
 				defer wg.Done()
 				svc.shutdown()
-			}(svc)
+			}()
 
 			totalRunning++
 		}
@@ -256,7 +241,10 @@ func (m *manager) shutdown() {
 		m.logC <- NewLog(fmt.Sprintf("%d parent services signaled to shut down.", totalRunning), Debug)
 	}
 
+	m.logC <- NewLog("manager cancelling context", Debug)
+	m.cancelCtx()
 	// wait for all shutdown routine calls to finish.
+	m.logC <- NewLog("manager waiting for all services to shutdown", Debug)
 	wg.Wait()
 	m.logC <- NewLog("cleaning up intercom pub/sub", Debug)
 	// close/cleanup our intercom pub/sub.

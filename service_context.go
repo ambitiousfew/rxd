@@ -23,9 +23,6 @@ type ServiceContext struct {
 
 	isDependent bool
 
-	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
-	shutdownC chan struct{}
-
 	// stateC all services report their own state changes up this channel
 	stateC chan State
 	// stateChangeC all dependent services receive parent state changes on this channel.
@@ -161,7 +158,6 @@ func (sc *ServiceContext) shutdown() {
 	}
 
 	sc.LogDebug("shutting down...")
-	close(sc.shutdownC)
 	sc.cancelCtx()
 	sc.shutdownCalled.Swap(1)
 }

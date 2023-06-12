@@ -41,7 +41,6 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		Ctx:          ctx,
 		cancelCtx:    cancel,
 		name:         name,
-		shutdownC:    make(chan struct{}),
 		stateC:       make(chan State),
 		stateChangeC: make(chan State),
 		opts:         opts,

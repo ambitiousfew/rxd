@@ -63,10 +63,10 @@ func TestDaemonSignalWatcherByStopC(t *testing.T) {
 	close(d.stopCh)
 
 	select {
-	case <-d.ctx.Done():
-		t.Errorf("daemon signalWatcher did not stop the correct way")
 	case <-d.stopCh:
 		return
+	default:
+		t.Errorf("daemon signalWatcher did not stop the correct way")
 	}
 }
 
