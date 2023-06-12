@@ -18,7 +18,9 @@ type ServiceContext struct {
 	service Service
 	opts    *serviceOpts
 
-	dependents  map[*ServiceContext]map[State]struct{}
+	dependents map[*ServiceContext]map[State]struct{}
+	intercom   *intercom
+
 	isDependent bool
 
 	// ShutdownC is provided to each service to give the ability to watch for a shutdown signal.
@@ -53,6 +55,23 @@ func (sc *ServiceContext) ShutdownSignal() <-chan struct{} {
 // defined by UsingServiceNotify option on creation of the ServiceContext.
 func (sc *ServiceContext) ChangeState() chan State {
 	return sc.stateChangeC
+}
+
+// IntercomSubscribe subscribes this service to inter-service communication by its topic name.
+// A channel is returned to receive published messages from another service.
+// Standardized on slice of bytes since it allows us to easily json unmarshal into struct if needed.
+func (sc *ServiceContext) IntercomSubscribe(topic string) <-chan []byte {
+	return sc.intercom.subscribe(topic, sc.name)
+}
+
+// IntercomUnsubscribe unsubscribes this service from inter-service communication by its topic name
+func (sc *ServiceContext) IntercomUnsubscribe(topic string) {
+	sc.intercom.unsubscribe(topic, sc.name)
+}
+
+// IntercomPublish will publish the bytes message to the topic, only if there is subscribed interest.
+func (sc *ServiceContext) IntercomPublish(topic string, message []byte) {
+	sc.intercom.publish(topic, message)
 }
 
 // AddDependentService adds a service that depends on the current service and the states the dependent service is interested in.
@@ -121,6 +140,12 @@ func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.logC = logC
+}
+
+func (sc *ServiceContext) setIntercom(intercom *intercom) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.intercom = intercom
 }
 
 func (sc *ServiceContext) shutdown() {

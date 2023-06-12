@@ -14,6 +14,7 @@ type manager struct {
 	wg *sync.WaitGroup
 
 	services []*ServiceContext
+	intercom *intercom
 
 	// logC is a shared logging channel passed down from daemon and closed by daemon after manager shutdown.
 	logC chan LogMessage
@@ -57,7 +58,7 @@ func (i *informed) close() {
 
 func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
-
+	channels := make(map[string]map[string]chan []byte)
 	return &manager{
 		ctx:       ctx,
 		cancelCtx: cancel,
@@ -65,6 +66,11 @@ func newManager(services []*ServiceContext) *manager {
 		wg:        new(sync.WaitGroup),
 		// stopCh is closed by daemon to signal to manager to stop services
 		stopCh: make(chan struct{}),
+		// intercom will be passed to each service to share for inter-service comms
+		intercom: &intercom{
+			mu:       new(sync.Mutex),
+			channels: channels,
+		},
 	}
 }
 
@@ -78,6 +84,7 @@ func (m *manager) setLogCh(logC chan LogMessage) {
 func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
+	serviceCtx.setIntercom(m.intercom)
 	serviceCtx.setLogChannel(m.logC)
 
 	// All services begin at Init stage
@@ -251,7 +258,9 @@ func (m *manager) shutdown() {
 
 	// wait for all shutdown routine calls to finish.
 	wg.Wait()
-
+	m.logC <- NewLog("cleaning up intercom pub/sub", Debug)
+	// close/cleanup our intercom pub/sub.
+	m.intercom.close()
 }
 
 // notifier is a goroutine launched only per parent with dependent services
