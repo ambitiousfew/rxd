@@ -175,21 +175,30 @@ func (m *manager) start() (exitErr error) {
 
 	var parents int
 	var dependents int
+	var independents int
+	var total int
 
 	for _, service := range m.services {
 		m.wg.Add(1)
 		if len(service.dependents) > 0 {
 			// start a notifier watcher routine only for services that have children to notify of state change.
 			parents++
+			dependents += len(service.dependents)
 			go m.notifier(service)
 		} else {
-			dependents++
+			independents++
 		}
 		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(service)
 	}
 
-	m.logC <- NewLog(fmt.Sprintf("Started %d services: %d parent and %d dependent", parents+dependents, parents, dependents), Debug)
+	total = parents + dependents + independents
+
+	if parents == 0 && dependents == 0 {
+		m.logC <- NewLog(fmt.Sprintf("Started %d services", total), Debug)
+	} else {
+		m.logC <- NewLog(fmt.Sprintf("Started %d services: %d (p), %d (d), and %d (i)", total, parents, dependents, independents), Debug)
+	}
 
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.

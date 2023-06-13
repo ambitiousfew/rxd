@@ -1,7 +1,6 @@
 package rxd
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -64,13 +63,8 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 //     manager to shutdown all services, blocks until finishes.
 //  2. Log watcher that handles all logging from manager and services through a channel.
 //  3. Manager routine to handle running and managing services.
-func (d *daemon) Start() (exitErr error) {
-	defer func() {
-		// capture any panics, convert to error to return
-		if rErr := recover(); rErr != nil {
-			exitErr = fmt.Errorf("%s", rErr)
-		}
-	}()
+func (d *daemon) Start() error {
+	var err error
 
 	d.wg.Add(3)
 	// OS Signal watcher routine.
@@ -87,10 +81,7 @@ func (d *daemon) Start() (exitErr error) {
 			d.wg.Done()
 		}()
 
-		exitErr = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
-		if exitErr != nil {
-			d.logger.Error(exitErr.Error())
-		}
+		err = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
 	}()
 
 	// Blocks the main thread, d.wg.Done() must finish all routines before we can continue beyond.
@@ -98,7 +89,7 @@ func (d *daemon) Start() (exitErr error) {
 	// close the logging channel - logC cannot be used after this point.
 	close(d.logCh)
 	d.logger.Debug("daemon logging channel closed")
-	return exitErr
+	return err
 }
 
 func (d *daemon) AddService(service *ServiceContext) {
