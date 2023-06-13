@@ -5,9 +5,19 @@ import (
 )
 
 type intercom struct {
-	mu       *sync.Mutex
-	channels map[string]map[string]chan []byte
-	closed   bool
+	mu          *sync.Mutex
+	channels    map[string]map[string]chan []byte
+	closed      bool
+	lastMessage map[string][]byte
+}
+
+func NewIntercom() *intercom {
+	return &intercom{
+		mu:          new(sync.Mutex),
+		channels:    make(map[string]map[string]chan []byte),
+		closed:      false,
+		lastMessage: make(map[string][]byte),
+	}
 }
 
 func (i *intercom) subscribe(topic, consumer string) <-chan []byte {
@@ -19,6 +29,11 @@ func (i *intercom) subscribe(topic, consumer string) <-chan []byte {
 	if !exists {
 		// if the topic does not yet exist, create an empty subs map for that topic.
 		i.channels[topic] = make(map[string]chan []byte)
+	}
+
+	if i.lastMessage[topic] != nil {
+		// if there is a previously stored message for this topic, send it upon subscribe.
+		ch <- i.lastMessage[topic]
 	}
 
 	if _, exists := subs[consumer]; exists {
@@ -56,6 +71,9 @@ func (i *intercom) publish(topic string, message []byte) {
 	for _, ch := range i.channels[topic] {
 		ch <- message
 	}
+
+	// store the published message as the previous message sent
+	i.lastMessage[topic] = message
 }
 
 func (i *intercom) close() {

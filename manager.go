@@ -58,7 +58,6 @@ func (i *informed) close() {
 
 func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	channels := make(map[string]map[string]chan []byte)
 	return &manager{
 		ctx:       ctx,
 		cancelCtx: cancel,
@@ -67,10 +66,7 @@ func newManager(services []*ServiceContext) *manager {
 		// stopCh is closed by daemon to signal to manager to stop services
 		stopCh: make(chan struct{}),
 		// intercom will be passed to each service to share for inter-service comms
-		intercom: &intercom{
-			mu:       new(sync.Mutex),
-			channels: channels,
-		},
+		intercom: NewIntercom(),
 	}
 }
 
