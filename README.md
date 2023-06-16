@@ -1,4 +1,6 @@
 # RxDaemon
+[![codecov](https://codecov.io/gh/ambitiousfew/rxd/branch/main/graph/badge.svg?token=3VTUQEX7HC)](https://codecov.io/gh/ambitiousfew/rxd)
+
 A simple (alpha) reactive services daemon
 
 ## Example Service Template
