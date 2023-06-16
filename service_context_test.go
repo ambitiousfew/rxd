@@ -31,7 +31,6 @@ func TestServiceContextShutdownSuccessful(t *testing.T) {
 	opts := NewServiceOpts()
 	validSvc := NewService("valid-service", vs, opts)
 	// Ensure service has a logC so it wont hang on channel based logging.
-	validSvc.logC = make(chan LogMessage, 5)
 
 	validSvc.shutdown()
 	want := int32(1)
@@ -71,14 +70,11 @@ func TestServiceContextNotifyStateWithDependents(t *testing.T) {
 	optsChild := NewServiceOpts()
 	validSvcChild := NewService("valid-child-service", vsChild, optsChild)
 
-	// Ensure service has a logC so it wont hang on channel based logging.
-	validSvcParent.logC = make(chan LogMessage, 5)
-
 	want := IdleState
 
 	err := validSvcParent.AddDependentService(validSvcChild, want)
 	if err != nil {
-		t.Errorf("ServiceContext %s AddDependentService had an error: %s", validSvcParent.name, err)
+		t.Errorf("ServiceContext %s AddDependentService had an error: %s", validSvcParent.Name, err)
 	}
 	// we cancel the service context immediately so it should always run first.
 	testCtx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
@@ -101,10 +97,10 @@ func TestServiceContextNotifyStateWithDependents(t *testing.T) {
 
 	select {
 	case <-testCtx.Done():
-		t.Errorf("ServiceContext %s notifyChangeState did not complete in a reasonable amount of time", validSvcParent.name)
+		t.Errorf("ServiceContext %s notifyChangeState did not complete in a reasonable amount of time", validSvcParent.Name)
 	case state := <-validSvcParent.stateC:
 		if want != state {
-			t.Errorf("ServiceContext %s did not receive correct state change. want: %s, got: %s", validSvcChild.name, want, state)
+			t.Errorf("ServiceContext %s did not receive correct state change. want: %s, got: %s", validSvcChild.Name, want, state)
 		}
 	}
 }
@@ -114,16 +110,13 @@ func TestServiceContextAddSelfAsDependent(t *testing.T) {
 	optsParent := NewServiceOpts()
 	validSvcParent := NewService("valid-parent-service", vsParent, optsParent)
 
-	// Ensure service has a logC so it wont hang on channel based logging.
-	validSvcParent.logC = make(chan LogMessage, 5)
-
 	err := validSvcParent.AddDependentService(validSvcParent, IdleState)
 	if err == nil {
-		t.Errorf("ServiceContext %s AddDependentService should not be able to add itself as a dependent", validSvcParent.name)
+		t.Errorf("ServiceContext %s AddDependentService should not be able to add itself as a dependent", validSvcParent.Name)
 	}
 
 	if len(validSvcParent.dependents) > 0 {
-		t.Errorf("ServiceContext %s AddDependentService should not have dependents when trying to add itself as one", validSvcParent.name)
+		t.Errorf("ServiceContext %s AddDependentService should not have dependents when trying to add itself as one", validSvcParent.Name)
 	}
 }
 
@@ -136,16 +129,13 @@ func TestServiceContextAddChildAsDependent(t *testing.T) {
 	optsChild := NewServiceOpts()
 	validSvcChild := NewService("valid-child-service", vsChild, optsChild)
 
-	// Ensure service has a logC so it wont hang on channel based logging.
-	validSvcParent.logC = make(chan LogMessage, 5)
-
 	err := validSvcParent.AddDependentService(validSvcChild, IdleState)
 	if err != nil {
-		t.Errorf("ServiceContext %s AddDependentService errored with: %s", validSvcParent.name, err)
+		t.Errorf("ServiceContext %s AddDependentService errored with: %s", validSvcParent.Name, err)
 	}
 
 	if len(validSvcParent.dependents) < 1 {
-		t.Errorf("ServiceContext %s AddDependentService should have dependents. want %d, got: %d", validSvcParent.name, 1, len(validSvcChild.dependents))
+		t.Errorf("ServiceContext %s AddDependentService should have dependents. want %d, got: %d", validSvcParent.Name, 1, len(validSvcChild.dependents))
 	}
 }
 
@@ -158,26 +148,23 @@ func TestServiceContextAddDependentNoStates(t *testing.T) {
 	optsChild := NewServiceOpts()
 	validSvcChild := NewService("valid-child-service", vsChild, optsChild)
 
-	// Ensure service has a logC so it wont hang on channel based logging.
-	validSvcParent.logC = make(chan LogMessage, 5)
-
 	err := validSvcParent.AddDependentService(validSvcChild)
 	if err == nil {
-		t.Errorf("ServiceContext %s AddDependentService should not be able to add a child service with no interested states", validSvcParent.name)
+		t.Errorf("ServiceContext %s AddDependentService should not be able to add a child service with no interested states", validSvcParent.Name)
 	}
 }
 
-func TestServiceContextServiceLogHelper(t *testing.T) {
-	vsParent := &validService{}
-	optsParent := NewServiceOpts()
-	validSvcParent := NewService("valid-parent-service", vsParent, optsParent)
+// func TestServiceContextServiceLogHelper(t *testing.T) {
+// 	vsParent := &validService{}
+// 	optsParent := NewServiceOpts()
+// 	validSvcParent := NewService("valid-parent-service", vsParent, optsParent)
 
-	// // Ensure service has a logC so it wont hang on channel based logging.
-	// validSvcParent.logC = make(chan LogMessage, 5)
-	want := "valid-parent-service test"
-	got := serviceLog(validSvcParent, "test")
+// 	// // Ensure service has a logC so it wont hang on channel based logging.
+// 	// validSvcParent.logC = make(chan LogMessage, 5)
+// 	want := "valid-parent-service test"
+// 	got := serviceLog(validSvcParent, "test")
 
-	if want != got {
-		t.Errorf("serviceLog helper did not return correct string: want %s, got %s", want, got)
-	}
-}
+// 	if want != got {
+// 		t.Errorf("serviceLog helper did not return correct string: want %s, got %s", want, got)
+// 	}
+// }

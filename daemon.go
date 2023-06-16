@@ -16,18 +16,20 @@ type daemon struct {
 	// logger *Logger
 	logger Logging
 
-	// logCh is a shared logging channel daemon handles watching and logging as are running.
-	logCh chan LogMessage
-
 	// stopCh is used to signal to the signal watcher routine to stop.
 	stopCh chan struct{}
 	// stopLogCh is closed when daemon is exiting to stop the log watcher routine to stop.
 	stopLogCh chan struct{}
 }
 
-// SetLogSeverity allows for the logging to be scoped to severity level
-func (d *daemon) SetLogger(logger Logging) {
+// SetCustomLogger set a custom logger that meets logging interface for the daemon to use.
+func (d *daemon) SetCustomLogger(logger Logging) {
 	d.logger = logger
+}
+
+// SetDefaultLogger allows for default logger to be defined with customized logging flags.
+func (d *daemon) SetDefaultLogger(flags int) {
+	d.logger = NewLogger(LevelInfo, flags)
 }
 
 // Logger returns the instance of the daemon logger
@@ -38,18 +40,15 @@ func (d *daemon) Logger() Logging {
 // NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(services ...*ServiceContext) *daemon {
 	// default severity to log is Info level and higher.
-	logger := NewLogger(LevelDebug)
-
-	logC := make(chan LogMessage, 10)
+	logger := NewLogger(LevelInfo, NoFlags)
 
 	manager := newManager(services)
-	manager.setLogCh(logC)
+	manager.setLogger(logger)
 
 	return &daemon{
 		wg:      new(sync.WaitGroup),
 		manager: manager,
 		logger:  logger,
-		logCh:   logC,
 
 		// stopCh is closed by daemon to signal the signal watcher daemon wants to stop.
 		stopCh: make(chan struct{}),
@@ -66,11 +65,9 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 func (d *daemon) Start() error {
 	var err error
 
-	d.wg.Add(3)
+	d.wg.Add(2)
 	// OS Signal watcher routine.
 	go d.signalWatcher()
-	// Logging routine.
-	go d.logWatcher()
 
 	// Run manager in its own thread so all wait using waitgroup
 	go func() {
@@ -86,8 +83,7 @@ func (d *daemon) Start() error {
 
 	// Blocks the main thread, d.wg.Done() must finish all routines before we can continue beyond.
 	d.wg.Wait()
-	// close the logging channel - logC cannot be used after this point.
-	close(d.logCh)
+
 	d.logger.Debug("daemon logging channel closed")
 	return err
 }
@@ -98,7 +94,7 @@ func (d *daemon) AddService(service *ServiceContext) {
 
 func (d *daemon) signalWatcher() {
 	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.logger.Debug("daemon: starting system signal watcher")
+	d.logger.Debug("daemon starting system signal watcher")
 
 	defer func() {
 		// wait to hear from manager before returning
@@ -122,33 +118,12 @@ func (d *daemon) signalWatcher() {
 	for {
 		select {
 		case <-signalC:
-			d.logger.Debug("OS signal received, cancelling context")
+			d.logger.Debug("daemon os signal received, cancelling context")
 			return
 		case <-d.stopCh:
 			// if manager completes we are done running...
 			d.logger.Debug("daemon received stop signal")
 			return
-		}
-	}
-}
-
-func (d *daemon) logWatcher() {
-	defer d.wg.Done()
-
-	for {
-		select {
-		case <-d.stopLogCh:
-			d.logger.Debug("stopping log watcher routine")
-			return
-		case logMsg := <-d.logCh:
-			switch logMsg.Level {
-			case Debug:
-				d.logger.Debug(logMsg.Message)
-			case Info:
-				d.logger.Info(logMsg.Message)
-			case Error:
-				d.logger.Error(logMsg.Message)
-			}
 		}
 	}
 }

@@ -18,7 +18,7 @@ func NewSimpleService() *SimpleService {
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *SimpleService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 
-	c.LogInfo("has entered the run state")
+	c.Log.Info("has entered the run state")
 
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -31,7 +31,7 @@ func (s *SimpleService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 
 		case <-timer.C:
 			// When 5 seconds has elapsed, log hello, then end the service.
-			c.LogInfo("hello")
+			c.Log.Info("hello")
 			return rxd.NewResponse(nil, rxd.StopState)
 		}
 
@@ -66,7 +66,7 @@ func main() {
 
 	// since MyLogger meets the Logging interface we can allow the daemon to use it.
 	logger := &MyLogger{}
-	daemon.SetLogger(logger)
+	daemon.SetCustomLogger(logger)
 
 	err := daemon.Start() // Blocks main thread
 	if err != nil {

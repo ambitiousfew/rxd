@@ -10,10 +10,11 @@ import (
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.
 // This config contains preconfigured shutdown channel,
 type ServiceContext struct {
-	Ctx       context.Context
-	cancelCtx context.CancelFunc
+	Name string
+	Ctx  context.Context
+	Log  Logging
 
-	name string
+	cancelCtx context.CancelFunc
 
 	service Service
 	opts    *serviceOpts
@@ -27,9 +28,6 @@ type ServiceContext struct {
 	stateC chan State
 	// stateChangeC all dependent services receive parent state changes on this channel.
 	stateChangeC chan State
-
-	// Logging channel for manage to attach to services to use
-	logC chan LogMessage
 
 	// isStopped is a flag to tell is if we have been asked to run the Stop state
 	isStopped bool
@@ -57,13 +55,13 @@ func (sc *ServiceContext) ChangeState() chan State {
 // IntercomSubscribe subscribes this service to inter-service communication by its topic name.
 // A channel is returned to receive published messages from another service.
 // Standardized on slice of bytes since it allows us to easily json unmarshal into struct if needed.
-func (sc *ServiceContext) IntercomSubscribe(topic string) <-chan []byte {
-	return sc.intercom.subscribe(topic, sc.name)
+func (sc *ServiceContext) IntercomSubscribe(topic string, id string) <-chan []byte {
+	return sc.intercom.subscribe(topic, id)
 }
 
 // IntercomUnsubscribe unsubscribes this service from inter-service communication by its topic name
-func (sc *ServiceContext) IntercomUnsubscribe(topic string) {
-	sc.intercom.unsubscribe(topic, sc.name)
+func (sc *ServiceContext) IntercomUnsubscribe(topic string, id string) {
+	sc.intercom.unsubscribe(topic, id)
 }
 
 // IntercomPublish will publish the bytes message to the topic, only if there is subscribed interest.
@@ -75,12 +73,12 @@ func (sc *ServiceContext) IntercomPublish(topic string, message []byte) {
 func (sc *ServiceContext) AddDependentService(s *ServiceContext, states ...State) error {
 	if sc == s {
 		// a parent service should not be trying to add itself as a dependent to itself.
-		return fmt.Errorf("cannot add service %s as a dependent service to itself", sc.name)
+		return fmt.Errorf("cannot add service %s as a dependent service to itself", sc.Name)
 	}
 
 	if len(states) == 0 {
 		// since states is variadic, make sure we have at least 1 otherwise why bother calling this method.
-		return fmt.Errorf("cannot add dependent service %s with no interested states", sc.name)
+		return fmt.Errorf("cannot add dependent service %s with no interested states", sc.Name)
 	}
 
 	if len(sc.dependents) == 0 {
@@ -110,7 +108,7 @@ func (sc *ServiceContext) notifyStateChange(state State) {
 		return
 	}
 
-	sc.LogDebugf("notifying dependents of next state, %s", string(state))
+	sc.Log.Debugf("%s notifying dependents of next state, %s", sc.Name, string(state))
 
 	select {
 	case <-sc.Ctx.Done():
@@ -133,11 +131,11 @@ func (sc *ServiceContext) hasShutdown() bool {
 	return sc.shutdownCalled.Load() == 1
 }
 
-func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.logC = logC
-}
+// func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
+// 	sc.mu.Lock()
+// 	defer sc.mu.Unlock()
+// 	sc.logC = logC
+// }
 
 func (sc *ServiceContext) setIntercom(intercom *intercom) {
 	sc.mu.Lock()
@@ -153,46 +151,46 @@ func (sc *ServiceContext) shutdown() {
 
 	// if the current service has dependents, shut them down first.
 	for dsvc := range sc.dependents {
-		sc.LogDebugf("signaling shutdown of dependent service: %s", dsvc.name)
+		sc.Log.Debugf("signaling shutdown of dependent service: %s", dsvc.Name)
 		dsvc.shutdown()
 	}
 
-	sc.LogDebug("shutting down...")
+	sc.Log.Debugf("%s shutting down...", sc.Name)
 	sc.cancelCtx()
 	sc.shutdownCalled.Swap(1)
 }
 
-// LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
-func (sc *ServiceContext) LogInfo(message string) {
-	sc.logC <- NewLog(serviceLog(sc, message), Info)
-}
+// // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
+// func (sc *ServiceContext) LogInfo(message string) {
+// 	sc.logC <- NewLog(serviceLog(sc, message), Info)
+// }
 
-// LogInfof takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
-func (sc *ServiceContext) LogInfof(msg string, v ...any) {
-	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Info)
-}
+// // LogInfof takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
+// func (sc *ServiceContext) LogInfof(msg string, v ...any) {
+// 	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Info)
+// }
 
-// LogDebug takes a string message and sends it down the logC channel as a LogMessage type with log level of Debug
-func (sc *ServiceContext) LogDebug(message string) {
-	sc.logC <- NewLog(serviceLog(sc, message), Debug)
-}
+// // LogDebug takes a string message and sends it down the logC channel as a LogMessage type with log level of Debug
+// func (sc *ServiceContext) LogDebug(message string) {
+// 	sc.logC <- NewLog(serviceLog(sc, message), Debug)
+// }
 
-// LogDebugf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
-func (sc *ServiceContext) LogDebugf(msg string, v ...any) {
-	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Debug)
-}
+// // LogDebugf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
+// func (sc *ServiceContext) LogDebugf(msg string, v ...any) {
+// 	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Debug)
+// }
 
-// LogError takes a string message and sends it down the logC channel as a LogMessage type with log level of Error
-func (sc *ServiceContext) LogError(message string) {
-	sc.logC <- NewLog(serviceLog(sc, message), Error)
-}
+// // LogError takes a string message and sends it down the logC channel as a LogMessage type with log level of Error
+// func (sc *ServiceContext) LogError(message string) {
+// 	sc.logC <- NewLog(serviceLog(sc, message), Error)
+// }
 
-// LogErrorf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
-func (sc *ServiceContext) LogErrorf(msg string, v ...any) {
-	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Error)
-}
+// // LogErrorf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
+// func (sc *ServiceContext) LogErrorf(msg string, v ...any) {
+// 	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Error)
+// }
 
-// serviceLog is a helper that prefixes log string messages with the service name
-func serviceLog(sc *ServiceContext, message string) string {
-	return fmt.Sprintf("%s %s", sc.name, message)
-}
+// // serviceLog is a helper that prefixes log string messages with the service name
+// func serviceLog(sc *ServiceContext, message string) string {
+// 	return fmt.Sprintf("%s %s", sc.name, message)
+// }

@@ -1,7 +1,6 @@
 package rxd
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -38,9 +37,7 @@ func TestManagerStart(t *testing.T) {
 
 	services := []*ServiceContext{validSvc}
 
-	logC := make(chan LogMessage, 10)
 	manager := newManager(services)
-	manager.setLogCh(logC)
 
 	errC := make(chan error)
 	go func() {
@@ -59,29 +56,24 @@ func TestManagerStart(t *testing.T) {
 	}
 }
 
-func TestManagerSetLogC(t *testing.T) {
-	services := []*ServiceContext{}
+// func TestManagerSetLogC(t *testing.T) {
+// 	services := []*ServiceContext{}
 
-	logC := make(chan LogMessage, 2)
+// 	logC := make(chan LogMessage, 2)
 
-	manager := newManager(services)
-	manager.setLogCh(logC)
+// 	manager := newManager(services)
 
-	go func() {
-		logC <- LogMessage{Message: "test", Level: Info}
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+// 	go func() {
+// 		logC <- LogMessage{Message: "test", Level: Info}
+// 	}()
+// 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+// 	defer cancel()
 
-	select {
-	case <-ctx.Done():
-		t.Errorf("Manager setLogC failed at setting correct log channel due to timeout")
-	case logMsg := <-manager.logC:
-		if logMsg.Message != "test" || logMsg.Level != Info {
-			t.Errorf("Manager setLogC failed at setting correct log channel")
-		}
-	}
-}
+// 	select {
+// 	case <-ctx.Done():
+// 		t.Errorf("Manager setLogC failed at setting correct log channel due to timeout")
+// 	}
+// }
 
 func TestManagerStartService(t *testing.T) {
 	mock := &MockService{mockC: make(chan State)}
@@ -90,9 +82,7 @@ func TestManagerStartService(t *testing.T) {
 
 	services := []*ServiceContext{}
 
-	logC := make(chan LogMessage, 10)
 	manager := newManager(services)
-	manager.setLogCh(logC)
 	manager.wg.Add(1)
 	go manager.startService(mockSvc)
 	states := make([]State, 0)

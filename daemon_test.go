@@ -6,9 +6,15 @@ import (
 
 type testLogger struct{}
 
-func (tl *testLogger) Info(v any)  {}
-func (tl *testLogger) Debug(v any) {}
-func (tl *testLogger) Error(v any) {}
+func (tl *testLogger) Debug(v ...any) {}
+func (tl *testLogger) Info(v ...any)  {}
+func (tl *testLogger) Warn(v ...any)  {}
+func (tl *testLogger) Error(v ...any) {}
+
+func (tl *testLogger) Debugf(format string, v ...any) {}
+func (tl *testLogger) Infof(format string, v ...any)  {}
+func (tl *testLogger) Warnf(format string, v ...any)  {}
+func (tl *testLogger) Errorf(format string, v ...any) {}
 
 func TestDaemonSetLogger(t *testing.T) {
 	vs := &validService{}
@@ -17,7 +23,7 @@ func TestDaemonSetLogger(t *testing.T) {
 
 	d := NewDaemon(validSvc)
 	tLogger := &testLogger{}
-	d.SetLogger(tLogger)
+	d.SetCustomLogger(tLogger)
 
 	if d.logger != tLogger {
 		t.Errorf("daemon SetLogger did not set the correct logging instance")
@@ -31,7 +37,7 @@ func TestDaemonGetLogger(t *testing.T) {
 
 	d := NewDaemon(validSvc)
 	tLogger := &testLogger{}
-	d.SetLogger(tLogger)
+	d.SetCustomLogger(tLogger)
 
 	if d.Logger() != tLogger {
 		t.Errorf("daemon Logger did not return the correct logging instance")

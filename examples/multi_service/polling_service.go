@@ -54,7 +54,7 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
-	c.LogInfo(fmt.Sprintf("has started to poll"))
+	c.Log.Info(fmt.Sprintf("has started to poll"))
 	var pollCount int
 	for {
 		select {
@@ -68,13 +68,13 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 			}
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				c.LogInfo(fmt.Sprintf("has reached its maximum poll count, stopping service"))
+				c.Log.Info(fmt.Sprintf("has reached its maximum poll count, stopping service"))
 				return rxd.NewResponse(nil, rxd.StopState)
 			}
 
 			resp, err := s.client.Get(s.apiBase + "/api")
 			if err != nil {
-				c.LogError(err.Error())
+				c.Log.Error(err.Error())
 				// if we error, reset timer and try again...
 				timer.Reset(s.retryDuration)
 				continue
@@ -84,18 +84,18 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 			resp.Body.Close()
 
 			if err != nil {
-				c.LogError(err.Error())
+				c.Log.Error(err.Error())
 				// we could return to new state: idle or stop or just continue
 			}
 
 			var respBody map[string]any
 			err = json.Unmarshal(respBytes, &respBody)
 			if err != nil {
-				c.LogError(err.Error())
+				c.Log.Error(err.Error())
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			c.LogInfo(fmt.Sprintf("received response from the API: %v", respBody))
+			c.Log.Info(fmt.Sprintf("received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 

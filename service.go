@@ -2,6 +2,7 @@ package rxd
 
 import (
 	"context"
+	"log"
 	"sync/atomic"
 )
 
@@ -36,11 +37,14 @@ type Service interface {
 
 // NewService creates a new service instance given a name and options.
 func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
+	if opts.logger == nil {
+		opts.logger = NewLogger(LevelInfo, log.LstdFlags|log.Lmsgprefix|log.Lshortfile)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ServiceContext{
 		Ctx:          ctx,
 		cancelCtx:    cancel,
-		name:         name,
+		Name:         name,
 		stateC:       make(chan State),
 		stateChangeC: make(chan State),
 		opts:         opts,
@@ -50,5 +54,6 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		shutdownCalled: atomic.Int32{},
 		service:        service,
 		dependents:     make(map[*ServiceContext]map[State]struct{}),
+		Log:            opts.logger,
 	}
 }

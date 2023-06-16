@@ -16,8 +16,7 @@ type manager struct {
 	services []*ServiceContext
 	intercom *intercom
 
-	// logC is a shared logging channel passed down from daemon and closed by daemon after manager shutdown.
-	logC chan LogMessage
+	log Logging
 	// used to signal that manager has exited start() therefore is trying to stop which triggers shutdown()
 	stopCh chan struct{}
 
@@ -70,8 +69,9 @@ func newManager(services []*ServiceContext) *manager {
 	}
 }
 
-func (m *manager) setLogCh(logC chan LogMessage) {
-	m.logC = logC
+// setLogger sets the passed in logging instance as the logger for manager and all services within manager.
+func (m *manager) setLogger(logger Logging) {
+	m.log = logger
 }
 
 // startService is run by manager in its own routine
@@ -81,7 +81,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
 	serviceCtx.setIntercom(m.intercom)
-	serviceCtx.setLogChannel(m.logC)
 
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
@@ -97,19 +96,19 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 		case InitState:
 			svcResp = service.Init(serviceCtx)
 			if svcResp.Error != nil {
-				m.logC <- NewLog(svcResp.Error.Error(), Error)
+				serviceCtx.Log.Errorf("%s %s", serviceCtx.Name, svcResp.Error.Error())
 			}
 
 		case IdleState:
 			svcResp = service.Idle(serviceCtx)
 			if svcResp.Error != nil {
-				serviceCtx.LogError(svcResp.Error.Error())
+				serviceCtx.Log.Errorf("%s %s", serviceCtx.Name, svcResp.Error.Error())
 			}
 
 		case RunState:
 			svcResp = service.Run(serviceCtx)
 			if svcResp.Error != nil {
-				serviceCtx.LogError(svcResp.Error.Error())
+				serviceCtx.Log.Errorf("%s %s", serviceCtx.Name, svcResp.Error.Error())
 			}
 
 			// Enforce Run policies
@@ -132,7 +131,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 		case StopState:
 			svcResp = service.Stop(serviceCtx)
 			if svcResp.Error != nil {
-				serviceCtx.LogError(svcResp.Error.Error())
+				serviceCtx.Log.Errorf("%s %s", serviceCtx.Name, svcResp.Error.Error())
 			}
 			serviceCtx.stopCalled.Store(1)
 			// Always force Exit after Stop is called.
@@ -144,7 +143,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
 				svcResp = service.Stop(serviceCtx)
 				if svcResp.Error != nil {
-					m.logC <- NewLog(svcResp.Error.Error(), Error)
+					serviceCtx.Log.Errorf("%s %s", serviceCtx.Name, svcResp.Error.Error())
 				}
 				serviceCtx.stopCalled.Store(1)
 			}
@@ -195,15 +194,15 @@ func (m *manager) start() (exitErr error) {
 	total = parents + dependents + independents
 
 	if parents == 0 && dependents == 0 {
-		m.logC <- NewLog(fmt.Sprintf("Started %d services", total), Debug)
+		m.log.Debugf("started %d services", total)
 	} else {
-		m.logC <- NewLog(fmt.Sprintf("Started %d services: %d (p), %d (d), and %d (i)", total, parents, dependents, independents), Debug)
+		m.log.Debugf("started %d services: %d (p), %d (d), and %d (i)", total, parents, dependents, independents)
 	}
 
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
 	m.wg.Wait()
-	m.logC <- NewLog("All services have stopped running", Info)
+	m.log.Info("stopped running all services")
 	return exitErr
 }
 
@@ -217,7 +216,7 @@ func (m *manager) hasShutdown() bool {
 func (m *manager) shutdown() {
 	if m.shutdownCalled.Swap(1) == 1 {
 		// if the old val is already 1, then shutdown has already been called before, dont run twice.
-		m.logC <- NewLog("SHUTDOWN CALLED TWICE...............", Debug)
+		m.log.Debug("shutdown was called twice....")
 		return
 	}
 	var wg sync.WaitGroup
@@ -229,8 +228,7 @@ func (m *manager) shutdown() {
 			// When shutting down only look for services who are not added as a dependent.
 			// This lets us signal shutdown to any parent service or individual service.
 			// Parent services will signal shutdown to all their child dependents.
-			m.logC <- NewLog(fmt.Sprintf("Signaling stop of service: %s", serviceCtx.name), Debug)
-
+			m.log.Debugf("signaling stop of service: %s", serviceCtx.Name)
 			svc := serviceCtx // rebind loop variable
 			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
 			go func() {
@@ -243,16 +241,14 @@ func (m *manager) shutdown() {
 	}
 
 	if totalRunning > 0 {
-		m.logC <- NewLog(fmt.Sprintf("%d parent services signaled to shut down.", totalRunning), Debug)
+		m.log.Debugf("signaled %d parent services to shut down.", totalRunning)
 	}
-
-	m.logC <- NewLog("manager cancelling context", Debug)
+	m.log.Debug("cancelling context")
 	m.cancelCtx()
 	// wait for all shutdown routine calls to finish.
-	m.logC <- NewLog("manager waiting for all services to shutdown", Debug)
+	m.log.Debug("waiting for all services to shutdown")
 	wg.Wait()
-	m.logC <- NewLog("cleaning up intercom pub/sub", Debug)
-	// close/cleanup our intercom pub/sub.
+	m.log.Debug("cleaning up intracom")
 	m.intercom.close()
 }
 
