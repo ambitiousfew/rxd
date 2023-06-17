@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ambitiousfew/intracom"
 )
 
 type manager struct {
@@ -14,7 +16,7 @@ type manager struct {
 	wg *sync.WaitGroup
 
 	services []*ServiceContext
-	intercom *intercom
+	intracom *intracom.Intracom[[]byte]
 
 	log Logging
 	// used to signal that manager has exited start() therefore is trying to stop which triggers shutdown()
@@ -57,6 +59,8 @@ func (i *informed) close() {
 
 func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
+	ic := intracom.New[[]byte]()
+
 	return &manager{
 		ctx:       ctx,
 		cancelCtx: cancel,
@@ -65,7 +69,7 @@ func newManager(services []*ServiceContext) *manager {
 		// stopCh is closed by daemon to signal to manager to stop services
 		stopCh: make(chan struct{}),
 		// intercom will be passed to each service to share for inter-service comms
-		intercom: NewIntercom(),
+		intracom: ic,
 	}
 }
 
@@ -80,7 +84,7 @@ func (m *manager) setLogger(logger Logging) {
 func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
-	serviceCtx.setIntercom(m.intercom)
+	serviceCtx.setIntracom(m.intracom)
 
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
@@ -249,7 +253,7 @@ func (m *manager) shutdown() {
 	m.log.Debug("waiting for all services to shutdown")
 	wg.Wait()
 	m.log.Debug("cleaning up intracom")
-	m.intercom.close()
+	m.intracom.Close()
 }
 
 // notifier is a goroutine launched only per parent with dependent services

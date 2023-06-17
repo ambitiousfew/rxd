@@ -3,8 +3,11 @@ package rxd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ambitiousfew/intracom"
 )
 
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.
@@ -20,7 +23,7 @@ type ServiceContext struct {
 	opts    *serviceOpts
 
 	dependents map[*ServiceContext]map[State]struct{}
-	intercom   *intercom
+	intracom   *intracom.Intracom[[]byte]
 
 	isDependent bool
 
@@ -52,21 +55,34 @@ func (sc *ServiceContext) ChangeState() chan State {
 	return sc.stateChangeC
 }
 
-// IntercomSubscribe subscribes this service to inter-service communication by its topic name.
+// IntracomSubscribe subscribes this service to inter-service communication by its topic name.
 // A channel is returned to receive published messages from another service.
 // Standardized on slice of bytes since it allows us to easily json unmarshal into struct if needed.
-func (sc *ServiceContext) IntercomSubscribe(topic string, id string) <-chan []byte {
-	return sc.intercom.subscribe(topic, id)
+func (sc *ServiceContext) IntracomSubscribe(topic string, id string) <-chan []byte {
+	if strings.HasPrefix(topic, "_") {
+		sc.Log.Warnf("%s is trying to subscribe using a reserved topic prefix '%s', auto-removing prefix")
+		topic = strings.Replace(topic, "_", "", 1)
+	}
+
+	return sc.intracom.Subscribe(topic, id)
 }
 
-// IntercomUnsubscribe unsubscribes this service from inter-service communication by its topic name
-func (sc *ServiceContext) IntercomUnsubscribe(topic string, id string) {
-	sc.intercom.unsubscribe(topic, id)
+// IntracomUnsubscribe unsubscribes this service from inter-service communication by its topic name
+func (sc *ServiceContext) IntracomUnsubscribe(topic string, id string) {
+	if strings.HasPrefix(topic, "_") {
+		sc.Log.Warnf("%s is trying to unsubscribe using a reserved topic prefix '%s', auto-removing prefix")
+		topic = strings.Replace(topic, "_", "", 1)
+	}
+	sc.intracom.Unsubscribe(topic, id)
 }
 
-// IntercomPublish will publish the bytes message to the topic, only if there is subscribed interest.
-func (sc *ServiceContext) IntercomPublish(topic string, message []byte) {
-	sc.intercom.publish(topic, message)
+// IntracomPublish will publish the bytes message to the topic, only if there is subscribed interest.
+func (sc *ServiceContext) IntracomPublish(topic string, message []byte) {
+	if strings.HasPrefix(topic, "_") {
+		sc.Log.Warnf("%s is trying to publish using a reserved topic prefix '%s', auto-removing prefix")
+		topic = strings.Replace(topic, "_", "", 1)
+	}
+	sc.intracom.Publish(topic, message)
 }
 
 // AddDependentService adds a service that depends on the current service and the states the dependent service is interested in.
@@ -131,16 +147,10 @@ func (sc *ServiceContext) hasShutdown() bool {
 	return sc.shutdownCalled.Load() == 1
 }
 
-// func (sc *ServiceContext) setLogChannel(logC chan LogMessage) {
-// 	sc.mu.Lock()
-// 	defer sc.mu.Unlock()
-// 	sc.logC = logC
-// }
-
-func (sc *ServiceContext) setIntercom(intercom *intercom) {
+func (sc *ServiceContext) setIntracom(intracom *intracom.Intracom[[]byte]) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	sc.intercom = intercom
+	sc.intracom = intracom
 }
 
 func (sc *ServiceContext) shutdown() {
@@ -159,38 +169,3 @@ func (sc *ServiceContext) shutdown() {
 	sc.cancelCtx()
 	sc.shutdownCalled.Swap(1)
 }
-
-// // LogInfo takes a string message and sends it down the logC channel as a LogMessage type with log level of Info
-// func (sc *ServiceContext) LogInfo(message string) {
-// 	sc.logC <- NewLog(serviceLog(sc, message), Info)
-// }
-
-// // LogInfof takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
-// func (sc *ServiceContext) LogInfof(msg string, v ...any) {
-// 	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Info)
-// }
-
-// // LogDebug takes a string message and sends it down the logC channel as a LogMessage type with log level of Debug
-// func (sc *ServiceContext) LogDebug(message string) {
-// 	sc.logC <- NewLog(serviceLog(sc, message), Debug)
-// }
-
-// // LogDebugf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
-// func (sc *ServiceContext) LogDebugf(msg string, v ...any) {
-// 	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Debug)
-// }
-
-// // LogError takes a string message and sends it down the logC channel as a LogMessage type with log level of Error
-// func (sc *ServiceContext) LogError(message string) {
-// 	sc.logC <- NewLog(serviceLog(sc, message), Error)
-// }
-
-// // LogErrorf takes a string message and variadic params and sends it into Sprintf to be passed down the logC channel.
-// func (sc *ServiceContext) LogErrorf(msg string, v ...any) {
-// 	sc.logC <- NewLog(serviceLog(sc, fmt.Sprintf(msg, v...)), Error)
-// }
-
-// // serviceLog is a helper that prefixes log string messages with the service name
-// func serviceLog(sc *ServiceContext, message string) string {
-// 	return fmt.Sprintf("%s %s", sc.name, message)
-// }
