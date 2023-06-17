@@ -25,11 +25,12 @@ type daemon struct {
 // SetCustomLogger set a custom logger that meets logging interface for the daemon to use.
 func (d *daemon) SetCustomLogger(logger Logging) {
 	d.logger = logger
+	d.manager.setLogger(logger)
 }
 
 // SetDefaultLogger allows for default logger to be defined with customized logging flags.
-func (d *daemon) SetDefaultLogger(flags int) {
-	d.logger = NewLogger(LevelInfo, flags)
+func (d *daemon) SetDefaultLogger(level LogSeverity, flags int) {
+	d.logger = NewLogger(level, flags)
 }
 
 // Logger returns the instance of the daemon logger
