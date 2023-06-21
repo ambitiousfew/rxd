@@ -59,7 +59,7 @@ func (sc *ServiceContext) ChangeState() chan State {
 // A channel is returned to receive published messages from another service.
 // Standardized on slice of bytes since it allows us to easily json unmarshal into struct if needed.
 func (sc *ServiceContext) IntracomSubscribe(topic string, id string) <-chan []byte {
-	return sc.intracom.Subscribe(topic, id)
+	return sc.intracom.Subscribe(topic, id, 1)
 }
 
 // IntracomUnsubscribe unsubscribes this service from inter-service communication by its topic name
