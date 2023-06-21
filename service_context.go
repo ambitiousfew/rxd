@@ -59,20 +59,11 @@ func (sc *ServiceContext) ChangeState() chan State {
 // A channel is returned to receive published messages from another service.
 // Standardized on slice of bytes since it allows us to easily json unmarshal into struct if needed.
 func (sc *ServiceContext) IntracomSubscribe(topic string, id string) <-chan []byte {
-	if strings.HasPrefix(topic, "_") {
-		sc.Log.Warnf("%s is trying to subscribe using a reserved topic prefix '%s', auto-removing prefix")
-		topic = strings.Replace(topic, "_", "", 1)
-	}
-
 	return sc.intracom.Subscribe(topic, id)
 }
 
 // IntracomUnsubscribe unsubscribes this service from inter-service communication by its topic name
 func (sc *ServiceContext) IntracomUnsubscribe(topic string, id string) {
-	if strings.HasPrefix(topic, "_") {
-		sc.Log.Warnf("%s is trying to unsubscribe using a reserved topic prefix '%s', auto-removing prefix")
-		topic = strings.Replace(topic, "_", "", 1)
-	}
 	sc.intracom.Unsubscribe(topic, id)
 }
 

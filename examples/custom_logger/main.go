@@ -18,7 +18,7 @@ func NewSimpleService() *SimpleService {
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *SimpleService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 
-	c.Log.Info("has entered the run state")
+	c.Log.Infof("%s has entered the run state", c.Name)
 
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()

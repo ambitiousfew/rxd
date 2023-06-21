@@ -93,12 +93,14 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	for {
 		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
 		serviceCtx.notifyStateChange(svcResp.NextState)
+		serviceCtx.intracom.Publish(fmt.Sprintf("_rxd.%s.state", serviceCtx.Name), []byte(string(svcResp.NextState)))
 		// Determine the next state the service should be in.
 		// Run the method associated with the next state.
 		switch svcResp.NextState {
 
 		case InitState:
-			svcResp = service.Init(serviceCtx)
+
+			svcResp = service.Init(serviceCtx) //blocking
 			if svcResp.Error != nil {
 				serviceCtx.Log.Errorf("%s %s", serviceCtx.Name, svcResp.Error.Error())
 			}

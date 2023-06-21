@@ -63,16 +63,36 @@ var _ rxd.Service = &SimpleService{}
 // Custom Logger use a struct that implements Debug, Info, Error to meet the Logging interface.
 type MyLogger struct{}
 
-func (ml *MyLogger) Debug(v any) {
-	fmt.Printf("[DBG] %s", v)
+func (ml *MyLogger) Debug(v ...any) {
+	fmt.Printf("[DBG] %s", v...)
 }
 
-func (ml *MyLogger) Info(v any) {
-	fmt.Printf("[INF] %s", v)
+func (ml *MyLogger) Debugf(format string, v ...any) {
+	fmt.Printf("[DBG] %s", fmt.Sprintf(format, v...))
 }
 
-func (ml *MyLogger) Error(v any) {
-	fmt.Printf("[ERR] %s", v)
+func (ml *MyLogger) Info(v ...any) {
+	fmt.Printf("[INF] %s", v...)
+}
+
+func (ml *MyLogger) Infof(format string, v ...any) {
+	fmt.Printf("[INF] %s", fmt.Sprintf(format, v...))
+}
+
+func (ml *MyLogger) Warn(v ...any) {
+	fmt.Printf("[WRN] %s", v...)
+}
+
+func (ml *MyLogger) Warnf(format string, v ...any) {
+	fmt.Printf("[WRN] %s", v...)
+}
+
+func (ml *MyLogger) Error(v ...any) {
+	fmt.Printf("[ERR] %s", v...)
+}
+
+func (ml *MyLogger) Errorf(format string, v ...any) {
+	fmt.Printf("[ERR] %s", fmt.Sprintf(format, v...))
 }
 
 ```
@@ -81,9 +101,10 @@ func (ml *MyLogger) Error(v any) {
 // Example entrypoint
 func main() {
 	// We create an instance of our service
-	simpleService := &SimpleService{}
-	// We create an instance of our ServiceConfig
+	simpleService := NewSimpleService()
+  // RunUntilStoppedPolicy is the default, could alternatively just use rxd.NewServiceOpts()
 	svcOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy))
+	// We create an instance of our ServiceConfig
 	simpleRxdService := rxd.NewService("SimpleService", simpleService, svcOpts)
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
@@ -91,7 +112,7 @@ func main() {
 
 	// since MyLogger meets the Logging interface we can allow the daemon to use it.
 	logger := &MyLogger{}
-	daemon.SetLogger(logger)
+	daemon.SetCustomLogger(logger)
 
 	err := daemon.Start() // Blocks main thread
 	if err != nil {
