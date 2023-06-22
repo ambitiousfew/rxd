@@ -2,6 +2,7 @@ package rxd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,9 @@ type manager struct {
 	wg *sync.WaitGroup
 
 	services []*ServiceContext
+
+	// states map reflects the state of a given service
+	states   map[string]State
 	intracom *intracom.Intracom[[]byte]
 
 	log Logging
@@ -23,6 +27,8 @@ type manager struct {
 	stopCh chan struct{}
 
 	shutdownCalled atomic.Int32
+
+	mu *sync.RWMutex
 }
 
 // informed is a struct used by the manager notifier routine
@@ -61,15 +67,23 @@ func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	ic := intracom.New[[]byte]()
 
+	states := make(map[string]State)
+
+	for _, sc := range services {
+		states[sc.Name] = InitState
+	}
+
 	return &manager{
 		ctx:       ctx,
 		cancelCtx: cancel,
 		services:  services,
+		states:    states,
 		wg:        new(sync.WaitGroup),
 		// stopCh is closed by daemon to signal to manager to stop services
 		stopCh: make(chan struct{}),
 		// intercom will be passed to each service to share for inter-service comms
 		intracom: ic,
+		mu:       new(sync.RWMutex),
 	}
 }
 
@@ -91,9 +105,9 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	service := serviceCtx.service
 
 	for {
+		m.updateStates(serviceCtx.Name, svcResp.NextState)
 		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
 		serviceCtx.notifyStateChange(svcResp.NextState)
-		serviceCtx.intracom.Publish(fmt.Sprintf("_rxd.%s.state", serviceCtx.Name), []byte(string(svcResp.NextState)))
 		// Determine the next state the service should be in.
 		// Run the method associated with the next state.
 		switch svcResp.NextState {
@@ -183,6 +197,14 @@ func (m *manager) start() (exitErr error) {
 	var independents int
 	var total int
 
+	statesBytes, err := json.Marshal(m.states)
+	if err != nil {
+		exitErr = err
+		return exitErr
+	}
+
+	m.intracom.Publish(InternalServiceStates, statesBytes)
+
 	for _, service := range m.services {
 		m.wg.Add(1)
 		if len(service.dependents) > 0 {
@@ -193,6 +215,7 @@ func (m *manager) start() (exitErr error) {
 		} else {
 			independents++
 		}
+
 		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(service)
 	}
@@ -256,6 +279,27 @@ func (m *manager) shutdown() {
 	wg.Wait()
 	m.log.Debug("cleaning up intracom")
 	m.intracom.Close()
+}
+
+func (m *manager) updateStates(serviceName string, state State) {
+	m.mu.RLock()
+	currState, found := m.states[serviceName]
+	m.mu.RUnlock()
+	if found && currState == state {
+		// if we exist in the map already and the state isnt actually a change.
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.states[serviceName] = state
+	statesBytes, err := json.Marshal(m.states)
+	if err != nil {
+		m.log.Debugf("manager error during marshal of states map: %s", err)
+		return
+	}
+	m.intracom.Publish("_rxd.states", statesBytes)
 }
 
 // notifier is a goroutine launched only per parent with dependent services
