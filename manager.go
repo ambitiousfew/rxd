@@ -19,8 +19,9 @@ type manager struct {
 	services []*ServiceContext
 
 	// states map reflects the state of a given service
-	states   map[string]State
-	intracom *intracom.Intracom[[]byte]
+	states       map[string]State
+	stateUpdateC chan stateUpdate
+	intracom     *intracom.Intracom[[]byte]
 
 	log Logging
 	// used to signal that manager has exited start() therefore is trying to stop which triggers shutdown()
@@ -28,7 +29,7 @@ type manager struct {
 
 	shutdownCalled atomic.Int32
 
-	mu *sync.RWMutex
+	mu *sync.Mutex
 }
 
 // informed is a struct used by the manager notifier routine
@@ -74,16 +75,17 @@ func newManager(services []*ServiceContext) *manager {
 	}
 
 	return &manager{
-		ctx:       ctx,
-		cancelCtx: cancel,
-		services:  services,
-		states:    states,
-		wg:        new(sync.WaitGroup),
+		ctx:          ctx,
+		cancelCtx:    cancel,
+		services:     services,
+		states:       states,
+		stateUpdateC: make(chan stateUpdate, len(services)),
+		wg:           new(sync.WaitGroup),
 		// stopCh is closed by daemon to signal to manager to stop services
 		stopCh: make(chan struct{}),
 		// intercom will be passed to each service to share for inter-service comms
 		intracom: ic,
-		mu:       new(sync.RWMutex),
+		mu:       new(sync.Mutex),
 	}
 }
 
@@ -105,7 +107,7 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	service := serviceCtx.service
 
 	for {
-		m.updateStates(serviceCtx.Name, svcResp.NextState)
+		m.updateServiceState(serviceCtx.Name, svcResp.NextState)
 		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
 		serviceCtx.notifyStateChange(svcResp.NextState)
 		// Determine the next state the service should be in.
@@ -203,7 +205,25 @@ func (m *manager) start() (exitErr error) {
 		return exitErr
 	}
 
-	m.intracom.Publish(InternalServiceStates, statesBytes)
+	stateUpdateStopC := make(chan struct{})
+	// Add the stateUpdate watcher
+	go func() {
+		for {
+			select {
+			case <-stateUpdateStopC:
+				return
+			case update := <-m.stateUpdateC:
+				currState, found := m.states[update.Name]
+				if found && currState == update.State {
+					// skip any non-changes from previous state.
+					continue
+				}
+
+				m.states[update.Name] = update.State
+				m.intracom.Publish(InternalServiceStates, statesBytes)
+			}
+		}
+	}()
 
 	for _, service := range m.services {
 		m.wg.Add(1)
@@ -231,6 +251,11 @@ func (m *manager) start() (exitErr error) {
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
 	m.wg.Wait()
+	// all services are done running their lifecycles beyond this point.
+
+	close(stateUpdateStopC)
+	close(m.stateUpdateC)
+
 	m.log.Info("stopped running all services")
 	return exitErr
 }
@@ -281,25 +306,8 @@ func (m *manager) shutdown() {
 	m.intracom.Close()
 }
 
-func (m *manager) updateStates(serviceName string, state State) {
-	m.mu.RLock()
-	currState, found := m.states[serviceName]
-	m.mu.RUnlock()
-	if found && currState == state {
-		// if we exist in the map already and the state isnt actually a change.
-		return
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.states[serviceName] = state
-	statesBytes, err := json.Marshal(m.states)
-	if err != nil {
-		m.log.Debugf("manager error during marshal of states map: %s", err)
-		return
-	}
-	m.intracom.Publish("_rxd.states", statesBytes)
+func (m *manager) updateServiceState(serviceName string, state State) {
+	m.stateUpdateC <- stateUpdate{Name: serviceName, State: state}
 }
 
 // notifier is a goroutine launched only per parent with dependent services

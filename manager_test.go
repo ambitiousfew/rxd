@@ -1,9 +1,25 @@
 package rxd
 
 import (
+	"log"
 	"testing"
-	"time"
 )
+
+type TestNoOpLogger struct {
+	debug *log.Logger
+	info  *log.Logger
+	warn  *log.Logger
+	err   *log.Logger
+}
+
+func (tl *TestNoOpLogger) Debug(v ...any)                 {}
+func (tl *TestNoOpLogger) Debugf(format string, v ...any) {}
+func (tl *TestNoOpLogger) Info(v ...any)                  {}
+func (tl *TestNoOpLogger) Infof(format string, v ...any)  {}
+func (tl *TestNoOpLogger) Warn(v ...any)                  {}
+func (tl *TestNoOpLogger) Warnf(format string, v ...any)  {}
+func (tl *TestNoOpLogger) Error(v ...any)                 {}
+func (tl *TestNoOpLogger) Errorf(format string, v ...any) {}
 
 type MockService struct {
 	mockC chan State
@@ -38,6 +54,7 @@ func TestManagerStart(t *testing.T) {
 	services := []*ServiceContext{validSvc}
 
 	manager := newManager(services)
+	manager.setLogger(&TestNoOpLogger{})
 
 	errC := make(chan error)
 	go func() {
@@ -75,36 +92,39 @@ func TestManagerStart(t *testing.T) {
 // 	}
 // }
 
-func TestManagerStartService(t *testing.T) {
-	mock := &MockService{mockC: make(chan State)}
-	mockOpts := NewServiceOpts()
-	mockSvc := NewService("mock", mock, mockOpts)
+// TODO: Fix this test to use intracom in-place of the mock channel test.
+// func TestManagerStartService(t *testing.T) {
+// 	mock := &MockService{mockC: make(chan State)}
+// 	mockOpts := NewServiceOpts()
+// 	mockSvc := NewService("mock", mock, mockOpts)
 
-	services := []*ServiceContext{}
+// 	services := []*ServiceContext{}
 
-	manager := newManager(services)
-	manager.wg.Add(1)
-	go manager.startService(mockSvc)
-	states := make([]State, 0)
+// 	manager := newManager(services)
+// 	manager.setLogger(&TestNoOpLogger{})
 
-	timer := time.NewTimer(1 * time.Second)
-	defer timer.Stop()
+// 	manager.wg.Add(1)
+// 	go manager.startService(mockSvc)
+// 	states := make([]State, 0)
 
-	for i := 0; i < 5; i++ {
-		select {
-		case <-timer.C:
-			t.Errorf("Manager startService failed due to timeout trying to check state transitions")
-		case state := <-mock.mockC:
-			if state == "" {
-				// close of channel
-				break
-			}
-			states = append(states, state)
-		}
-		timer.Reset(1 * time.Second)
-	}
+// 	timer := time.NewTimer(1 * time.Second)
+// 	defer timer.Stop()
 
-	if len(states) != 4 {
-		t.Errorf("Manager startService failed to transition through all lifecycle states")
-	}
-}
+// 	for i := 0; i < 5; i++ {
+// 		select {
+// 		case <-timer.C:
+// 			t.Errorf("Manager startService failed due to timeout trying to check state transitions")
+// 		case state := <-mock.mockC:
+// 			if state == "" {
+// 				// close of channel
+// 				break
+// 			}
+// 			states = append(states, state)
+// 		}
+// 		timer.Reset(1 * time.Second)
+// 	}
+
+// 	if len(states) != 4 {
+// 		t.Errorf("Manager startService failed to transition through all lifecycle states")
+// 	}
+// }

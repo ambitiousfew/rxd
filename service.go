@@ -6,6 +6,11 @@ import (
 	"sync/atomic"
 )
 
+type stateUpdate struct {
+	Name  string
+	State State
+}
+
 // State is used to determine the "next state" the service should enter
 // when the current state has completed/errored returned. State should
 // reflect different states that the interface can enter.
