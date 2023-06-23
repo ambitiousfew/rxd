@@ -199,12 +199,6 @@ func (m *manager) start() (exitErr error) {
 	var independents int
 	var total int
 
-	statesBytes, err := json.Marshal(m.states)
-	if err != nil {
-		exitErr = err
-		return exitErr
-	}
-
 	stateUpdateStopC := make(chan struct{})
 	// Add the stateUpdate watcher
 	go func() {
@@ -220,6 +214,13 @@ func (m *manager) start() (exitErr error) {
 				}
 
 				m.states[update.Name] = update.State
+
+				statesBytes, err := json.Marshal(m.states)
+				if err != nil {
+					m.log.Debugf("manager error marshalling updated states map: %s", err)
+					continue
+				}
+
 				m.intracom.Publish(InternalServiceStates, statesBytes)
 			}
 		}
