@@ -100,8 +100,6 @@ func (m *manager) setLogger(logger Logging) {
 func (m *manager) startService(serviceCtx *ServiceContext) {
 	defer m.wg.Done()
 
-	serviceCtx.setIntracom(m.intracom)
-
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
 	service := serviceCtx.service
@@ -227,6 +225,7 @@ func (m *manager) start() (exitErr error) {
 	}()
 
 	for _, service := range m.services {
+		s := service
 		m.wg.Add(1)
 		if len(service.dependents) > 0 {
 			// start a notifier watcher routine only for services that have children to notify of state change.
@@ -236,9 +235,9 @@ func (m *manager) start() (exitErr error) {
 		} else {
 			independents++
 		}
-
+		s.setIntracom(m.intracom)
 		// Start each service in its own routine logic / conditional lifecycle.
-		go m.startService(service)
+		go m.startService(s)
 	}
 
 	total = parents + dependents + independents
