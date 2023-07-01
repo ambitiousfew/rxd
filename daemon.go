@@ -1,6 +1,7 @@
 package rxd
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -65,27 +66,40 @@ func NewDaemon(services ...*ServiceContext) *daemon {
 //  3. Manager routine to handle running and managing services.
 func (d *daemon) Start() error {
 	var err error
+	if len(d.manager.services) < 1 {
+		return fmt.Errorf("no services were provided to rxd daemon to start")
+	}
 
-	d.wg.Add(2)
+	d.wg.Add(3)
 	// OS Signal watcher routine.
 	go d.signalWatcher()
+
+	// Add the managers stateUpdate watcher
+	stateWatcherStopC := make(chan struct{})
+	go func() {
+		// manager service states watcher routine.
+		// needs to be outside manager start waitgroup
+		// since we are trying to stop this after start is done.
+		defer d.wg.Done()
+		d.manager.serviceStateWatcher(stateWatcherStopC)
+	}()
 
 	// Run manager in its own thread so all wait using waitgroup
 	go func() {
 		defer func() {
-			d.logger.Debug("daemon closing stopCh and stopLogCh")
+			d.logger.Debug("rxdaemon closing stopCh and stopLogCh")
+			// when manager start is done, stop serviceStateWatcher
+			close(stateWatcherStopC)
 			// signal stopping of daemon
 			close(d.stopCh)
 			d.wg.Done()
 		}()
-
 		err = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
 	}()
-
 	// Blocks the main thread, d.wg.Done() must finish all routines before we can continue beyond.
 	d.wg.Wait()
 
-	d.logger.Debug("daemon logging channel closed")
+	d.logger.Debug("rxdaemon is exiting")
 	return err
 }
 
@@ -95,17 +109,18 @@ func (d *daemon) AddService(service *ServiceContext) {
 
 func (d *daemon) signalWatcher() {
 	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.logger.Debug("daemon starting system signal watcher")
+	d.logger.Debug("rxdaemon starting system signal watcher")
 
 	defer func() {
 		// wait to hear from manager before returning
 		// might still be sending messages.
 		d.manager.shutdown()
-		d.logger.Debug("daemon signal watcher waiting for manager to finish...")
+		d.logger.Debug("rxdaemon signal watcher waiting for manager to finish shutting down...")
 		<-d.manager.ctx.Done()
-		d.logger.Debug("daemon signal watcher manager done signal received")
+		d.logger.Debug("rxdaemon signal watcher manager received done signal from manager shutdown")
 		// wait for signal that manager exited start()
 		<-d.manager.stopCh
+		d.logger.Debug("rxdaemon signal watcher received signal that manager has exited start")
 		// logging routine stays open until manager signals it finished running start().
 		// Signal stop of Logging routine
 		close(d.stopLogCh)
@@ -113,17 +128,17 @@ func (d *daemon) signalWatcher() {
 		d.wg.Done()
 	}()
 
-	signalC := make(chan os.Signal)
+	signalC := make(chan os.Signal, 1)
 	signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
 
 	for {
 		select {
 		case <-signalC:
-			d.logger.Debug("daemon os signal received, cancelling context")
+			d.logger.Debug("rxdaemon os signal received, cancelling context")
 			return
 		case <-d.stopCh:
 			// if manager completes we are done running...
-			d.logger.Debug("daemon received stop signal")
+			d.logger.Debug("rxdaemon received stop signal")
 			return
 		}
 	}

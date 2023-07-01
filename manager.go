@@ -19,8 +19,8 @@ type manager struct {
 	services []*ServiceContext
 
 	// states map reflects the state of a given service
-	states       map[string]State
-	stateUpdateC chan stateUpdate
+	states       States
+	stateUpdateC chan StateUpdate
 	intracom     *intracom.Intracom[[]byte]
 
 	log Logging
@@ -68,18 +68,12 @@ func newManager(services []*ServiceContext) *manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	ic := intracom.New[[]byte]()
 
-	states := make(map[string]State)
-
-	for _, sc := range services {
-		states[sc.Name] = InitState
-	}
-
 	return &manager{
-		ctx:          ctx,
-		cancelCtx:    cancel,
-		services:     services,
-		states:       states,
-		stateUpdateC: make(chan stateUpdate, len(services)),
+		ctx:       ctx,
+		cancelCtx: cancel,
+		services:  services,
+		// N services * 2 (possible states)
+		stateUpdateC: make(chan StateUpdate, len(services)*2),
 		wg:           new(sync.WaitGroup),
 		// stopCh is closed by daemon to signal to manager to stop services
 		stopCh: make(chan struct{}),
@@ -167,7 +161,6 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 				}
 				serviceCtx.stopCalled.Store(1)
 			}
-			serviceCtx.notifyStateChange(ExitState)
 			// if a close signal hasnt been sent to the service.
 			serviceCtx.shutdown()
 
@@ -189,7 +182,10 @@ func (m *manager) start() (exitErr error) {
 			exitErr = fmt.Errorf("%s", rErr)
 		}
 
-		close(m.stopCh)
+		m.log.Debug("manager closing intracom")
+		m.intracom.Close()
+		m.log.Debug("manager has finished close on intracom")
+		close(m.stopCh) // signal to daemon signal watcher
 	}()
 
 	var parents int
@@ -197,36 +193,8 @@ func (m *manager) start() (exitErr error) {
 	var independents int
 	var total int
 
-	stateUpdateStopC := make(chan struct{})
-	// Add the stateUpdate watcher
-	go func() {
-		for {
-			select {
-			case <-stateUpdateStopC:
-				return
-			case update := <-m.stateUpdateC:
-				currState, found := m.states[update.Name]
-				if found && currState == update.State {
-					// skip any non-changes from previous state.
-					continue
-				}
-
-				m.states[update.Name] = update.State
-
-				statesBytes, err := json.Marshal(m.states)
-				if err != nil {
-					m.log.Debugf("manager error marshalling updated states map: %s", err)
-					continue
-				}
-
-				m.intracom.Publish(InternalServiceStates, statesBytes)
-			}
-		}
-	}()
-
 	for _, service := range m.services {
 		s := service
-		m.wg.Add(1)
 		if len(service.dependents) > 0 {
 			// start a notifier watcher routine only for services that have children to notify of state change.
 			parents++
@@ -237,26 +205,24 @@ func (m *manager) start() (exitErr error) {
 		}
 		s.setIntracom(m.intracom)
 		// Start each service in its own routine logic / conditional lifecycle.
+		m.wg.Add(1)
 		go m.startService(s)
 	}
 
 	total = parents + dependents + independents
 
 	if parents == 0 && dependents == 0 {
-		m.log.Debugf("started %d services", total)
+		m.log.Debugf("manager has started %d services", total)
 	} else {
-		m.log.Debugf("started %d services: %d (p), %d (d), and %d (i)", total, parents, dependents, independents)
+		m.log.Debugf("manager has started %d services: %d (p), %d (d), and %d (i)", total, parents, dependents, independents)
 	}
 
 	// Main thread blocking forever infinite loop to select between
 	//  listening for OS Signal and/or errors to print from each service.
 	m.wg.Wait()
+
 	// all services are done running their lifecycles beyond this point.
-
-	close(stateUpdateStopC)
-	close(m.stateUpdateC)
-
-	m.log.Info("stopped running all services")
+	m.log.Debug("manager has stopped running all services")
 	return exitErr
 }
 
@@ -270,7 +236,7 @@ func (m *manager) hasShutdown() bool {
 func (m *manager) shutdown() {
 	if m.shutdownCalled.Swap(1) == 1 {
 		// if the old val is already 1, then shutdown has already been called before, dont run twice.
-		m.log.Debug("shutdown was called twice....")
+		m.log.Debug("manager shutdown was called twice....")
 		return
 	}
 	var wg sync.WaitGroup
@@ -282,7 +248,7 @@ func (m *manager) shutdown() {
 			// When shutting down only look for services who are not added as a dependent.
 			// This lets us signal shutdown to any parent service or individual service.
 			// Parent services will signal shutdown to all their child dependents.
-			m.log.Debugf("signaling stop of service: %s", serviceCtx.Name)
+			m.log.Debugf("manager is signaling stop of service: %s", serviceCtx.Name)
 			svc := serviceCtx // rebind loop variable
 			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
 			go func() {
@@ -295,19 +261,48 @@ func (m *manager) shutdown() {
 	}
 
 	if totalRunning > 0 {
-		m.log.Debugf("signaled %d parent services to shut down.", totalRunning)
+		m.log.Debugf("manager has signaled %d services to shut down.", totalRunning)
 	}
-	m.log.Debug("cancelling context")
-	m.cancelCtx()
 	// wait for all shutdown routine calls to finish.
-	m.log.Debug("waiting for all services to shutdown")
+	m.log.Debug("manager is waiting for all services to shutdown")
 	wg.Wait()
-	m.log.Debug("cleaning up intracom")
-	m.intracom.Close()
+	m.log.Debug("manager cancelling context")
+	m.cancelCtx()
 }
 
 func (m *manager) updateServiceState(serviceName string, state State) {
-	m.stateUpdateC <- stateUpdate{Name: serviceName, State: state}
+	m.stateUpdateC <- StateUpdate{Name: serviceName, State: state}
+}
+
+func (m *manager) serviceStateWatcher(stopC chan struct{}) {
+	states := make(map[string]State)
+
+	for _, sc := range m.services {
+		states[sc.Name] = InitState
+	}
+
+	for {
+		select {
+		case <-stopC:
+			return
+		case update := <-m.stateUpdateC:
+			currState, found := states[update.Name]
+			if found && currState == update.State {
+				// skip any non-changes from previous state.
+				continue
+			}
+
+			states[update.Name] = update.State
+
+			statesBytes, err := json.Marshal(states)
+			if err != nil {
+				m.log.Debugf("manager error marshalling updated states map: %s", err)
+				continue
+			}
+
+			m.intracom.Publish(internalServiceStates, statesBytes)
+		}
+	}
 }
 
 // notifier is a goroutine launched only per parent with dependent services

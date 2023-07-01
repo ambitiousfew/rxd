@@ -80,8 +80,8 @@ func TestDaemonStartNoServices(t *testing.T) {
 	d := NewDaemon()
 	err := d.Start()
 
-	if err != nil {
-		t.Errorf("daemon Start had an error: %s", err)
+	if err == nil {
+		t.Errorf("expected start error, got nil")
 	}
 
 }
@@ -95,7 +95,7 @@ func TestDaemonStartSingleService(t *testing.T) {
 	err := d.Start()
 
 	if err != nil {
-		t.Errorf("daemon Start had an error: %s", err)
+		t.Errorf("expected: nil, got: %s", err)
 	}
 
 }

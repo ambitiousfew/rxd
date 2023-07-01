@@ -51,15 +51,16 @@ func (sc *ServiceContext) ShutdownSignal() <-chan struct{} {
 
 // ChangeState returns the channel the service listens for state changes of the service it depends on
 // defined by UsingServiceNotify option on creation of the ServiceContext.
-func (sc *ServiceContext) ChangeState() chan State {
+func (sc *ServiceContext) ChangeState() <-chan State {
 	return sc.stateChangeC
 }
 
 // IntracomSubscribe subscribes this service to inter-service communication by its topic name.
 // A channel is returned to receive published messages from another service.
-// Standardized on slice of bytes since it allows us to easily json unmarshal into struct if needed.
-func (sc *ServiceContext) IntracomSubscribe(topic string, id string) <-chan []byte {
-	return sc.intracom.Subscribe(topic, id, 0)
+// RxD standardizes on slice of bytes since it allows us to pass messages using a built-in type and
+// easily leverage json unmarshal into a custom struct if needed.
+func (sc *ServiceContext) IntracomSubscribe(topic string, id string) *intracom.Consumer[[]byte] {
+	return sc.intracom.Subscribe(topic, id, 1)
 }
 
 // IntracomUnsubscribe unsubscribes this service from inter-service communication by its topic name
@@ -158,5 +159,4 @@ func (sc *ServiceContext) shutdown() {
 
 	sc.Log.Debugf("%s shutting down...", sc.Name)
 	sc.cancelCtx()
-	sc.shutdownCalled.Swap(1)
 }

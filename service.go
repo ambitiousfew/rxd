@@ -6,11 +6,6 @@ import (
 	"sync/atomic"
 )
 
-type stateUpdate struct {
-	Name  string
-	State State
-}
-
 // State is used to determine the "next state" the service should enter
 // when the current state has completed/errored returned. State should
 // reflect different states that the interface can enter.
@@ -36,8 +31,6 @@ type Service interface {
 	Idle(*ServiceContext) ServiceResponse
 	Run(*ServiceContext) ServiceResponse
 	Stop(*ServiceContext) ServiceResponse
-	// TODO: Other possible states!
-	// Reload(*ServiceContext) ServiceResponse
 }
 
 // NewService creates a new service instance given a name and options.
@@ -45,6 +38,7 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 	if opts.logger == nil {
 		opts.logger = NewLogger(LevelInfo, log.LstdFlags|log.Lmsgprefix|log.Lshortfile)
 	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ServiceContext{
 		Ctx:          ctx,

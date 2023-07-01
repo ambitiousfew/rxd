@@ -56,10 +56,17 @@ func TestManagerStart(t *testing.T) {
 	manager := newManager(services)
 	manager.setLogger(&TestNoOpLogger{})
 
+	stopWatcherC := make(chan struct{})
+	go func() {
+		manager.serviceStateWatcher(stopWatcherC)
+	}()
+
 	errC := make(chan error)
 	go func() {
 		// service should proceed through all lifecycle stages instantly and be done then manager would stop.
 		err := manager.start()
+		// if manager start finishes, signal stop of watcher
+		close(stopWatcherC)
 		if err != nil {
 			errC <- err
 		}
