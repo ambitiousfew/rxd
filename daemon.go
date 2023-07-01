@@ -94,7 +94,14 @@ func (d *daemon) Start() error {
 			close(d.stopCh)
 			d.wg.Done()
 		}()
-		err = d.manager.start() // Blocks main thread until all services stop to end wg.Wait() blocking.
+
+		err = d.manager.preStartCheck()
+		if err != nil {
+			return
+		}
+
+		// Blocks main thread until all services stop to end wg.Wait() blocking.
+		err = d.manager.start()
 	}()
 	// Blocks the main thread, d.wg.Done() must finish all routines before we can continue beyond.
 	d.wg.Wait()

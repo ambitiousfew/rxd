@@ -21,28 +21,21 @@ func (tl *TestNoOpLogger) Warnf(format string, v ...any)  {}
 func (tl *TestNoOpLogger) Error(v ...any)                 {}
 func (tl *TestNoOpLogger) Errorf(format string, v ...any) {}
 
-type MockService struct {
-	mockC chan State
-}
+type MockService struct{}
 
 func (ms *MockService) Init(sc *ServiceContext) ServiceResponse {
-	ms.mockC <- InitState
 	return NewResponse(nil, IdleState)
 }
 
 func (ms *MockService) Idle(sc *ServiceContext) ServiceResponse {
-	ms.mockC <- IdleState
 	return NewResponse(nil, RunState)
 }
 
 func (ms *MockService) Run(sc *ServiceContext) ServiceResponse {
-	ms.mockC <- RunState
 	return NewResponse(nil, StopState)
 }
 
 func (ms *MockService) Stop(sc *ServiceContext) ServiceResponse {
-	defer close(ms.mockC)
-	ms.mockC <- StopState
 	return NewResponse(nil, ExitState)
 }
 
@@ -74,64 +67,48 @@ func TestManagerStart(t *testing.T) {
 
 	select {
 	case err := <-errC:
-		t.Errorf("Manager had an error during run: %s", err)
+		t.Errorf("manager had an error during run: %s", err)
 	case <-manager.stopCh:
 		return
 	}
 }
 
-// func TestManagerSetLogC(t *testing.T) {
-// 	services := []*ServiceContext{}
-
-// 	logC := make(chan LogMessage, 2)
-
-// 	manager := newManager(services)
-
-// 	go func() {
-// 		logC <- LogMessage{Message: "test", Level: Info}
-// 	}()
-// 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-// 	defer cancel()
-
-// 	select {
-// 	case <-ctx.Done():
-// 		t.Errorf("Manager setLogC failed at setting correct log channel due to timeout")
-// 	}
-// }
-
 // TODO: Fix this test to use intracom in-place of the mock channel test.
-// func TestManagerStartService(t *testing.T) {
-// 	mock := &MockService{mockC: make(chan State)}
-// 	mockOpts := NewServiceOpts()
-// 	mockSvc := NewService("mock", mock, mockOpts)
+func TestManagerGoodPreStartCheck(t *testing.T) {
+	mock1 := &MockService{}
+	mock1Opts := NewServiceOpts()
+	mock1Svc := NewService("mock-1", mock1, mock1Opts)
 
-// 	services := []*ServiceContext{}
+	mock2 := &MockService{}
+	mock2Opts := NewServiceOpts()
+	mock2Svc := NewService("mock-2", mock2, mock2Opts)
 
-// 	manager := newManager(services)
-// 	manager.setLogger(&TestNoOpLogger{})
+	services := []*ServiceContext{mock1Svc, mock2Svc}
 
-// 	manager.wg.Add(1)
-// 	go manager.startService(mockSvc)
-// 	states := make([]State, 0)
+	manager := newManager(services)
+	manager.setLogger(&TestNoOpLogger{})
 
-// 	timer := time.NewTimer(1 * time.Second)
-// 	defer timer.Stop()
+	manager.preStartCheck()
+	if err := manager.preStartCheck(); err != nil {
+		t.Errorf("wanted nil error, got %s", err)
+	}
+}
 
-// 	for i := 0; i < 5; i++ {
-// 		select {
-// 		case <-timer.C:
-// 			t.Errorf("Manager startService failed due to timeout trying to check state transitions")
-// 		case state := <-mock.mockC:
-// 			if state == "" {
-// 				// close of channel
-// 				break
-// 			}
-// 			states = append(states, state)
-// 		}
-// 		timer.Reset(1 * time.Second)
-// 	}
+func TestManagerBadPreStartCheck(t *testing.T) {
+	mock1 := &MockService{}
+	mock1Opts := NewServiceOpts()
+	mock1Svc := NewService("mock-1", mock1, mock1Opts)
 
-// 	if len(states) != 4 {
-// 		t.Errorf("Manager startService failed to transition through all lifecycle states")
-// 	}
-// }
+	mock2 := &MockService{}
+	mock2Opts := NewServiceOpts()
+	mock2Svc := NewService("mock-1", mock2, mock2Opts)
+
+	services := []*ServiceContext{mock1Svc, mock2Svc}
+
+	manager := newManager(services)
+	manager.setLogger(&TestNoOpLogger{})
+
+	if err := manager.preStartCheck(); err == nil {
+		t.Errorf("wanted non-nil error, got %v", err)
+	}
+}

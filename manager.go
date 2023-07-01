@@ -170,6 +170,17 @@ func (m *manager) startService(serviceCtx *ServiceContext) {
 	}
 }
 
+func (m *manager) preStartCheck() error {
+	serviceNames := make(map[string]struct{})
+	for _, service := range m.services {
+		if _, exists := serviceNames[service.Name]; exists {
+			return fmt.Errorf("manager error: the service named '%s' overlaps with another service name", service.Name)
+		}
+		serviceNames[service.Name] = struct{}{}
+	}
+	return nil
+}
+
 // start is run by daemon in its own routine
 // manager also handles spinning up each service in its own routine
 // as well as a notifier routine per each service that is considered
