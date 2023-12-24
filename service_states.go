@@ -1,9 +1,10 @@
 package rxd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/ambitiousfew/intracom"
 )
 
 // StateUpdate reflects any given update of lifecycle state at a given time.
@@ -16,36 +17,41 @@ type StateUpdate struct {
 // reflects the service name and its lifecycle state.
 type States map[string]State
 
-func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
+func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, chan<- struct{}) {
 	checkC := make(chan States, 1)
 
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	doneC := make(chan struct{})
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given.
 		consumer := internalEnterStatesConsumer(sc.Name, target)
-		sub := sc.intracom.Subscribe(internalServiceStates, consumer, 1)
+		subscriptionC, unsubscribe := sc.intracom.Subscribe(&intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropNone,
+		})
+
 		defer func() {
 			close(checkC)
-			sc.intracom.Unsubscribe(internalServiceStates, consumer)
+			unsubscribe()
 		}()
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-doneC:
 				// signaled stop
 				return
-			default:
-				stateBytes, ok := sub.NextMsgWithContext(ctx)
-				if !ok {
-					// context was cancelled before message was received.
+			case stateBytes, open := <-subscriptionC:
+				if !open {
+					// channel closed
 					return
 				}
 
 				var states States
 				err := json.Unmarshal(stateBytes, &states)
 				if err != nil {
-					sc.Log.Warnf("%s failed at unmarshalling the states for AnyServiceExitsState", sc.Name)
+					sc.Log.Warn("rxd failed at unmarshalling the states", "func", "AllServicesEnteredState", "service", sc.Name)
 					return
 				}
 
@@ -58,8 +64,13 @@ func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...s
 				}
 
 				if len(interestedServices) == len(serviceNames) {
-					// if we found all those we care about.
-					checkC <- interestedServices
+
+					select {
+					case <-doneC:
+						return
+					case checkC <- interestedServices:
+						// if we found all those we care about.
+					}
 				}
 			}
 
@@ -67,39 +78,45 @@ func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...s
 
 	}()
 
-	return checkC, cancel
+	return checkC, doneC
 }
 
 // AnyServicesExitState
-func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
+func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, chan<- struct{}) {
 	checkC := make(chan States, 1)
 
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	doneC := make(chan struct{})
+	// ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
 		consumer := internalExitStatesConsumer(sc.Name, target)
-		sub := sc.intracom.Subscribe(internalServiceStates, consumer, 1)
+		subscriptionC, unsubscribe := sc.intracom.Subscribe(&intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropNone,
+		})
+
 		defer func() {
 			close(checkC)
-			sc.intracom.Unsubscribe(internalServiceStates, consumer)
+			unsubscribe()
 		}()
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-doneC:
 				return
-			default:
-				stateBytes, ok := sub.NextMsgWithContext(ctx)
-				if !ok {
-					// context was cancelled before message was received.
+			case stateBytes, open := <-subscriptionC:
+				if !open {
+					// channel closed
 					return
 				}
 
 				var states States
 				err := json.Unmarshal(stateBytes, &states)
 				if err != nil {
-					sc.Log.Warnf("%s failed at unmarshalling the states for AnyServiceExitsState", sc.Name)
+					sc.Log.Warn("rxd failed at unmarshalling the states", "func", "AnyServiceExitsState", "service", sc.Name)
 					return
 				}
 
@@ -112,8 +129,13 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 				}
 
 				if len(interestedExits) > 0 {
-					// if we found ANY that we care about.
-					checkC <- interestedExits
+					select {
+					case <-doneC:
+						return
+					case checkC <- interestedExits:
+						// if we found ANY that we care about.
+					}
+
 				}
 			}
 
@@ -121,45 +143,47 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 
 	}()
 
-	return checkC, cancel
+	return checkC, doneC
 }
 
 // AllServicesStates
-func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
+func AllServicesStates(sc *ServiceContext) (<-chan States, chan<- struct{}) {
 	checkC := make(chan States, 1)
-
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	doneC := make(chan struct{})
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
 		consumer := internalAllStatesConsumer(sc.Name)
-		sub := sc.intracom.Subscribe(internalServiceStates, consumer, 1)
+		subscriptionC, unsubscribe := sc.intracom.Subscribe(&intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropNone,
+		})
 		defer func() {
 			close(checkC)
-			sc.intracom.Unsubscribe(internalServiceStates, consumer)
+			unsubscribe()
 		}()
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-doneC:
 				return
-			default:
-				stateBytes, ok := sub.NextMsgWithContext(ctx)
-				if !ok {
-					// context was cancelled before message was received.
+			case stateBytes, open := <-subscriptionC:
+				if !open {
+					// channel closed
 					return
 				}
-
 				var states States
 				err := json.Unmarshal(stateBytes, &states)
 				if err != nil {
-					sc.Log.Warnf("%s failed at unmarshalling the states for AnyServiceExitsState", sc.Name)
+					sc.Log.Warn("rxd failed at unmarshalling the states", "func", "AllServicesStates", "service", sc.Name)
 					return
 				}
 
 				// try to send and while we wait still watch for cancel
 				select {
-				case <-ctx.Done():
+				case <-doneC:
 					return
 				case checkC <- states:
 				}
@@ -168,7 +192,7 @@ func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
 
 	}()
 
-	return checkC, cancel
+	return checkC, doneC
 }
 
 func internalAllStatesConsumer(name string) string {

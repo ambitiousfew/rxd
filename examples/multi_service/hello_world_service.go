@@ -42,10 +42,10 @@ func NewHelloWorldService() *HelloWorldAPIService {
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
 func (s *HelloWorldAPIService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// if all is well here, move to the RunState or retry back to Init if something went wrong.
-	timer := time.NewTimer(20 * time.Second)
+	timer := time.NewTimer(8 * time.Second)
 	defer timer.Stop()
 
-	c.Log.Info(fmt.Sprintf("intentionally delaying for 20s before run begins."))
+	c.Log.Info("intentionally delaying for 8s before run begins")
 	for {
 		select {
 		case <-c.ShutdownSignal():
@@ -66,7 +66,7 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		// since ListenAndServe will block and we need a way to end the
 		// server as well as inform the server to stop all requests ASAP.
 		<-c.ShutdownSignal()
-		c.Log.Info(fmt.Sprintf("received a shutdown signal, cancel server context to stop server gracefully"))
+		c.Log.Info("received a shutdown signal, cancel server context to stop server gracefully")
 		s.cancel()
 		s.server.Shutdown(s.ctx)
 	}()
@@ -80,7 +80,7 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.IdleState)
 	}
 
-	c.Log.Info(fmt.Sprintf("server shutdown"))
+	c.Log.Info("service server shutdown")
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
@@ -91,7 +91,7 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 func (s *HelloWorldAPIService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	c.Log.Info(fmt.Sprintf("is stopping"))
+	c.Log.Info("service is stopping")
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
 

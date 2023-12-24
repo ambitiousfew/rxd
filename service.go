@@ -1,9 +1,9 @@
 package rxd
 
 import (
-	"context"
-	"log"
 	"sync/atomic"
+
+	"golang.org/x/exp/slog"
 )
 
 // State is used to determine the "next state" the service should enter
@@ -36,23 +36,19 @@ type Service interface {
 // NewService creates a new service instance given a name and options.
 func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
 	if opts.logger == nil {
-		opts.logger = NewLogger(LevelInfo, log.LstdFlags|log.Lmsgprefix|log.Lshortfile)
+		opts.logger = slog.Default()
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	return &ServiceContext{
-		Ctx:          ctx,
-		cancelCtx:    cancel,
-		Name:         name,
-		stateC:       make(chan State),
-		stateChangeC: make(chan State),
-		opts:         opts,
-		isStopped:    true,
+		Name: name,
+		opts: opts,
 
-		// 0 = not called, 1 = called
-		shutdownCalled: atomic.Int32{},
-		service:        service,
-		dependents:     make(map[*ServiceContext]map[State]struct{}),
-		Log:            opts.logger,
+		cancel: make(chan struct{}),
+
+		isStopped:  atomic.Int32{}, // 0 = not stopped, 1 = stopped
+		isShutdown: atomic.Int32{}, // 0 = not shutdown, 1 = shutdown
+
+		service: service,
+		Log:     opts.logger,
 	}
 }

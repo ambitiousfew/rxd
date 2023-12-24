@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/ambitiousfew/intracom"
 	"github.com/ambitiousfew/rxd"
+	"golang.org/x/exp/slog"
 )
 
 // HelloWorldAPIService create a struct for your service which requires a config field along with any other state
@@ -16,14 +17,10 @@ import (
 type HelloWorldAPIService struct {
 	// fields this specific server uses
 	server *http.Server
-	ctx    context.Context
-	cancel context.CancelFunc
 }
 
 // NewHelloWorldService just a factory helper function to help create and return a new instance of the service.
 func NewHelloWorldService() *HelloWorldAPIService {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -37,25 +34,20 @@ func NewHelloWorldService() *HelloWorldAPIService {
 
 	return &HelloWorldAPIService{
 		server: server,
-		ctx:    ctx,
-		cancel: cancel,
 	}
 }
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	go func() {
-		// We should always watch for this signal, must use goroutine here
-		// since ListenAndServe will block and we need a way to end the
-		// server as well as inform the server to stop all requests ASAP.
-		<-c.ShutdownSignal()
-		c.Log.Info(fmt.Sprintf("received a shutdown signal, cancel server context to stop server gracefully"))
-		s.cancel()
-		s.server.Shutdown(s.ctx)
+		<-sc.ShutdownSignal() // wait for shutdown signal against this service
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.server.Shutdown(ctx)
 	}()
 
-	c.Log.Info(fmt.Sprintf("server starting at %s", s.server.Addr))
+	sc.Log.Info("server starting", "service", sc.Name, "address", s.server.Addr)
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 
@@ -64,22 +56,27 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.IdleState)
 	}
 
-	c.Log.Info(fmt.Sprintf("server shutdown"))
+	sc.Log.Info("server shutdown", "service", sc.Name)
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
+
+	// Run moves to StopState when the server is shutdown
 	return rxd.NewResponse(nil, rxd.StopState)
 }
 
-func (s *HelloWorldAPIService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Init(sc *rxd.ServiceContext) rxd.ServiceResponse {
+	// Init moves to IdleState
 	return rxd.NewResponse(nil, rxd.IdleState)
 }
 
-func (s *HelloWorldAPIService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
+	// Idle moves to RunState
 	return rxd.NewResponse(nil, rxd.RunState)
 }
 
-func (s *HelloWorldAPIService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Stop(sc *rxd.ServiceContext) rxd.ServiceResponse {
+	// Stop moves to ExitState
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
 
@@ -88,6 +85,9 @@ var _ rxd.Service = &HelloWorldAPIService{}
 
 // Example entrypoint
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	// We create an instance of our service
 	helloWorld := NewHelloWorldService()
 	// We create an instance of our ServiceConfig
@@ -95,12 +95,22 @@ func main() {
 
 	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld, apiOpts)
 
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
+	logger := slog.New(handler)
+
+	ic := intracom.New[[]byte]()
+	ic.SetLogger(logger)
+
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
 	daemon := rxd.NewDaemon(apiSvc)
+	daemon.SetLogHandler(handler)
+	daemon.SetIntracom(ic)
 
 	// We can set the log severity we want to observe, LevelInfo is default
 
-	err := daemon.Start() // Blocks main thread
+	err := daemon.Start(ctx) // Blocks main thread
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)

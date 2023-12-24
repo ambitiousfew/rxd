@@ -34,47 +34,62 @@ func NewAPIPollingService() *APIPollingService {
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *APIPollingService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *APIPollingService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
+
+	// APIPolling service is registering its interest in ALL services passed ENTERING a "RunState"
+	// So if HelloWorldAPI is the only passed service here and it ENTERS a "RunState" then
+	//  APIPolling service will be notified of that state change.
+	// This is how we are able to listen to state changes of other services running within RxD.
+	enteredStateC, stopC := rxd.AllServicesEnteredState(sc, rxd.RunState, HelloWorldAPI)
+	defer close(stopC)
+
 	for {
 		select {
-		case <-c.ShutdownSignal():
+		case <-sc.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
-		case state := <-c.ChangeState():
-			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
-			if state == rxd.RunState {
-				return rxd.NewResponse(nil, rxd.RunState)
-			}
+		case <-enteredStateC:
+			// if we receive a state change over this channel, it will only happen
+			// because ALL services we are interested in have entered their run state.
+			// HelloWorldAPI should be running, APIPolling can now move from
+			// Idle to Run state.
+
+			// We must exit Idle and specify the next state we want to enter.
+			return rxd.NewResponse(nil, rxd.RunState)
 		}
 	}
 }
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *APIPollingService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
-	c.Log.Info(fmt.Sprintf("has started to poll"))
+	// Here we are registering our interest in ANY of the services passed EXITING a "RunState"
+	// So if any service given here for some reasons LEAVES their RunState, we will be notified.
+	exitStateC, stopC := rxd.AnyServicesExitState(sc, rxd.RunState, HelloWorldAPI)
+	defer close(stopC)
+
+	sc.Log.Info("starting to poll")
+
 	var pollCount int
 	for {
 		select {
-		case <-c.ShutdownSignal():
+		case <-sc.ShutdownSignal():
 			return rxd.NewResponse(nil, rxd.StopState)
-		case state := <-c.ChangeState():
+		case <-exitStateC:
 			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
-			if state == rxd.StopState {
-				// if the parent we depend on says they are stopping we will move to exit which also calls Stop() first.
-				return rxd.NewResponse(nil, rxd.ExitState)
-			}
+			return rxd.NewResponse(nil, rxd.ExitState)
+
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				c.Log.Info(fmt.Sprintf("has reached its maximum poll count, stopping service"))
+				sc.Log.Info("reached maximum poll count, stopping")
 				return rxd.NewResponse(nil, rxd.StopState)
 			}
 
 			resp, err := s.client.Get(s.apiBase + "/api")
 			if err != nil {
-				c.Log.Error(err.Error())
+				sc.Log.Error(err.Error())
 				// if we error, reset timer and try again...
 				timer.Reset(s.retryDuration)
 				continue
@@ -84,18 +99,18 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 			resp.Body.Close()
 
 			if err != nil {
-				c.Log.Error(err.Error())
+				sc.Log.Error(err.Error())
 				// we could return to new state: idle or stop or just continue
 			}
 
 			var respBody map[string]any
 			err = json.Unmarshal(respBytes, &respBody)
 			if err != nil {
-				c.Log.Error(err.Error())
+				sc.Log.Error(err.Error())
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			c.Log.Info(fmt.Sprintf("received response from the API: %v", respBody))
+			sc.Log.Info(fmt.Sprintf("received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 
@@ -109,6 +124,7 @@ func (s *APIPollingService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 func (s *APIPollingService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
+	c.Log.Info("service is stopping", "service", c.Name)
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
 
