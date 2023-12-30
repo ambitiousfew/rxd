@@ -46,8 +46,6 @@ func newManager(services []*ServiceContext) *manager {
 // it wraps the service's lifecycle methods in a loop and runs them until the service returns ExitState
 func (m *manager) startService(wg *sync.WaitGroup, serviceCtx *ServiceContext) {
 	defer wg.Done()
-	// attach a new slog logger with the service name as key/value.
-	serviceCtx.Log = m.log.With("service", serviceCtx.Name)
 
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
@@ -118,7 +116,8 @@ func (m *manager) startService(wg *sync.WaitGroup, serviceCtx *ServiceContext) {
 
 			serviceCtx.shutdown()
 			// we are done with this service, exit the service wrapper routine.
-			serviceCtx.Log.Debug("service has exited", "service", serviceCtx.Name)
+			serviceCtx.Log.Debug("service exiting", "service", serviceCtx.Name)
+			close(serviceCtx.doneC)
 			return
 
 		default:
@@ -159,8 +158,10 @@ func (m *manager) start() {
 
 	var total int
 	for _, service := range m.services {
-		service := service          // rebind loop variable
-		service.iStates = m.iStates // attach the manager's internal states to each service
+		// service := service                                // rebind loop variable
+		service.iStates = m.iStates                       // attach the manager's internal states to each service
+		service.Log = m.log.With("service", service.Name) // attach child logger instance with service name
+
 		wg.Add(1)
 		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(&wg, service)
@@ -196,12 +197,14 @@ func (m *manager) shutdown() {
 			// This lets us signal shutdown to any parent service or individual service.
 			// Parent services will signal shutdown to all their child dependents.
 			m.log.Debug("manager signaling stop", "service", serviceCtx.Name)
-			svc := serviceCtx // rebind loop variable
+
 			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
-			go func() {
+			go func(svc *ServiceContext) {
 				defer wg.Done()
 				svc.shutdown()
-			}()
+				<-svc.doneC
+			}(serviceCtx)
+
 			totalRunning++
 		}
 	}

@@ -27,7 +27,8 @@ type ServiceContext struct {
 	stopCalled     atomic.Int32
 	shutdownCalled atomic.Int32
 	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
-	mu sync.Mutex
+	mu    sync.Mutex
+	doneC chan struct{}
 }
 
 // NewService creates a new service context instance given a name and options.
@@ -48,7 +49,8 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		service:        service,
 		Log:            opts.logger,
 
-		mu: sync.Mutex{},
+		mu:    sync.Mutex{},
+		doneC: make(chan struct{}),
 	}
 }
 
