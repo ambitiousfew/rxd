@@ -39,8 +39,8 @@ func NewDaemon(conf DaemonConfig) *daemon {
 
 	logger = logger.With("rxd", conf.Name)
 
-	iSignals := intracom.New[rxdSignal]()
-	iStates := intracom.New[States]()
+	iSignals := intracom.New[rxdSignal]("rxd-signals")
+	iStates := intracom.New[States]("rxd-states")
 
 	if conf.IntracomLogHandler != nil {
 		iSignals.SetLogHandler(conf.IntracomLogHandler)

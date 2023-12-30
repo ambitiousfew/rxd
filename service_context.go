@@ -43,8 +43,6 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		Name:      name,
 		opts:      opts,
 
-		iStates: intracom.New[States](),
-
 		// 0 = not called, 1 = called
 		shutdownCalled: atomic.Int32{},
 		service:        service,

@@ -18,6 +18,10 @@ type StateUpdate struct {
 type States map[string]State
 
 func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
+	if sc.iStates == nil {
+		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
+		return nil, func() {} // noop cancel
+	}
 	checkC := make(chan States, 1)
 
 	ctx, cancel := context.WithCancel(sc.Ctx)
@@ -68,6 +72,10 @@ func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...s
 
 // AnyServicesExitState
 func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
+	if sc.iStates == nil {
+		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
+		return nil, func() {} // noop cancel
+	}
 	checkC := make(chan States, 1)
 
 	ctx, cancel := context.WithCancel(sc.Ctx)
@@ -117,6 +125,10 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 }
 
 func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
+	if sc.iStates == nil {
+		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
+		return nil, func() {} // noop cancel
+	}
 	checkC := make(chan States, 1)
 
 	ctx, cancel := context.WithCancel(sc.Ctx)

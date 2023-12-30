@@ -1,10 +1,6 @@
 package rxd
 
-import (
-	"os"
-
-	"golang.org/x/exp/slog"
-)
+import "golang.org/x/exp/slog"
 
 // RunPolicy service option type representing the run policy of a given service
 // basically controlling different ways of stopping a service like running only once when it succeeds
@@ -51,15 +47,6 @@ func UsingRunPolicy(policy RunPolicy) ServiceOption {
 func UsingLogger(logger *slog.Logger) ServiceOption {
 	return func(so *serviceOpts) {
 		so.logger = logger
-	}
-}
-
-// UsingDefaultLogger applies new logging instance as the logger with a customized log severity level and flags to use.
-func UsingDefaultLogger(severity slog.Level) ServiceOption {
-	return func(so *serviceOpts) {
-		so.logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: severity,
-		}))
 	}
 }
 

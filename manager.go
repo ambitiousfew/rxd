@@ -38,11 +38,7 @@ func newManager(services []*ServiceContext) *manager {
 
 		// give the state update channel a buffer size of 2x the number of services
 		stateUpdateC: make(chan StateUpdate, len(services)*2),
-
-		iSignals: intracom.New[rxdSignal](), // signals from daemon to manager
-		iStates:  intracom.New[States](),    // services state updates to manager
-
-		mu: new(sync.Mutex),
+		mu:           new(sync.Mutex),
 	}
 }
 
