@@ -159,9 +159,10 @@ func (m *manager) start() {
 
 	var total int
 	for _, service := range m.services {
-		service := service // rebind loop variable
-		// Start each service in its own routine logic / conditional lifecycle.
+		service := service          // rebind loop variable
+		service.iStates = m.iStates // attach the manager's internal states to each service
 		wg.Add(1)
+		// Start each service in its own routine logic / conditional lifecycle.
 		go m.startService(&wg, service)
 		total++
 	}
