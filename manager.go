@@ -1,7 +1,7 @@
 package rxd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -11,111 +11,135 @@ import (
 )
 
 type manager struct {
+	ctx       context.Context
+	cancelCtx context.CancelFunc
+
 	services []*ServiceContext
 
-	intracom *intracom.Intracom[[]byte]
-	log      *slog.Logger
+	stateUpdateC chan StateUpdate
 
-	stateUpdateC   chan StateUpdate
+	// intracom *intracom.Intracom[[]byte]
+	iSignals *intracom.Intracom[rxdSignal]
+	iStates  *intracom.Intracom[States]
+
+	log *slog.Logger
+	mu  *sync.Mutex
+
 	shutdownCalled atomic.Int32
 }
 
-// setLogger sets the passed in logging instance as the logger for manager and all services within manager.
-func (m *manager) setLogger(logger *slog.Logger) {
-	m.log = logger
+func newManager(services []*ServiceContext) *manager {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	return &manager{
+		ctx:       ctx,
+		cancelCtx: cancel,
+		services:  services,
+
+		// give the state update channel a buffer size of 2x the number of services
+		stateUpdateC: make(chan StateUpdate, len(services)*2),
+
+		iSignals: intracom.New[rxdSignal](), // signals from daemon to manager
+		iStates:  intracom.New[States](),    // services state updates to manager
+
+		mu: new(sync.Mutex),
+	}
 }
 
 // startService is run by manager in its own routine
-// its a service wrapper so lifecycle stages can be controlled
-// and relayed behind the scenes.
-func (m *manager) startService(sc *ServiceContext) {
+// it wraps the service's lifecycle methods in a loop and runs them until the service returns ExitState
+func (m *manager) startService(wg *sync.WaitGroup, serviceCtx *ServiceContext) {
+	defer wg.Done()
+	// attach a new slog logger with the service name as key/value.
+	serviceCtx.Log = m.log.With("service", serviceCtx.Name)
 
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
-	service := sc.service // remap for readability
+	service := serviceCtx.service
 
 	for {
-		m.log.Debug("rxd manager publishing state update", "service", sc.Name)
-		m.stateUpdateC <- StateUpdate{Name: sc.Name, State: svcResp.NextState}
-		m.log.Debug("rxd manager done publishing state update", "service", sc.Name)
-		// Every service attempts to notify any services that were set during setup via UsingServiceNotify option.
+		// inform state watcher of this service's upcoming state transition
+		m.stateUpdateC <- StateUpdate{Name: serviceCtx.Name, State: svcResp.NextState}
+
 		// Determine the next state the service should be in.
 		// Run the method associated with the next state.
 		switch svcResp.NextState {
 
 		case InitState:
-			m.log.Debug("rxd manager is initializing service", "service", sc.Name)
-			svcResp = service.Init(sc)
+
+			svcResp = service.Init(serviceCtx)
 			if svcResp.Error != nil {
-				sc.Log.Error(svcResp.Error.Error(), "service", sc.Name)
+				serviceCtx.Log.Error(fmt.Sprintf("%s %s", serviceCtx.Name, svcResp.Error.Error()))
 			}
 
 		case IdleState:
-			m.log.Debug("rxd manager is idling service", "service", sc.Name)
-			svcResp = service.Idle(sc)
+			svcResp = service.Idle(serviceCtx)
 			if svcResp.Error != nil {
-				sc.Log.Error(svcResp.Error.Error(), "service", sc.Name)
+				serviceCtx.Log.Error(fmt.Sprintf("%s %s", serviceCtx.Name, svcResp.Error.Error()))
 			}
 
 		case RunState:
-			m.log.Debug("rxd manager is running service", "service", sc.Name)
-			svcResp = service.Run(sc)
+			svcResp = service.Run(serviceCtx)
 			if svcResp.Error != nil {
-				sc.Log.Error(svcResp.Error.Error(), "service", sc.Name)
+				serviceCtx.Log.Error(fmt.Sprintf("%s %s", serviceCtx.Name, svcResp.Error.Error()))
 			}
 
 			// Enforce Run policies
-			switch sc.opts.runPolicy {
+			switch serviceCtx.opts.runPolicy {
 			case RunOncePolicy:
 				// regardless of success/fail, we exit
 				svcResp.NextState = ExitState
 
 			case RetryUntilSuccessPolicy:
 				if svcResp.Error == nil {
-					svcResp := service.Stop(sc)
+					svcResp := service.Stop(serviceCtx)
 					if svcResp.Error != nil {
 						continue
 					}
-					sc.isStopped.Store(1)
+					serviceCtx.stopCalled.Store(1)
 					// If Run didnt error, we assume successful run once and stop service.
 					svcResp.NextState = ExitState
 				}
 			}
 		case StopState:
-			m.log.Debug("rxd manager is stopping service", "service", sc.Name)
-			svcResp = service.Stop(sc)
+			svcResp = service.Stop(serviceCtx)
 			if svcResp.Error != nil {
-				sc.Log.Error(svcResp.Error.Error(), "service", sc.Name)
+				serviceCtx.Log.Error(fmt.Sprintf("%s %s", serviceCtx.Name, svcResp.Error.Error()))
 			}
-			sc.isStopped.Store(1)
-
-			// TODO: consider the ability to stop a service and restart it instead of forcing exit.
-			svcResp.NextState = ExitState
+			serviceCtx.stopCalled.Store(1)
 
 		case ExitState:
-			m.log.Debug("rxd manager is exiting service", "service", sc.Name)
-			if !sc.hasStopped() {
+			if !serviceCtx.hasStopped() {
+				// inform state watcher of this service's upcoming state transition since we wont loop again after this.
+				m.stateUpdateC <- StateUpdate{Name: serviceCtx.Name, State: svcResp.NextState}
 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
-				svcResp = service.Stop(sc)
+				svcResp = service.Stop(serviceCtx)
 				if svcResp.Error != nil {
-					sc.Log.Error(svcResp.Error.Error(), "service", sc.Name)
+					serviceCtx.Log.Error(fmt.Sprintf("%s %s", serviceCtx.Name, svcResp.Error.Error()))
 				}
-				sc.isStopped.Store(1)
+				serviceCtx.stopCalled.Store(1)
 			}
 
-			<-sc.shutdown() // wait for service to finish its shutdown routine
-			m.log.Debug("rxd manager received shutdown signal", "service", sc.Name)
+			serviceCtx.shutdown()
+			// we are done with this service, exit the service wrapper routine.
+			serviceCtx.Log.Debug("service has exited", "service", serviceCtx.Name)
 			return
-		}
-	}
 
+		default:
+			serviceCtx.Log.Error(fmt.Sprintf("unknown state '%s' returned from service", svcResp.NextState))
+		}
+
+	}
 }
 
+// preStartCheck is run before manager starts its own routine
+// it ensures that all services have unique names since overlapping
+// names would cause issues with services interested in specific service states.
 func (m *manager) preStartCheck() error {
 	serviceNames := make(map[string]struct{})
 	for _, service := range m.services {
 		if _, exists := serviceNames[service.Name]; exists {
-			return fmt.Errorf("rxd manager error: the service named '%s' overlaps with another service name", service.Name)
+			return fmt.Errorf("manager error: the service named '%s' overlaps with another service name", service.Name)
 		}
 		serviceNames[service.Name] = struct{}{}
 	}
@@ -123,39 +147,37 @@ func (m *manager) preStartCheck() error {
 }
 
 // start is run by daemon in its own routine
-// manager also handles spinning up each service in its own routine
-// as well as a notifier routine per each service that is considered
-// a parent with dependent services, any service that AddDependentService()
-// was called on.
+// it starts all services and blocks until all services have exited their lifecycles.
+// once all services have exited their lifecycles, a stop signal is sent to the service state watcher
 func (m *manager) start() {
-	stopC := make(chan struct{}) // used to signal state watcher to stop
-	doneC := m.serviceStateWatcher(stopC)
+
+	// subscribe to the internal states on behalf of the manager to receive state updates from services.
+	statePublishC, unsubscribe := m.iStates.Register(internalServiceStates)
+	defer unsubscribe()
+
+	stateWatcherStopC := make(chan struct{}, 1)
+	// launch the service state watcher routine.
+	doneC := m.serviceStateWatcher(statePublishC, stateWatcherStopC)
 
 	var wg sync.WaitGroup
 
-	// manager is reponsible for starting each service in its own routine
+	var total int
 	for _, service := range m.services {
-		service := service
-		service.setLogger(m.log)        // ensure each service receives logger instance for logging.
-		service.setIntracom(m.intracom) // ensure each service receives intracom instance for intra-comms.
-
+		service := service // rebind loop variable
+		// Start each service in its own routine logic / conditional lifecycle.
 		wg.Add(1)
-		// each service starts in their own routine
-		go func() {
-			defer wg.Done()
-			m.startService(service) // blocks until service is done running its lifecycle
-		}()
+		go m.startService(&wg, service)
+		total++
 	}
 
-	m.log.Debug("rxd manager started all services", "total", len(m.services))
+	m.log.Debug("manager started services", "total", total)
+	wg.Wait() // blocks until all services have exited their lifecycles
 
-	wg.Wait() // blocks until all services are done running their lifecycles
-
-	close(stopC) // signal state watcher to stop
-	<-doneC      // wait for state watcher to signal done
-
-	// all services are done running their lifecycles beyond this point.
-	m.log.Debug("rxd manager has stopped running all services")
+	// all services have exited their lifecycles at this point.
+	close(stateWatcherStopC) // signal to state watcher to stop
+	<-doneC                  // wait for state watcher to signal done
+	close(m.stateUpdateC)    // close state update publishing channel
+	m.log.Debug("manager has stopped running all services")
 }
 
 // shutdown handles iterating over any remaining services that still may be running
@@ -164,73 +186,85 @@ func (m *manager) start() {
 func (m *manager) shutdown() {
 	if m.shutdownCalled.Swap(1) == 1 {
 		// if the old val is already 1, then shutdown has already been called before, dont run twice.
+		m.log.Debug("manager shutdown was called twice....")
 		return
 	}
 	var wg sync.WaitGroup
 
 	var totalRunning int
-	for _, service := range m.services {
-		service := service // rebind loop variable
-		if !service.hasShutdown() {
+	for _, serviceCtx := range m.services {
+		if !serviceCtx.hasShutdown() {
 			wg.Add(1)
-
+			// When shutting down only look for services who are not added as a dependent.
+			// This lets us signal shutdown to any parent service or individual service.
+			// Parent services will signal shutdown to all their child dependents.
+			m.log.Debug("manager signaling stop", "service", serviceCtx.Name)
+			svc := serviceCtx // rebind loop variable
+			// Signal all non-dependent services to shutdown without hanging on for the previous shutdown call.
 			go func() {
 				defer wg.Done()
-				m.log.Debug("rxd manager is signaling stop", "service", service.Name)
-				<-service.shutdown() // wait for service to finish its shutdown routine
-				m.log.Debug("rxd manager done signaling service stop", "name", service.Name)
+				svc.shutdown()
 			}()
-
 			totalRunning++
 		}
 	}
 
 	if totalRunning > 0 {
-		m.log.Debug("rxd manager has signaled shutdown to all services", "total", totalRunning)
+		m.log.Debug("manager signaled shutdown of running services", "total", totalRunning)
 	}
 	// wait for all shutdown routine calls to finish.
-	m.log.Debug("rxd manager is waiting for all services to shutdown")
+	m.log.Debug("manager is waiting for all services to shutdown")
 	wg.Wait()
-	m.log.Debug("rxd manager is done wating for all services to shutdown")
+	m.log.Debug("manager cancelling context")
+	m.cancelCtx()
 }
 
-func (m *manager) serviceStateWatcher(signalStopC <-chan struct{}) <-chan struct{} {
-	doneC := make(chan struct{})
+func (m *manager) serviceStateWatcher(statePublishC chan<- States, stopC chan struct{}) <-chan struct{} {
+	signalDoneC := make(chan struct{})
 
 	go func() {
-		publishStateC, unregister := m.intracom.Register(internalServiceStates)
-		defer close(doneC)
-		defer unregister()
+		defer close(signalDoneC)
 
-		states := make(map[string]State)
+		localStates := make(States)
+
+		for _, sc := range m.services {
+			localStates[sc.Name] = InitState
+		}
 
 		for {
 			select {
-			case <-signalStopC:
-				m.log.Debug("rxd manager state watcher received stop signal")
+			case <-stopC:
 				return
-			case update := <-m.stateUpdateC:
-				currState, found := states[update.Name]
-				if found && currState == update.State {
-					continue // skip any non-changes from previous state.
+			case update, open := <-m.stateUpdateC:
+				if !open {
+					return
 				}
-
-				states[update.Name] = update.State
-
-				statesBytes, err := json.Marshal(states)
-				if err != nil {
-					m.log.Debug(fmt.Sprintf("rxd manager error marshalling updated states: %s", err))
+				currState, found := localStates[update.Name]
+				if found && currState == update.State {
+					// skip any non-changes from previous state.
 					continue
 				}
 
+				// update the local state
+				localStates[update.Name] = update.State
+
+				// make a copy to send out
+				states := make(States)
+				for name, state := range localStates {
+					states[name] = state
+				}
+
+				// attempt to publish states to anyone still listening or exit if stop signal received.
 				select {
-				case <-signalStopC:
+				case <-stopC:
 					return
-				case publishStateC <- statesBytes:
+				case statePublishC <- states:
+				default:
+					// no one was registered to receive the states, drop it.
 				}
 			}
 		}
 	}()
 
-	return doneC
+	return signalDoneC
 }

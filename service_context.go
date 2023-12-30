@@ -1,6 +1,7 @@
 package rxd
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -12,76 +13,67 @@ import (
 // This config contains preconfigured shutdown channel,
 type ServiceContext struct {
 	Name string
+	Ctx  context.Context
+	Log  *slog.Logger
+
+	cancelCtx context.CancelFunc
 
 	service Service
 	opts    *serviceOpts
 
-	intracom *intracom.Intracom[[]byte]
-
-	Log *slog.Logger
-
-	cancel chan struct{} // a channel all services should watch for shutdown signal
+	iStates *intracom.Intracom[States]
 
 	// ensure a service shutdown cannot be called twice
-	isStopped  atomic.Int32
-	isShutdown atomic.Int32
-
+	stopCalled     atomic.Int32
+	shutdownCalled atomic.Int32
+	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
 	mu sync.Mutex
+}
+
+// NewService creates a new service context instance given a name and options.
+func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
+	if opts.logger == nil {
+		opts.logger = slog.Default()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	return &ServiceContext{
+		Ctx:       ctx,
+		cancelCtx: cancel,
+		Name:      name,
+		opts:      opts,
+
+		iStates: intracom.New[States](),
+
+		// 0 = not called, 1 = called
+		shutdownCalled: atomic.Int32{},
+		service:        service,
+		Log:            opts.logger,
+
+		mu: sync.Mutex{},
+	}
 }
 
 // ShutdownSignal returns the channel the side implementing the service should use and watch to be notified
 // when the daemon/manager are attempting to shutdown services.
 func (sc *ServiceContext) ShutdownSignal() <-chan struct{} {
-	return sc.cancel
-}
-
-func (sc *ServiceContext) IntracomRegister(topic string) (chan<- []byte, func() bool) {
-	return sc.intracom.Register(topic)
-}
-
-// IntracomSubscribe subscribes this service to inter-service communication by its topic name.
-// A channel is returned to receive published messages from another service.
-// RxD standardizes on slice of bytes since it allows us to pass messages using a built-in type and
-// easily leverage json unmarshal into a custom struct if needed.
-func (sc *ServiceContext) IntracomSubscribe(topic string, id string) (<-chan []byte, func() error) {
-	return sc.intracom.Subscribe(&intracom.SubscriberConfig{
-		Topic:         topic,
-		ConsumerGroup: id,
-		BufferSize:    1,
-		BufferPolicy:  intracom.DropNone,
-	})
+	return sc.Ctx.Done()
 }
 
 func (sc *ServiceContext) hasStopped() bool {
-	return sc.isStopped.Load() == 1
+	return sc.stopCalled.Load() == 1
 }
 
 func (sc *ServiceContext) hasShutdown() bool {
 	// 0 has not shutdown, 1 has shutdown
-	return sc.isShutdown.Load() == 1
+	return sc.shutdownCalled.Load() == 1
 }
 
-func (sc *ServiceContext) setLogger(logger *slog.Logger) {
-	// sc.Log = logger
-	sc.Log = logger.With("service", sc.Name)
-}
-
-func (sc *ServiceContext) setIntracom(intracom *intracom.Intracom[[]byte]) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.intracom = intracom
-}
-
-func (sc *ServiceContext) shutdown() <-chan struct{} {
-	doneC := make(chan struct{})
-	go func() {
-		defer close(doneC)
-		// ensure shutdown only closes once
-		if sc.isShutdown.Swap(1) == 1 {
-			return
-		}
-		close(sc.cancel)
-	}()
-
-	return doneC
+func (sc *ServiceContext) shutdown() {
+	if sc.shutdownCalled.Swap(1) == 1 {
+		// if we swap and the old value is already 1, shutdown was already called.
+		return
+	}
+	sc.Log.Debug("sending a shutdown signal", "service", sc.Name)
+	sc.cancelCtx()
 }

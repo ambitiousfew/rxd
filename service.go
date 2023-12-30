@@ -1,11 +1,5 @@
 package rxd
 
-import (
-	"sync/atomic"
-
-	"golang.org/x/exp/slog"
-)
-
 // State is used to determine the "next state" the service should enter
 // when the current state has completed/errored returned. State should
 // reflect different states that the interface can enter.
@@ -24,31 +18,9 @@ const (
 	ExitState State = "exit"
 )
 
-type stageFunc func(*ServiceContext) ServiceResponse
-
 type Service interface {
 	Init(*ServiceContext) ServiceResponse
 	Idle(*ServiceContext) ServiceResponse
 	Run(*ServiceContext) ServiceResponse
 	Stop(*ServiceContext) ServiceResponse
-}
-
-// NewService creates a new service instance given a name and options.
-func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
-	if opts.logger == nil {
-		opts.logger = slog.Default()
-	}
-
-	return &ServiceContext{
-		Name: name,
-		opts: opts,
-
-		cancel: make(chan struct{}),
-
-		isStopped:  atomic.Int32{}, // 0 = not stopped, 1 = stopped
-		isShutdown: atomic.Int32{}, // 0 = not shutdown, 1 = shutdown
-
-		service: service,
-		Log:     opts.logger,
-	}
 }

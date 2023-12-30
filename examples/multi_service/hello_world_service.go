@@ -18,7 +18,7 @@ type HelloWorldAPIService struct {
 
 // NewHelloWorldService just a factory helper function to help create and return a new instance of the service.
 func NewHelloWorldService() *HelloWorldAPIService {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
@@ -67,8 +67,9 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		// server as well as inform the server to stop all requests ASAP.
 		<-c.ShutdownSignal()
 		c.Log.Info("received a shutdown signal, cancel server context to stop server gracefully")
-		s.cancel()
-		s.server.Shutdown(s.ctx)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.server.Shutdown(ctx)
 	}()
 
 	c.Log.Info(fmt.Sprintf("server starting at %s", s.server.Addr))
@@ -80,23 +81,24 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.IdleState)
 	}
 
-	c.Log.Info("service server shutdown")
+	c.Log.Info("server shutdown")
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
 	return rxd.NewResponse(nil, rxd.StopState)
 }
 
+func (s *HelloWorldAPIService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
+	c.Log.Info("initializing")
+	return rxd.NewResponse(nil, rxd.IdleState)
+}
+
 // Stop handles anything you might need to do to clean up before ending your service.
 func (s *HelloWorldAPIService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	c.Log.Info("service is stopping")
+	c.Log.Info("stopping")
 	return rxd.NewResponse(nil, rxd.ExitState)
-}
-
-func (s *HelloWorldAPIService) Init(c *rxd.ServiceContext) rxd.ServiceResponse {
-	return rxd.NewResponse(nil, rxd.IdleState)
 }
 
 // Ensure we meet the interface or error.

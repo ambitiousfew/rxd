@@ -40,8 +40,8 @@ func (s *APIPollingService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	// So if HelloWorldAPI is the only passed service here and it ENTERS a "RunState" then
 	//  APIPolling service will be notified of that state change.
 	// This is how we are able to listen to state changes of other services running within RxD.
-	enteredStateC, stopC := rxd.AllServicesEnteredState(sc, rxd.RunState, HelloWorldAPI)
-	defer close(stopC)
+	enteredStateC, cancel := rxd.AllServicesEnteredState(sc, rxd.RunState, HelloWorldAPI)
+	defer cancel()
 
 	for {
 		select {
@@ -67,8 +67,8 @@ func (s *APIPollingService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 
 	// Here we are registering our interest in ANY of the services passed EXITING a "RunState"
 	// So if any service given here for some reasons LEAVES their RunState, we will be notified.
-	exitStateC, stopC := rxd.AnyServicesExitState(sc, rxd.RunState, HelloWorldAPI)
-	defer close(stopC)
+	exitStateC, cancel := rxd.AnyServicesExitState(sc, rxd.RunState, HelloWorldAPI)
+	defer cancel()
 
 	sc.Log.Info("starting to poll")
 
@@ -124,7 +124,7 @@ func (s *APIPollingService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 func (s *APIPollingService) Stop(c *rxd.ServiceContext) rxd.ServiceResponse {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	c.Log.Info("service is stopping", "service", c.Name)
+	c.Log.Info("service is stopping")
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
 

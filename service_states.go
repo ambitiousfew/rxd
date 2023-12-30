@@ -1,7 +1,7 @@
 package rxd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 
 	"github.com/ambitiousfew/intracom"
@@ -17,60 +17,45 @@ type StateUpdate struct {
 // reflects the service name and its lifecycle state.
 type States map[string]State
 
-func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, chan<- struct{}) {
+func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
 	checkC := make(chan States, 1)
 
-	doneC := make(chan struct{})
+	ctx, cancel := context.WithCancel(sc.Ctx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given.
 		consumer := internalEnterStatesConsumer(sc.Name, target)
-		subscriptionC, unsubscribe := sc.intracom.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
-			BufferPolicy:  intracom.DropNone,
+			BufferPolicy:  intracom.DropOldest,
 		})
 
-		defer func() {
-			close(checkC)
-			unsubscribe()
-		}()
+		defer close(checkC)
+		defer unsubscribe()
 
 		for {
 			select {
-			case <-doneC:
-				// signaled stop
+			case <-ctx.Done():
 				return
-			case stateBytes, open := <-subscriptionC:
-				if !open {
-					// channel closed
-					return
-				}
 
-				var states States
-				err := json.Unmarshal(stateBytes, &states)
-				if err != nil {
-					sc.Log.Warn("rxd failed at unmarshalling the states", "func", "AllServicesEnteredState", "service", sc.Name)
+			case states, open := <-subscriberC:
+				if !open {
 					return
 				}
 
 				interestedServices := make(States)
 				for _, name := range serviceNames {
-					if state := states[name]; state == target {
-						// build the map of entered states to send out.
-						interestedServices[name] = state
+					if val := states[name]; val != target {
+						// build states map of only services we care about.
+						interestedServices[name] = val
 					}
 				}
 
+				// if we found all those we care about.
 				if len(interestedServices) == len(serviceNames) {
-
-					select {
-					case <-doneC:
-						return
-					case checkC <- interestedServices:
-						// if we found all those we care about.
-					}
+					checkC <- interestedServices // send out the states
 				}
 			}
 
@@ -78,45 +63,35 @@ func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...s
 
 	}()
 
-	return checkC, doneC
+	return checkC, cancel
 }
 
 // AnyServicesExitState
-func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, chan<- struct{}) {
+func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
 	checkC := make(chan States, 1)
 
-	doneC := make(chan struct{})
-	// ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(sc.Ctx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
 		consumer := internalExitStatesConsumer(sc.Name, target)
-		subscriptionC, unsubscribe := sc.intracom.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
-			BufferPolicy:  intracom.DropNone,
+			BufferPolicy:  intracom.DropOldest,
 		})
 
-		defer func() {
-			close(checkC)
-			unsubscribe()
-		}()
+		defer close(checkC)
+		defer unsubscribe()
 
 		for {
 			select {
-			case <-doneC:
+			case <-ctx.Done():
 				return
-			case stateBytes, open := <-subscriptionC:
-				if !open {
-					// channel closed
-					return
-				}
 
-				var states States
-				err := json.Unmarshal(stateBytes, &states)
-				if err != nil {
-					sc.Log.Warn("rxd failed at unmarshalling the states", "func", "AnyServiceExitsState", "service", sc.Name)
+			case states, open := <-subscriberC:
+				if !open {
 					return
 				}
 
@@ -129,13 +104,8 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 				}
 
 				if len(interestedExits) > 0 {
-					select {
-					case <-doneC:
-						return
-					case checkC <- interestedExits:
-						// if we found ANY that we care about.
-					}
-
+					// if we found ANY that we care about.
+					checkC <- interestedExits
 				}
 			}
 
@@ -143,22 +113,22 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 
 	}()
 
-	return checkC, doneC
+	return checkC, cancel
 }
 
-// AllServicesStates
-func AllServicesStates(sc *ServiceContext) (<-chan States, chan<- struct{}) {
+func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
 	checkC := make(chan States, 1)
-	doneC := make(chan struct{})
+
+	ctx, cancel := context.WithCancel(sc.Ctx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
 		consumer := internalAllStatesConsumer(sc.Name)
-		subscriptionC, unsubscribe := sc.intracom.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
-			BufferPolicy:  intracom.DropNone,
+			BufferPolicy:  intracom.DropOldest,
 		})
 		defer func() {
 			close(checkC)
@@ -167,23 +137,15 @@ func AllServicesStates(sc *ServiceContext) (<-chan States, chan<- struct{}) {
 
 		for {
 			select {
-			case <-doneC:
+			case <-ctx.Done():
 				return
-			case stateBytes, open := <-subscriptionC:
+			case states, open := <-subscriberC:
 				if !open {
-					// channel closed
-					return
-				}
-				var states States
-				err := json.Unmarshal(stateBytes, &states)
-				if err != nil {
-					sc.Log.Warn("rxd failed at unmarshalling the states", "func", "AllServicesStates", "service", sc.Name)
 					return
 				}
 
-				// try to send and while we wait still watch for cancel
 				select {
-				case <-doneC:
+				case <-ctx.Done():
 					return
 				case checkC <- states:
 				}
@@ -192,7 +154,7 @@ func AllServicesStates(sc *ServiceContext) (<-chan States, chan<- struct{}) {
 
 	}()
 
-	return checkC, doneC
+	return checkC, cancel
 }
 
 func internalAllStatesConsumer(name string) string {

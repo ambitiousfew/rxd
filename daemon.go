@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"sync/atomic"
 	"syscall"
 
 	"github.com/ambitiousfew/intracom"
@@ -14,109 +13,207 @@ import (
 )
 
 type daemon struct {
-	intracom *intracom.Intracom[[]byte]
-
 	services []*ServiceContext
+	conf     DaemonConfig
 
-	log    *slog.Logger
+	iSignals *intracom.Intracom[rxdSignal] // signals from daemon to manager
+	iStates  *intracom.Intracom[States]    // services state updates to manager
+
+	logger *slog.Logger
+
+	// stopCh is used to signal to the signal watcher routine to stop.
 	stopCh chan struct{}
+	// stopLogCh is closed when daemon is exiting to stop the log watcher routine to stop.
+	stopLogCh chan struct{}
+
+	started bool
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
-func NewDaemon(services ...*ServiceContext) *daemon {
-	// default severity to log is Info level and higher.
+func NewDaemon(conf DaemonConfig) *daemon {
 	logger := slog.Default()
-	ic := intracom.New[[]byte]()
+
+	if conf.LogHandler != nil {
+		logger = slog.New(conf.LogHandler)
+	}
+
+	logger = logger.With("rxd", conf.Name)
+
+	iSignals := intracom.New[rxdSignal]()
+	iStates := intracom.New[States]()
+
+	if conf.IntracomLogHandler != nil {
+		iSignals.SetLogHandler(conf.IntracomLogHandler)
+		iStates.SetLogHandler(conf.IntracomLogHandler)
+	}
 
 	return &daemon{
-		services: services,
-		intracom: ic,
-		log:      logger,
-		stopCh:   make(chan struct{}),
+		services: []*ServiceContext{},
+		conf:     conf,
+
+		iSignals: iSignals,
+		iStates:  iStates,
+
+		logger: logger,
+		// stopCh is closed by daemon to signal the signal watcher daemon wants to stop.
+		stopCh: make(chan struct{}, 1),
+		// stopLogCh
+		stopLogCh: make(chan struct{}),
+
+		started: false,
 	}
 }
 
-// SetIntracom set an intracom instance to be used by the daemon, manager, and services.
-// intracom is used for intra-service communication ("within" the rxd daemon).
-// A new default intracom instance is created if one is not provided.
-// NOTE: This must be called before Start() is called.
-func (d *daemon) SetIntracom(i *intracom.Intracom[[]byte]) {
-	d.intracom = i
+// AddService adds a service to the daemon.
+// if the service fails to be added, the error will be returned.
+func (d *daemon) AddService(s *ServiceContext) error {
+	return d.addService(s)
+
 }
 
-// SetLogHandler recreates the logger with the passed in handler.
-func (d *daemon) SetLogHandler(handler slog.Handler) {
-	d.log = slog.New(handler)
+// AddServices adds a list of services to the daemon.
+// if any service fails to be added, the service will be skipped and the error will be logged.
+func (d *daemon) AddServices(services ...*ServiceContext) error {
+	for _, service := range services {
+		err := d.addService(service)
+		if err != nil {
+			d.logger.Error(err.Error())
+			continue
+		}
+	}
+	return nil
 }
 
-// Start the entrypoint for the reactive daemon. It launches 2 routines for its wait group.
-//  1. Watches for context cancel or OS signals to trigger manager shutdown.
-//  2. Manager routine to handle running and managing services.
-//
-// Blocks until all routines have finished.
-// NOTE: This is a blocking call, it will not return until all services have completed.
 func (d *daemon) Start(ctx context.Context) error {
-	if len(d.services) < 1 {
-		return fmt.Errorf("no services were provided to rxd daemon to start")
+	if d.started {
+		return fmt.Errorf("daemon is already running")
 	}
 
-	// Start the intracom comms bus
-	if err := d.intracom.Start(); err != nil {
+	if len(d.services) < 1 {
+		return fmt.Errorf("no services were added prior to starting the daemon")
+	}
+
+	// start an intracom instance for daemon to communicate with manager
+	err := d.iSignals.Start()
+	if err != nil {
 		return err
 	}
+	defer d.iSignals.Close()
 
-	defer d.intracom.Close()
-
-	manager := &manager{
-		services: d.services,
-		// N services * 2 (possible states)
-		stateUpdateC: make(chan StateUpdate, len(d.services)*2),
-		// intercom will be passed to each service to share for inter-service comms
-		intracom:       d.intracom,
-		log:            d.log,
-		shutdownCalled: atomic.Int32{},
+	// start an intracom instance for services to communicate with manager
+	err = d.iStates.Start()
+	if err != nil {
+		return err
 	}
+	defer d.iStates.Close()
+
+	d.started = true
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(2) // signal watcher and manager
+
+	go d.signalWatcher(&wg, ctx) // OS Signal watcher routine.
+	go d.startManager(&wg)       // handles start and watching for signal to shutdown
+
+	wg.Wait() // wait for signal watcher and manager to finish
+
+	d.started = false
+	d.logger.Debug("daemon is exiting")
+	return nil
+}
+
+// addService is a helper function to add a service to the daemon.
+func (d *daemon) addService(s *ServiceContext) error {
+	if d.started {
+		return fmt.Errorf("cannot add a service once the daemon is started")
+	}
+
+	for _, service := range d.services {
+		if service.Name == s.Name {
+			return fmt.Errorf("service name '%s' already exists", s.Name)
+		}
+	}
+	d.services = append(d.services, s)
+	return nil
+}
+
+func (d *daemon) startManager(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	// create manager instance
+	manager := newManager(d.services)
+
+	// ensure manager services do not have duplicate names
+	err := manager.preStartCheck()
+	if err != nil {
+		d.logger.Error(err.Error())
+		return
+	}
+	// set intracom instances for manager
+	manager.iSignals = d.iSignals
+	manager.iStates = d.iStates
+	// set logger for manager and all services
+	manager.log = d.logger
 
 	go func() {
-		// watch for both context and OS signals, whichever comes first.
-		defer wg.Done()
+		// watch for signal from daemon to stop
+		signalC, unsubscribe := d.iSignals.Subscribe(&intracom.SubscriberConfig{
+			Topic:         internalSignalsManager,
+			ConsumerGroup: "manager",
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropNone,
+		})
+		defer unsubscribe()
 
-		signalC := make(chan os.Signal, 1)
+		// TODO: in future we can handle specific signals here
+		// such as restart/hot-reload of services without bringing down
+		// the daemon and/or manager entirely.
 
-		defer close(signalC)
-		defer manager.shutdown() // signal manager to shutdown all services in both cases
-		defer signal.Stop(signalC)
+		<-signalC          // wait for signal from daemon to stop
+		manager.shutdown() // signal manager to begin shutdown, should unblock manager.start()
+	}()
 
-		signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
+	manager.start() // blocks until all services started have stopped
+}
 
+func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context) {
+	defer wg.Done()
+	defer close(d.stopLogCh)
+
+	signalManager, unregister := d.iSignals.Register(internalSignalsManager)
+	defer unregister()
+
+	if len(d.conf.Signals) == 0 {
+		d.conf.Signals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
+	}
+
+	// Watch for OS Signals in separate go routine so we dont block main thread.
+	d.logger.Debug("daemon starting system signal watcher")
+
+	signalC := make(chan os.Signal, 1)
+	signal.Notify(signalC, d.conf.Signals...)
+
+	var signaled bool
+
+	for !signaled {
 		select {
 		case <-ctx.Done():
-			d.log.Debug("rxd daemon received context done signal")
-			return
+			d.logger.Debug("daemon received context done signal")
+			signaled = true
 		case <-signalC:
-			d.log.Debug("rxd daemon received OS signal")
-			return
+			d.logger.Debug("daemon os signal received")
+			signaled = true
+		case <-d.stopCh:
+			// if manager completes we are done running...
+			d.logger.Debug("daemon received stop signal")
+			signaled = true
 		}
-	}()
+	}
 
-	// Run manager in its own thread so all wait using waitgroup
-	go func() {
-		defer wg.Done()
+	signal.Stop(signalC)
+	close(signalC)
 
-		// preStartCheck ensures no duplicate service names were passed to daemon
-		if err := manager.preStartCheck(); err != nil {
-			// TODO: get errors out to daemon start
-			return
-		}
-
-		manager.start() // blocks until all services are done running their lifecycles
-	}()
-
-	wg.Wait() // blocks until all routines are done
-
-	d.log.Debug("rxd daemon is exiting")
-	return nil
+	// TODO: future, add restart/hot-reload signal handler
+	// after receiving any signal, inform manager to stop.
+	signalManager <- signalStop
 }

@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/ambitiousfew/intracom"
 	"github.com/ambitiousfew/rxd"
 	"golang.org/x/exp/slog"
 )
@@ -42,7 +41,7 @@ func NewHelloWorldService() *HelloWorldAPIService {
 func (s *HelloWorldAPIService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	go func() {
 		<-sc.ShutdownSignal() // wait for shutdown signal against this service
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		s.server.Shutdown(ctx)
 	}()
@@ -72,10 +71,12 @@ func (s *HelloWorldAPIService) Init(sc *rxd.ServiceContext) rxd.ServiceResponse 
 
 func (s *HelloWorldAPIService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	// Idle moves to RunState
+	sc.Log.Info("idle state")
 	return rxd.NewResponse(nil, rxd.RunState)
 }
 
 func (s *HelloWorldAPIService) Stop(sc *rxd.ServiceContext) rxd.ServiceResponse {
+	sc.Log.Info("stopping server")
 	// Stop moves to ExitState
 	return rxd.NewResponse(nil, rxd.ExitState)
 }
@@ -98,15 +99,17 @@ func main() {
 	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
+
 	logger := slog.New(handler)
-
-	ic := intracom.New[[]byte]()
-	ic.SetLogger(logger)
-
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
-	daemon := rxd.NewDaemon(apiSvc)
-	daemon.SetLogHandler(handler)
-	daemon.SetIntracom(ic)
+	daemon := rxd.NewDaemon(rxd.DaemonConfig{
+		Name:               "hello-world-example",
+		LogHandler:         handler,
+		IntracomLogHandler: handler,
+		Signals:            []os.Signal{os.Interrupt, os.Kill},
+	})
+
+	daemon.AddService(apiSvc)
 
 	// We can set the log severity we want to observe, LevelInfo is default
 
@@ -116,5 +119,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Println("successfully stopped daemon")
+	logger.Info("successfully stopped daemon")
 }

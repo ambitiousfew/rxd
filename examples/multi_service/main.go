@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -39,15 +40,20 @@ func main() {
 	// We are interested in when API Server reaches a RunState and when its reached a StopState
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})
+
 	logger := slog.New(handler)
 	// Pass N services for daemon to manage and start
-	daemon := rxd.NewDaemon(pollRxdSvc, apiSvc)
-	daemon.SetLogHandler(handler)
-	// daemon.SetIntracom(ic) // optional step to display DEBUG logs from intracom
+	daemon := rxd.NewDaemon(rxd.DaemonConfig{
+		Name:               "multi-service-example",
+		LogHandler:         handler,
+		IntracomLogHandler: handler,
+		Signals:            []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+	})
 
+	daemon.AddServices(pollRxdSvc, apiSvc)
 	// tell the daemon to Start - this blocks until the underlying
 	// services manager stops running, which it wont until all services complete.
 	err := daemon.Start(ctx)
