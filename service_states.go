@@ -17,7 +17,7 @@ type StateUpdate struct {
 // reflects the service name and its lifecycle state.
 type States map[string]State
 
-func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
+func AnyServicesEnterState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
 	if sc.iStates == nil {
 		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
 		return nil, func() {} // noop cancel
@@ -51,7 +51,60 @@ func AllServicesEnteredState(sc *ServiceContext, target State, serviceNames ...s
 
 				interestedServices := make(States)
 				for _, name := range serviceNames {
-					if val := states[name]; val != target {
+					if val := states[name]; val == target {
+						// build states map of only services we care about.
+						interestedServices[name] = val
+					}
+				}
+
+				// if we found all those we care about.
+				if len(interestedServices) > 0 {
+					checkC <- interestedServices // send out the states
+				}
+			}
+
+		}
+
+	}()
+
+	return checkC, cancel
+}
+
+func AllServicesEnterState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
+	if sc.iStates == nil {
+		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
+		return nil, func() {} // noop cancel
+	}
+	checkC := make(chan States, 1)
+
+	ctx, cancel := context.WithCancel(sc.Ctx)
+
+	go func() {
+		// subscribe to the internal states on behalf of the service context given.
+		consumer := internalEnterStatesConsumer(sc.Name, target)
+		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropOldest,
+		})
+
+		defer close(checkC)
+		defer unsubscribe()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case states, open := <-subscriberC:
+				if !open {
+					return
+				}
+
+				interestedServices := make(States)
+				for _, name := range serviceNames {
+					if val := states[name]; val == target {
 						// build states map of only services we care about.
 						interestedServices[name] = val
 					}

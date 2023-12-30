@@ -40,7 +40,7 @@ func (s *APIPollingService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	// So if HelloWorldAPI is the only passed service here and it ENTERS a "RunState" then
 	//  APIPolling service will be notified of that state change.
 	// This is how we are able to listen to state changes of other services running within RxD.
-	enteredStateC, cancel := rxd.AllServicesEnteredState(sc, rxd.RunState, HelloWorldAPI)
+	enteredStateC, cancel := rxd.AllServicesEnterState(sc, rxd.RunState, HelloWorldAPI)
 	defer cancel()
 
 	for {
