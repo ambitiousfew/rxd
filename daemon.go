@@ -24,9 +24,6 @@ type daemon struct {
 
 	log *slog.Logger
 
-	// stopCh is used to signal to the signal watcher routine to stop.
-	stopCh chan struct{}
-
 	started atomic.Bool
 }
 
@@ -57,8 +54,6 @@ func NewDaemon(conf DaemonConfig) *daemon {
 		iStates:  iStates,
 
 		log: logger,
-
-		stopCh: make(chan struct{}, 1),
 
 		started: atomic.Bool{},
 	}
@@ -124,7 +119,7 @@ func (d *daemon) Start(ctx context.Context) error {
 
 	wg.Wait() // wait for signal watcher and manager to finish
 
-	d.log.Debug("daemon is exiting")
+	d.log.Debug("manager and signal watcher have stopped running, daemon is exiting")
 
 	d.started.Store(false)
 	return nil
@@ -149,7 +144,6 @@ func (d *daemon) addService(s *ServiceContext) error {
 
 func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States) {
 	defer wg.Done()
-
 	// create a channel for each service to publish state updates to state watcher
 	stateUpdateC := make(chan StateUpdate, d.total*2)
 	defer close(stateUpdateC)
@@ -167,7 +161,7 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States) {
 		defer unsubscribe()
 
 		<-signalC // if we receive a signal from daemon signal watcher, we are done running.
-		d.log.Debug("manager received stop signal")
+		d.log.Debug("manager received stop signal from daemon")
 
 		d.services.Range(func(anyName, anyService interface{}) bool {
 			service, ok := anyService.(*ServiceContext)
@@ -175,11 +169,11 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States) {
 				d.log.Error("failed to stop service", "name", anyName, "error", "failed to cast service to *ServiceContext")
 				return false
 			}
-			d.log.Debug("manager stopping service", "name", service.Name)
 			service.shutdown()
 			return true
 		})
 
+		d.log.Debug("manager signaled shutdown to all services", "total", d.total)
 	}()
 
 	// a channel to signal the service state watcher to stop.
@@ -212,12 +206,10 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States) {
 
 	d.log.Debug("manager started services", "total", totalStarted)
 	swg.Wait() // blocks until all services have exited their lifecycles
-	d.log.Debug("manager done waiting for services to stop")
 
 	// all services have exited their lifecycles at this point.
 	close(stateWatcherStopC) // signal to state watcher to stop
 	<-watcherDoneC           // wait for state watcher to signal done
-	d.log.Debug("manager has stopped running all services")
 
 }
 
@@ -290,7 +282,7 @@ func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, signalPu
 	}
 
 	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.log.Debug("daemon starting system signal watcher")
+	d.log.Debug("daemon starting signal watcher")
 
 	signalC := make(chan os.Signal, 1)
 	signal.Notify(signalC, d.conf.Signals...)
@@ -298,9 +290,9 @@ func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, signalPu
 	// TODO: future, add restart/hot-reload signal handler
 	// after receiving any signal, inform manager to stop.
 	defer func() {
-		signal.Stop(signalC)
-		close(signalC)
-		signalPublishC <- signalStop
+		signal.Stop(signalC)         // stop receiving OS signals
+		close(signalC)               // close the signal channel
+		signalPublishC <- signalStop // signal to manager via intracom to stop
 	}()
 
 	for {
@@ -310,10 +302,6 @@ func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, signalPu
 			return
 		case <-signalC:
 			d.log.Debug("daemon os signal received")
-			return
-		case <-d.stopCh:
-			// if manager completes we are done running...
-			d.log.Debug("daemon received stop signal")
 			return
 		}
 	}
