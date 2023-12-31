@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"syscall"
 	"time"
@@ -19,7 +18,7 @@ const (
 
 // Example entrypoint
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
 	// Create Poll Service config with RunPolicy option.
@@ -47,18 +46,22 @@ func main() {
 	logger := slog.New(handler)
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon(rxd.DaemonConfig{
-		Name:               "multi-service-example",
-		LogHandler:         handler,
-		IntracomLogHandler: handler,
-		Signals:            []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		Name:       "multi-service-example",
+		LogHandler: logger.Handler(),
+		// IntracomLogHandler: logger.Handler(),
+		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 	})
 
-	daemon.AddServices(pollRxdSvc, apiSvc)
+	err := daemon.AddServices(pollRxdSvc, apiSvc)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
 	// tell the daemon to Start - this blocks until the underlying
 	// services manager stops running, which it wont until all services complete.
-	err := daemon.Start(ctx)
+	err = daemon.Start(ctx)
 	if err != nil {
-		log.Println(err)
+		logger.Error(err.Error())
 		os.Exit(1)
 	}
 	logger.Info("daemon has completed")

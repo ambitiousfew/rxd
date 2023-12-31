@@ -2,6 +2,7 @@ package rxd
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -23,11 +24,9 @@ type ServiceContext struct {
 
 	iStates *intracom.Intracom[States]
 
-	// ensure a service shutdown cannot be called twice
-	stopCalled     atomic.Int32
-	shutdownCalled atomic.Int32
-	// mu is primarily used for mutations against isStopped and isShutdown between manager and wrapped service logic
-	mu    sync.Mutex
+	stopCalled     atomic.Int32 // 0 = not called, 1 = called
+	shutdownCalled atomic.Int32 // 0 = not called, 1 = called
+
 	doneC chan struct{}
 }
 
@@ -48,9 +47,7 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		shutdownCalled: atomic.Int32{},
 		service:        service,
 		Log:            opts.logger,
-
-		mu:    sync.Mutex{},
-		doneC: make(chan struct{}),
+		doneC:          make(chan struct{}),
 	}
 }
 
@@ -64,16 +61,95 @@ func (sc *ServiceContext) hasStopped() bool {
 	return sc.stopCalled.Load() == 1
 }
 
-func (sc *ServiceContext) hasShutdown() bool {
-	// 0 has not shutdown, 1 has shutdown
-	return sc.shutdownCalled.Load() == 1
-}
-
 func (sc *ServiceContext) shutdown() {
 	if sc.shutdownCalled.Swap(1) == 1 {
-		// if we swap and the old value is already 1, shutdown was already called.
 		return
 	}
-	sc.Log.Debug("sending a shutdown signal", "service", sc.Name)
-	sc.cancelCtx()
+	sc.cancelCtx() // cancel context to signal shutdown to service
+}
+
+// startService is run in its own routine by daemon.
+// it is a wrapper around the service's lifecycle methods and
+// is responsible for calling the service's lifecycle methods and enforcing the service's run policy.
+func startService(wg *sync.WaitGroup, stateUpdateC chan<- StateUpdate, sc *ServiceContext) {
+	defer wg.Done()
+
+	// All services begin at Init stage
+	var svcResp ServiceResponse = NewResponse(nil, InitState)
+	service := sc.service
+
+	for {
+		// inform state watcher of this service's upcoming state transition
+		stateUpdateC <- StateUpdate{Name: sc.Name, State: svcResp.NextState}
+
+		// Determine the next state the service should be in.
+		// Run the method associated with the next state.
+		switch svcResp.NextState {
+
+		case InitState:
+
+			svcResp = service.Init(sc)
+			if svcResp.Error != nil {
+				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
+			}
+
+		case IdleState:
+			svcResp = service.Idle(sc)
+			if svcResp.Error != nil {
+				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
+			}
+
+		case RunState:
+			svcResp = service.Run(sc)
+			if svcResp.Error != nil {
+				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
+			}
+
+			// Enforce Run policies
+			switch sc.opts.runPolicy {
+			case RunOncePolicy:
+				// regardless of success/fail, we exit
+				svcResp.NextState = ExitState
+
+			case RetryUntilSuccessPolicy:
+				if svcResp.Error == nil {
+					svcResp := service.Stop(sc)
+					if svcResp.Error != nil {
+						continue
+					}
+					sc.stopCalled.Store(1)
+					// If Run didnt error, we assume successful run once and stop service.
+					svcResp.NextState = ExitState
+				}
+			}
+		case StopState:
+			svcResp = service.Stop(sc)
+			if svcResp.Error != nil {
+				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
+			}
+			sc.stopCalled.Store(1)
+
+		case ExitState:
+			if !sc.hasStopped() {
+				// inform state watcher of this service's upcoming state transition since we wont loop again after this.
+				stateUpdateC <- StateUpdate{Name: sc.Name, State: svcResp.NextState}
+				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
+				svcResp = service.Stop(sc)
+				if svcResp.Error != nil {
+					sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
+				}
+				sc.stopCalled.Store(1)
+			}
+
+			sc.shutdown()
+			// we are done with this service, exit the service wrapper routine.
+			sc.Log.Debug("service exiting", "service", sc.Name)
+			close(sc.doneC)
+			return
+
+		default:
+			sc.Log.Error(fmt.Sprintf("unknown state '%s' returned from service", svcResp.NextState))
+		}
+
+	}
 }
