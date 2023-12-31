@@ -59,7 +59,11 @@ func AnyServicesEnterState(sc *ServiceContext, target State, serviceNames ...str
 
 				// if we found all those we care about.
 				if len(interestedServices) > 0 {
-					checkC <- interestedServices // send out the states
+					select {
+					case <-ctx.Done(): // user cancelled us
+						return
+					case checkC <- interestedServices: // send out the states we cared about
+					}
 				}
 			}
 
@@ -112,7 +116,11 @@ func AllServicesEnterState(sc *ServiceContext, target State, serviceNames ...str
 
 				// if we found all those we care about.
 				if len(interestedServices) == len(serviceNames) {
-					checkC <- interestedServices // send out the states
+					select {
+					case <-ctx.Done(): // user cancelled us
+						return
+					case checkC <- interestedServices: // send out the states
+					}
 				}
 			}
 
@@ -165,8 +173,12 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 				}
 
 				if len(interestedExits) > 0 {
-					// if we found ANY that we care about.
-					checkC <- interestedExits
+
+					select {
+					case <-ctx.Done(): // user cancelled us
+						return
+					case checkC <- interestedExits: // send out the states we cared about
+					}
 				}
 			}
 

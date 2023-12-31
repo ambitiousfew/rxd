@@ -92,17 +92,17 @@ func (d *daemon) Start(ctx context.Context) error {
 
 	// start an intracom instance for daemon to communicate with manager
 	err := d.iSignals.Start()
+	defer d.iStates.Close() // close the internal states intracom
 	if err != nil {
 		return err
 	}
-	defer d.iSignals.Close()
 
 	// start an intracom instance for services to communicate with manager
 	err = d.iStates.Start()
 	if err != nil {
 		return err
 	}
-	defer d.iStates.Close()
+	defer d.iSignals.Close() // close the internal signals intracom
 
 	// register the internal states topic for use by the service state watcher to push states to services.
 	statePublishC, unregisterStateC := d.iStates.Register(internalServiceStates)

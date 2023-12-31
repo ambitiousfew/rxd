@@ -4,4 +4,4 @@ go 1.20
 
 require golang.org/x/exp v0.0.0-20231219180239-dc181d75b848
 
-require github.com/ambitiousfew/intracom v1.0.2-0.20231230224230-1ffb1c687f28 // indirect
+require github.com/ambitiousfew/intracom v1.1.0

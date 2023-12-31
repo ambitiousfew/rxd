@@ -1,8 +1,4 @@
-github.com/ambitiousfew/intracom v1.0.2-0.20231230201845-d3a8c7b1628d h1:tT67JwdYJ0DEOTsDdsl153536qK02YIuSTZR53e93Do=
-github.com/ambitiousfew/intracom v1.0.2-0.20231230201845-d3a8c7b1628d/go.mod h1:FAuuFa1N5Q5SP+BzTB6vT446T2oWptWfHSUnAuxJEm0=
-github.com/ambitiousfew/intracom v1.0.2-0.20231230203256-b5a03484f373 h1:Qck+tnCs1nABF7yKvRs/NvDlI5SknhU89RbRHw6HhKM=
-github.com/ambitiousfew/intracom v1.0.2-0.20231230203256-b5a03484f373/go.mod h1:FAuuFa1N5Q5SP+BzTB6vT446T2oWptWfHSUnAuxJEm0=
-github.com/ambitiousfew/intracom v1.0.2-0.20231230224230-1ffb1c687f28 h1:5qbqY9wSFihIDkOk9TQVpFG8RSkaTiLQdygICLYQSnc=
-github.com/ambitiousfew/intracom v1.0.2-0.20231230224230-1ffb1c687f28/go.mod h1:FAuuFa1N5Q5SP+BzTB6vT446T2oWptWfHSUnAuxJEm0=
+github.com/ambitiousfew/intracom v1.1.0 h1:wuIz/XaIIjHYhmlX1vgu+vajShrAfinvU6uk4AQ4ig0=
+github.com/ambitiousfew/intracom v1.1.0/go.mod h1:FAuuFa1N5Q5SP+BzTB6vT446T2oWptWfHSUnAuxJEm0=
 golang.org/x/exp v0.0.0-20231219180239-dc181d75b848 h1:+iq7lrkxmFNBM7xx+Rae2W6uyPfhPeDWD+n+JgppptE=
 golang.org/x/exp v0.0.0-20231219180239-dc181d75b848/go.mod h1:iRJReGqOEeBhDZGkGbynYwcHlctCvnjTYIamk7uXpHI=
