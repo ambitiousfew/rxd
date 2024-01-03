@@ -40,7 +40,7 @@ func NewHelloWorldService() *HelloWorldAPIService {
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *HelloWorldAPIService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	go func() {
-		<-sc.ShutdownSignal() // wait for shutdown signal against this service
+		<-sc.ShutdownCtx.Done() // wait for shutdown signal against this service
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		s.server.Shutdown(ctx)

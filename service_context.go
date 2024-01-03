@@ -14,13 +14,14 @@ import (
 // This config contains preconfigured shutdown channel,
 type ServiceContext struct {
 	Name string
-	Ctx  context.Context
 	Log  *slog.Logger
 
-	cancelCtx context.CancelFunc
+	ShutdownCtx context.Context
+	cancel      context.CancelFunc
 
-	service Service
-	opts    *serviceOpts
+	service   Service
+	runPolicy RunPolicy
+	// opts    *serviceOpts
 
 	iStates *intracom.Intracom[States]
 
@@ -30,31 +31,27 @@ type ServiceContext struct {
 	doneC chan struct{}
 }
 
-// NewService creates a new service context instance given a name and options.
+// NewServiceContext creates a new service context instance given a name, service, and service options.
 func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
-	if opts.logger == nil {
-		opts.logger = slog.Default()
+	if opts == nil {
+		opts = NewServiceOpts() // if nil is passed, use defaults
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	return &ServiceContext{
-		Ctx:       ctx,
-		cancelCtx: cancel,
+		ShutdownCtx: opts.ctx,
+		cancel:      opts.cancel,
+
 		Name:      name,
-		opts:      opts,
+		runPolicy: opts.runPolicy,
+		// opts: opts,
 
 		// 0 = not called, 1 = called
 		shutdownCalled: atomic.Int32{},
 		service:        service,
-		Log:            opts.logger,
-		doneC:          make(chan struct{}),
+		// attach the service name to the child logger automatically
+		Log:   slog.With(opts.logHandler, "service", name),
+		doneC: make(chan struct{}),
 	}
-}
-
-// ShutdownSignal returns the channel the side implementing the service should use and watch to be notified
-// when the daemon/manager are attempting to shutdown services.
-func (sc *ServiceContext) ShutdownSignal() <-chan struct{} {
-	return sc.Ctx.Done()
 }
 
 func (sc *ServiceContext) hasStopped() bool {
@@ -65,15 +62,13 @@ func (sc *ServiceContext) shutdown() {
 	if sc.shutdownCalled.Swap(1) == 1 {
 		return
 	}
-	sc.cancelCtx() // cancel context to signal shutdown to service
+	sc.cancel() // cancel context to signal shutdown to service
 }
 
 // startService is run in its own routine by daemon.
 // it is a wrapper around the service's lifecycle methods and
 // is responsible for calling the service's lifecycle methods and enforcing the service's run policy.
 func startService(wg *sync.WaitGroup, stateUpdateC chan<- StateUpdate, sc *ServiceContext) {
-	defer wg.Done()
-
 	// All services begin at Init stage
 	var svcResp ServiceResponse = NewResponse(nil, InitState)
 	service := sc.service
@@ -106,7 +101,7 @@ func startService(wg *sync.WaitGroup, stateUpdateC chan<- StateUpdate, sc *Servi
 			}
 
 			// Enforce Run policies
-			switch sc.opts.runPolicy {
+			switch sc.runPolicy {
 			case RunOncePolicy:
 				// regardless of success/fail, we exit
 				svcResp.NextState = ExitState
@@ -145,11 +140,12 @@ func startService(wg *sync.WaitGroup, stateUpdateC chan<- StateUpdate, sc *Servi
 			// we are done with this service, exit the service wrapper routine.
 			sc.Log.Debug("service exiting", "service", sc.Name)
 			close(sc.doneC)
+
+			wg.Done()
 			return
 
 		default:
 			sc.Log.Error(fmt.Sprintf("unknown state '%s' returned from service", svcResp.NextState))
 		}
-
 	}
 }

@@ -48,7 +48,7 @@ func (s *HelloWorldAPIService) Idle(c *rxd.ServiceContext) rxd.ServiceResponse {
 	c.Log.Info("intentionally delaying for 8s before run begins")
 	for {
 		select {
-		case <-c.ShutdownSignal():
+		case <-c.ShutdownCtx.Done():
 			return rxd.NewResponse(nil, rxd.StopState)
 		case <-timer.C:
 			// Intentional 20s delay so polling service can react to failed attempts to this API.
@@ -65,7 +65,7 @@ func (s *HelloWorldAPIService) Run(c *rxd.ServiceContext) rxd.ServiceResponse {
 		// We should always watch for this signal, must use goroutine here
 		// since ListenAndServe will block and we need a way to end the
 		// server as well as inform the server to stop all requests ASAP.
-		<-c.ShutdownSignal()
+		<-c.ShutdownCtx.Done()
 		c.Log.Info("received a shutdown signal, cancel server context to stop server gracefully")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

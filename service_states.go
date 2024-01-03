@@ -24,7 +24,7 @@ func AnyServicesEnterState(sc *ServiceContext, target State, serviceNames ...str
 	}
 	checkC := make(chan States, 1)
 
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given.
@@ -81,7 +81,7 @@ func AllServicesEnterState(sc *ServiceContext, target State, serviceNames ...str
 	}
 	checkC := make(chan States, 1)
 
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given.
@@ -139,7 +139,7 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 	}
 	checkC := make(chan States, 1)
 
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
@@ -196,7 +196,7 @@ func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
 	}
 	checkC := make(chan States, 1)
 
-	ctx, cancel := context.WithCancel(sc.Ctx)
+	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
 
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>

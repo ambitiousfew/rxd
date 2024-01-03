@@ -45,7 +45,7 @@ func (s *APIPollingService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
 
 	for {
 		select {
-		case <-sc.ShutdownSignal():
+		case <-sc.ShutdownCtx.Done():
 			return rxd.NewResponse(nil, rxd.StopState)
 		case <-enteredStateC:
 			// if we receive a state change over this channel, it will only happen
@@ -75,7 +75,7 @@ func (s *APIPollingService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 	var pollCount int
 	for {
 		select {
-		case <-sc.ShutdownSignal():
+		case <-sc.ShutdownCtx.Done():
 			return rxd.NewResponse(nil, rxd.StopState)
 		case <-exitStateC:
 			// Polling service can wait to be Notified of a specific state change, or even a state to be put into.

@@ -62,13 +62,22 @@ func NewDaemon(conf DaemonConfig) *daemon {
 // AddService adds a service to the daemon.
 // if the service fails to be added, the error will be returned.
 func (d *daemon) AddService(s *ServiceContext) error {
+	if d.started.Load() {
+		return fmt.Errorf("cannot add a service once the daemon is started")
+	}
 	return d.addService(s)
 
 }
 
 // AddServices adds a list of services to the daemon.
-// if any service fails to be added, the service will be skipped and the error will be logged.
+// if any service fails to be added, the error is logged and the next service is attempted.
+// any services that fail likely are failing due to name overlap and will be skipped
+// if daemon is already started, no new services can be added.
 func (d *daemon) AddServices(services ...*ServiceContext) error {
+	if d.started.Load() {
+		return fmt.Errorf("cannot add a service once the daemon is started")
+	}
+
 	for _, service := range services {
 		err := d.addService(service)
 		if err != nil {
@@ -92,7 +101,6 @@ func (d *daemon) Start(ctx context.Context) error {
 
 	// start an intracom instance for daemon to communicate with manager
 	err := d.iSignals.Start()
-	defer d.iStates.Close() // close the internal states intracom
 	if err != nil {
 		return err
 	}
@@ -102,35 +110,38 @@ func (d *daemon) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer d.iSignals.Close() // close the internal signals intracom
 
 	// register the internal states topic for use by the service state watcher to push states to services.
 	statePublishC, unregisterStateC := d.iStates.Register(internalServiceStates)
-	defer unregisterStateC()
-
 	publishSignalC, unregisterSignalC := d.iSignals.Register(internalSignalsManager)
-	defer unregisterSignalC()
+
 	var wg sync.WaitGroup
 
-	wg.Add(2) // signal watcher and manager
+	wg.Add(3) // signal watcher and manager
 
-	go d.signalWatcher(&wg, ctx, publishSignalC) // OS Signal watcher routine.
-	go d.manager(&wg, statePublishC)             // handles starting services and watching for signal to shutdown
+	signalStopC := make(chan struct{}, 1)
+
+	go d.signalWatcher(&wg, ctx, publishSignalC, signalStopC) // OS Signal watcher routine.
+	go d.managerWatcher(&wg)
+	go d.manager(&wg, statePublishC, signalStopC) // handles starting services and watching for signal to shutdown
 
 	wg.Wait() // wait for signal watcher and manager to finish
 
 	d.log.Debug("manager and signal watcher have stopped running, daemon is exiting")
 
+	// ensure unregisters take place before closing intracom instances
+	unregisterStateC()
+	unregisterSignalC()
+
 	d.started.Store(false)
+
+	d.iSignals.Close() // close the internal signals intracom, now unusable
+	d.iStates.Close()  // close the internal states intracom, now unusable
 	return nil
 }
 
 // addService is a helper function to add a service to the daemon.
 func (d *daemon) addService(s *ServiceContext) error {
-	if d.started.Load() {
-		return fmt.Errorf("cannot add a service once the daemon is started")
-	}
-
 	// ensure the service name hasn't already been added.
 	if service, exists := d.services.Load(s.Name); exists {
 		return fmt.Errorf("service with the name '%s' already exists", service.(*ServiceContext).Name)
@@ -142,39 +153,11 @@ func (d *daemon) addService(s *ServiceContext) error {
 	return nil
 }
 
-func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States) {
+func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States, doneC chan<- struct{}) {
 	defer wg.Done()
 	// create a channel for each service to publish state updates to state watcher
 	stateUpdateC := make(chan StateUpdate, d.total*2)
 	defer close(stateUpdateC)
-
-	doneC := make(chan struct{})
-	go func() {
-		defer close(doneC)
-		// watch for internal signals from daemon to manager
-		signalC, unsubscribe := d.iSignals.Subscribe(&intracom.SubscriberConfig{
-			Topic:         internalSignalsManager,
-			ConsumerGroup: "manager",
-			BufferSize:    1,
-			BufferPolicy:  intracom.DropNone,
-		})
-		defer unsubscribe()
-
-		<-signalC // if we receive a signal from daemon signal watcher, we are done running.
-		d.log.Debug("manager received stop signal from daemon")
-
-		d.services.Range(func(anyName, anyService interface{}) bool {
-			service, ok := anyService.(*ServiceContext)
-			if !ok {
-				d.log.Error("failed to stop service", "name", anyName, "error", "failed to cast service to *ServiceContext")
-				return false
-			}
-			service.shutdown()
-			return true
-		})
-
-		d.log.Debug("manager signaled shutdown to all services", "total", d.total)
-	}()
 
 	// a channel to signal the service state watcher to stop.
 	stateWatcherStopC := make(chan struct{})
@@ -210,6 +193,7 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States) {
 	// all services have exited their lifecycles at this point.
 	close(stateWatcherStopC) // signal to state watcher to stop
 	<-watcherDoneC           // wait for state watcher to signal done
+	close(doneC)             // signal done in case signal watcher is still running
 
 }
 
@@ -274,7 +258,7 @@ func (d *daemon) serviceStateWatcher(statePublishC chan<- States, stateUpdateC <
 }
 
 // signal watcher is run in its own routine by daemon to watch for context done and OS Signals.
-func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, signalPublishC chan<- rxdSignal) {
+func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, managerC chan<- rxdSignal, stopSignal <-chan struct{}) {
 	defer wg.Done()
 
 	if len(d.conf.Signals) == 0 {
@@ -284,15 +268,15 @@ func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, signalPu
 	// Watch for OS Signals in separate go routine so we dont block main thread.
 	d.log.Debug("daemon starting signal watcher")
 
-	signalC := make(chan os.Signal, 1)
-	signal.Notify(signalC, d.conf.Signals...)
+	osSignal := make(chan os.Signal, 1)
+	signal.Notify(osSignal, d.conf.Signals...)
 
 	// TODO: future, add restart/hot-reload signal handler
 	// after receiving any signal, inform manager to stop.
 	defer func() {
-		signal.Stop(signalC)         // stop receiving OS signals
-		close(signalC)               // close the signal channel
-		signalPublishC <- signalStop // signal to manager via intracom to stop
+		signal.Stop(osSignal)  // stop receiving OS signals
+		close(osSignal)        // close the signal channel
+		managerC <- signalStop // signal to manager via intracom to stop
 	}()
 
 	for {
@@ -300,9 +284,42 @@ func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, signalPu
 		case <-ctx.Done():
 			d.log.Debug("daemon received context done signal")
 			return
-		case <-signalC:
+		case <-osSignal:
 			d.log.Debug("daemon os signal received")
+			return
+		case <-stopSignal:
+			d.log.Debug("daemon received signal from manager that all services have stopped")
 			return
 		}
 	}
+}
+
+// managerWatcher is run in its own routine by daemon to watch for internal signals from daemon to manager.
+// if a signal is received from daemon, it will signal all services manager is running to shutdown.
+func (d *daemon) managerWatcher(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	// watch for internal signals from daemon to manager
+	signalC, unsubscribe := d.iSignals.Subscribe(&intracom.SubscriberConfig{
+		Topic:         internalSignalsManager,
+		ConsumerGroup: "manager",
+		BufferSize:    1,
+		BufferPolicy:  intracom.DropNone,
+	})
+	defer unsubscribe()
+
+	<-signalC // if we receive a signal from daemon signal watcher, we are done running.
+	d.log.Debug("manager watcher received stop signal from daemon signal watcher")
+
+	d.services.Range(func(anyName, anyService interface{}) bool {
+		service, ok := anyService.(*ServiceContext)
+		if !ok {
+			d.log.Error("failed to stop service", "name", anyName, "error", "failed to cast service to *ServiceContext")
+			return false
+		}
+		service.shutdown()
+		return true
+	})
+
+	d.log.Debug("manager watcher signaled shutdown to all services", "total", d.total)
 }
