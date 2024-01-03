@@ -52,10 +52,6 @@ func NewServiceOpts(options ...ServiceOption) *serviceOpts {
 		opts.ctx, opts.cancel = context.WithCancel(context.Background())
 	}
 
-	if opts.logHandler == nil {
-		opts.logHandler = slog.Default().Handler()
-	}
-
 	return opts
 }
 

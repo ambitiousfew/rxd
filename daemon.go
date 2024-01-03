@@ -29,17 +29,17 @@ type daemon struct {
 
 // NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(conf DaemonConfig) *daemon {
-	logger := slog.Default()
-
-	if conf.LogHandler != nil {
-		logger = slog.New(conf.LogHandler)
+	var logger *slog.Logger
+	if conf.LogHandler == nil {
+		logger = slog.Default().With("rxd", conf.Name)
+	} else {
+		logger = slog.New(conf.LogHandler).With("rxd", conf.Name)
 	}
-
-	logger = logger.With("rxd", conf.Name)
 
 	iSignals := intracom.New[rxdSignal]("rxd-signals")
 	iStates := intracom.New[States]("rxd-states")
 
+	// override log handler for intracom instances, gives ability to debug intracom
 	if conf.IntracomLogHandler != nil {
 		iSignals.SetLogHandler(conf.IntracomLogHandler)
 		iStates.SetLogHandler(conf.IntracomLogHandler)
@@ -177,8 +177,10 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States, doneC 
 			return false
 		}
 		// service := service                                // rebind loop variable
-		service.iStates = d.iStates                       // attach the manager's internal states to each service
-		service.Log = d.log.With("service", service.Name) // attach child logger instance with service name
+		service.iStates = d.iStates // attach the manager's internal states to each service
+		if service.Log == nil {     // if service has no logger, create child off the daemons logger
+			service.Log = d.log.With("service", service.Name) // attach child logger instance with service name
+		}
 
 		swg.Add(1)
 		// Start each service in its own routine logic / conditional lifecycle.

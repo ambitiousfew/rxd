@@ -37,19 +37,24 @@ func NewService(name string, service Service, opts *serviceOpts) *ServiceContext
 		opts = NewServiceOpts() // if nil is passed, use defaults
 	}
 
-	return &ServiceContext{
-		ShutdownCtx: opts.ctx,
-		cancel:      opts.cancel,
+	var log *slog.Logger
+	if opts.logHandler != nil {
+		// overrides the logger that manager would attach to the service context
+		log = slog.New(opts.logHandler).With("service", name)
+	}
 
-		Name:      name,
+	return &ServiceContext{
+		Name:        name,
+		ShutdownCtx: opts.ctx,
+		Log:         log, // if nil, manager takes care of it.
+
 		runPolicy: opts.runPolicy,
-		// opts: opts,
+		cancel:    opts.cancel,
 
 		// 0 = not called, 1 = called
 		shutdownCalled: atomic.Int32{},
 		service:        service,
 		// attach the service name to the child logger automatically
-		Log:   slog.With(opts.logHandler, "service", name),
 		doneC: make(chan struct{}),
 	}
 }
