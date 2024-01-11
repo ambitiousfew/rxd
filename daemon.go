@@ -302,7 +302,7 @@ func (d *daemon) managerWatcher(wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	// watch for internal signals from daemon to manager
-	signalC, unsubscribe := d.iSignals.Subscribe(&intracom.SubscriberConfig{
+	signalC, unsubscribe := d.iSignals.Subscribe(intracom.SubscriberConfig{
 		Topic:         internalSignalsManager,
 		ConsumerGroup: "manager",
 		BufferSize:    1,

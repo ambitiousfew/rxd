@@ -29,7 +29,7 @@ func AnyServicesEnterState(sc *ServiceContext, target State, serviceNames ...str
 	go func() {
 		// subscribe to the internal states on behalf of the service context given.
 		consumer := internalEnterStatesConsumer(sc.Name, target)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
@@ -86,7 +86,7 @@ func AllServicesEnterState(sc *ServiceContext, target State, serviceNames ...str
 	go func() {
 		// subscribe to the internal states on behalf of the service context given.
 		consumer := internalEnterStatesConsumer(sc.Name, target)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
@@ -144,7 +144,7 @@ func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...stri
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
 		consumer := internalExitStatesConsumer(sc.Name, target)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
@@ -201,7 +201,7 @@ func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
 	go func() {
 		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
 		consumer := internalAllStatesConsumer(sc.Name)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(&intracom.SubscriberConfig{
+		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
 			BufferSize:    1,
