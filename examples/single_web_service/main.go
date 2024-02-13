@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
-	"golang.org/x/exp/slog"
 )
 
 // HelloWorldAPIService create a struct for your service which requires a config field along with any other state

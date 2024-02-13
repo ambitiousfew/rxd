@@ -3,6 +3,7 @@ package rxd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -10,7 +11,6 @@ import (
 	"syscall"
 
 	"github.com/ambitiousfew/intracom"
-	"golang.org/x/exp/slog"
 )
 
 type daemon struct {
@@ -180,6 +180,7 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States, doneC 
 		service.iStates = d.iStates // attach the manager's internal states to each service
 		if service.Log == nil {     // if service has no logger, create child off the daemons logger
 			service.Log = d.log.With("service", service.Name) // attach child logger instance with service name
+
 		}
 
 		swg.Add(1)

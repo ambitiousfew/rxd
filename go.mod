@@ -1,7 +1,7 @@
 module github.com/ambitiousfew/rxd
 
-go 1.20
+go 1.21
 
-require golang.org/x/exp v0.0.0-20231219180239-dc181d75b848
+require golang.org/x/exp v0.0.0-20240213143201-ec583247a57a
 
-require github.com/ambitiousfew/intracom v1.1.3
+require github.com/ambitiousfew/intracom v1.1.4

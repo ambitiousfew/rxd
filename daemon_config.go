@@ -1,9 +1,8 @@
 package rxd
 
 import (
+	"log/slog"
 	"os"
-
-	"golang.org/x/exp/slog"
 )
 
 type DaemonConfig struct {

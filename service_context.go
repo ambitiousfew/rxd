@@ -3,11 +3,11 @@ package rxd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 
 	"github.com/ambitiousfew/intracom"
-	"golang.org/x/exp/slog"
 )
 
 // ServiceContext all services will require a config as a *ServiceContext in their service struct.

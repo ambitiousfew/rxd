@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
-	"golang.org/x/exp/slog"
 )
 
 // Service Names
