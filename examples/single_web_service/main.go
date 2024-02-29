@@ -55,7 +55,7 @@ func (s *HelloWorldAPIService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.IdleState)
 	}
 
-	sc.Log.Info("server shutdown", "service", sc.Name)
+	sc.Log.Info("server shutdown")
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly

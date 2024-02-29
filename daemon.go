@@ -113,6 +113,18 @@ func (d *daemon) Start(ctx context.Context) error {
 
 	// register the internal states topic for use by the service state watcher to push states to services.
 	statePublishC, unregisterStateC := d.iStates.Register(internalServiceStates)
+
+	// noop consumer to ensure that internal states broadcaster is actively storing last messages
+	// in a case where the caller never makes a subscription to the internal states topic.
+	// basically, if the rxd states helper functions are never used.
+	_, unsubscribe := d.iStates.Subscribe(intracom.SubscriberConfig{
+		Topic:         internalServiceStates,
+		ConsumerGroup: "_rxd.noop",
+		BufferSize:    1,
+		BufferPolicy:  intracom.DropOldest,
+	})
+	defer unsubscribe()
+
 	publishSignalC, unregisterSignalC := d.iSignals.Register(internalSignalsManager)
 
 	var wg sync.WaitGroup
@@ -180,7 +192,6 @@ func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States, doneC 
 		service.iStates = d.iStates // attach the manager's internal states to each service
 		if service.Log == nil {     // if service has no logger, create child off the daemons logger
 			service.Log = d.log.With("service", service.Name) // attach child logger instance with service name
-
 		}
 
 		swg.Add(1)
@@ -245,13 +256,12 @@ func (d *daemon) serviceStateWatcher(statePublishC chan<- States, stateUpdateC <
 					states[name] = state
 				}
 
-				// attempt to publish states to anyone still listening or exit if stop signal received.
+				// send the updated states to anyone listening
+				// at minimum noop consumer is subscribed to ensure last message is stored.
 				select {
 				case <-stopC:
 					return
 				case statePublishC <- states:
-				default:
-					// no one was registered to receive the states, drop it.
 				}
 			}
 		}

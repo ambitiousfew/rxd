@@ -143,7 +143,7 @@ func startService(wg *sync.WaitGroup, stateUpdateC chan<- StateUpdate, sc *Servi
 
 			sc.shutdown()
 			// we are done with this service, exit the service wrapper routine.
-			sc.Log.Debug("service exiting", "service", sc.Name)
+			sc.Log.Debug("service exiting")
 			close(sc.doneC)
 
 			wg.Done()
