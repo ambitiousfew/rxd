@@ -1,43 +1,61 @@
 package rxd
 
-const (
-	// InitState is in the ServiceResponse to inform manager to move us to the Init state (Initial Default).
-	InitState State = iota
-	// IdleState is in the ServiceResponse to inform manager to move us to the Idle state
-	IdleState
-	// RunState is in the ServiceResponse to inform manager to move us to the Run state
-	RunState
-	// StopState is in the ServiceResponse to inform manager to move us to the Stop state
-	StopState
-	// ExitState is in the ServiceResponse to inform manager to act as the final response type for Stop.
-	ExitState
-)
+import "context"
 
-// State is used to determine the "next state" the service should enter
-// when the current state has completed/errored returned. State should
-// reflect different states that the interface can enter.
-type State int
+// ServiceState represents the possible states a service can be in.
+type ServiceState int
 
-func (s State) String() string {
+func (s ServiceState) String() string {
 	switch s {
-	case InitState:
+	case unknown:
+		return "unknown"
+	case setup:
+		return "setup"
+	case Init:
 		return "init"
-	case IdleState:
+	case Idle:
 		return "idle"
-	case RunState:
+	case Run:
 		return "run"
-	case StopState:
+	case Stop:
 		return "stop"
-	case ExitState:
+	case Exit:
 		return "exit"
 	default:
 		return "unknown"
 	}
 }
 
+const (
+	// unexported to prevent user selecting states that aren't lifecycles.
+	unknown ServiceState = iota
+	setup
+
+	Init
+	Idle
+	Run
+	Stop
+	Exit
+)
+
+func NewResponse(err error, state ServiceState) ServiceResponse {
+	return ServiceResponse{
+		Next: state,
+		Err:  err,
+	}
+}
+
+// ServiceResponse is used by services to indicate their next desired state.
+type ServiceResponse struct {
+	Next ServiceState
+	Err  error
+}
+
+// Service is the interface that all services must implement.
 type Service interface {
-	Init(*ServiceContext) ServiceResponse
-	Idle(*ServiceContext) ServiceResponse
-	Run(*ServiceContext) ServiceResponse
-	Stop(*ServiceContext) ServiceResponse
+	Setup(context.Context) ServiceConfig
+	Init(context.Context) ServiceResponse
+	Idle(context.Context) ServiceResponse
+	Run(context.Context) ServiceResponse
+	Stop(context.Context) ServiceResponse
 }

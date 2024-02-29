@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,7 +35,7 @@ func NewAPIPollingService() *APIPollingService {
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *APIPollingService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *APIPollingService) Idle(ctx context.Context) rxd.ServiceResponse {
 
 	// APIPolling service is registering its interest in ALL services passed ENTERING a "RunState"
 	// So if HelloWorldAPI is the only passed service here and it ENTERS a "RunState" then
@@ -61,7 +62,7 @@ func (s *APIPollingService) Idle(sc *rxd.ServiceContext) rxd.ServiceResponse {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *APIPollingService) Run(sc *rxd.ServiceContext) rxd.ServiceResponse {
+func (s *APIPollingService) Run(ctx context.Context) rxd.ServiceResponse {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
