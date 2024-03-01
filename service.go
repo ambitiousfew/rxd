@@ -9,8 +9,8 @@ func (s ServiceState) String() string {
 	switch s {
 	case unknown:
 		return "unknown"
-	case setup:
-		return "setup"
+	case config:
+		return "config"
 	case Init:
 		return "init"
 	case Idle:
@@ -29,7 +29,7 @@ func (s ServiceState) String() string {
 const (
 	// unexported to prevent user selecting states that aren't lifecycles.
 	unknown ServiceState = iota
-	setup
+	config
 
 	Init
 	Idle
@@ -51,9 +51,13 @@ type ServiceResponse struct {
 	Err  error
 }
 
-// Service is the interface that all services must implement.
-type Service interface {
-	Setup(context.Context) ServiceConfig
+type Service struct {
+	Conf ServiceConfig
+	Svc  Servicer
+}
+
+// Servicer is the interface that all services must implement.
+type Servicer interface {
 	Init(context.Context) ServiceResponse
 	Idle(context.Context) ServiceResponse
 	Run(context.Context) ServiceResponse

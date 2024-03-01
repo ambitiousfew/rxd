@@ -6,10 +6,10 @@ import (
 
 type DaemonOption func(*daemonOpts)
 
-// NewServiceOpts will apply all options in the order given and return the final options back.
-func NewDaemonOpts(options ...ServiceOption) *serviceOpts {
+// NewDaemonOpts will apply all options in the order given and return the final options back.
+func NewDaemonOpts(options ...DaemonOption) *daemonOpts {
 	// Default runPolicy unless overridden
-	opts := &serviceOpts{}
+	opts := &daemonOpts{}
 
 	// Apply all functional options to update defaults.
 	for _, option := range options {
@@ -19,16 +19,9 @@ func NewDaemonOpts(options ...ServiceOption) *serviceOpts {
 	return opts
 }
 
-// UsingRunPolicy applies a given policy to the ServiceOption instance
-func UsingRunPolicy(policy RunPolicy) ServiceOption {
-	return func(so *serviceOpts) {
-		so.runPolicy = policy
-	}
-}
-
 // UsingLogger applies a given slog Logger to the underlying service options
-func UsingLogger(l *slog.Logger) ServiceOption {
-	return func(so *serviceOpts) {
+func UsingLogger(l *slog.Logger) DaemonOption {
+	return func(so *daemonOpts) {
 		so.log = l
 	}
 }

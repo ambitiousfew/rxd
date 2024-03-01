@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"syscall"
 	"time"
@@ -26,13 +27,20 @@ func main() {
 	// create an http api server
 	apiServer := NewHelloWorldService()
 
+	l := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon(rxd.DaemonConfig{
 		Name:    "multi-service-example",
 		Signals: []os.Signal{os.Interrupt, syscall.SIGINT, syscall.SIGTERM},
+		Opts: []rxd.DaemonOption{
+			rxd.UsingLogger(l),
+		},
 	})
 
-	err := daemon.AddServices(pollRxdSvc, apiSvc)
+	err := daemon.AddServices(pollClient, apiServer)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)

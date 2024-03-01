@@ -1,15 +1,10 @@
 package rxd
 
-import (
-	"log/slog"
-)
-
 // serviceOpts will allow for customizations of how a service runs and should always have
 // a reasonable default to fallback if the case one isnt provided.
 // This would be set by the ServiceConfig upon creation.
 type serviceOpts struct {
 	runPolicy RunPolicy
-	log       *slog.Logger
 }
 
 type ServiceOption func(*serviceOpts)
@@ -31,12 +26,5 @@ func NewServiceOpts(options ...ServiceOption) *serviceOpts {
 func UsingServiceRunPolicy(policy RunPolicy) ServiceOption {
 	return func(so *serviceOpts) {
 		so.runPolicy = policy
-	}
-}
-
-// UsingServiceLogger applies a given slog Logger to the underlying service options
-func UsingServiceLogger(l *slog.Logger) ServiceOption {
-	return func(so *serviceOpts) {
-		so.log = l
 	}
 }

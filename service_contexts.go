@@ -24,26 +24,26 @@ type serviceContextResponse struct {
 	exists  bool
 }
 
-func manageServiceContexts(requests chan serviceContextRequest) {
-	serviceContexts := make(map[Service]context.Context)
-	serviceCancels := make(map[Service]context.CancelFunc)
+// func manageServiceContexts(requests chan serviceContextRequest) {
+// 	serviceContexts := make(map[Service]context.Context)
+// 	serviceCancels := make(map[Service]context.CancelFunc)
 
-	for request := range requests {
-		switch request.operation {
-		case AddContext:
-			serviceContexts[request.service] = request.context
-			serviceCancels[request.service] = request.cancel
-		case DeleteContext:
-			delete(serviceContexts, request.service)
-			delete(serviceCancels, request.service)
-		case GetContext:
-			ctx, ctxExists := serviceContexts[request.service]
-			cancel, cancelExists := serviceCancels[request.service]
-			request.response <- &serviceContextResponse{
-				context: ctx,
-				cancel:  cancel,
-				exists:  ctxExists && cancelExists,
-			}
-		}
-	}
-}
+// 	for request := range requests {
+// 		switch request.operation {
+// 		case AddContext:
+// 			serviceContexts[request.service] = request.context
+// 			serviceCancels[request.service] = request.cancel
+// 		case DeleteContext:
+// 			delete(serviceContexts, request.service)
+// 			delete(serviceCancels, request.service)
+// 		case GetContext:
+// 			ctx, ctxExists := serviceContexts[request.service]
+// 			cancel, cancelExists := serviceCancels[request.service]
+// 			request.response <- &serviceContextResponse{
+// 				context: ctx,
+// 				cancel:  cancel,
+// 				exists:  ctxExists && cancelExists,
+// 			}
+// 		}
+// 	}
+// }

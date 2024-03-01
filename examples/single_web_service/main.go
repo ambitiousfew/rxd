@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"syscall"
@@ -11,7 +12,7 @@ import (
 	"github.com/ambitiousfew/rxd"
 )
 
-var _ rxd.Service = &HelloWorldAPIService{}
+var _ rxd.Servicer = &HelloWorldAPIService{}
 
 const serviceName = "HelloWorldAPI"
 
@@ -20,6 +21,7 @@ const serviceName = "HelloWorldAPI"
 type HelloWorldAPIService struct {
 	// fields this specific server uses
 	server *http.Server
+	log    *slog.Logger
 }
 
 // NewHelloWorldService just a factory helper function to help create and return a new instance of the service.
@@ -27,28 +29,23 @@ func NewHelloWorldService() *HelloWorldAPIService {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Write([]byte(`{"hello": "world"}`))
+		_, _ = w.Write([]byte(`{"hello": "world"}`))
 	})
 
 	server := &http.Server{
 		Addr:    ":8000",
 		Handler: mux,
 	}
-
 	return &HelloWorldAPIService{
 		server: server,
-	}
-}
-
-func (s *HelloWorldAPIService) Setup(ctx context.Context) rxd.ServiceConfig {
-	return rxd.ServiceConfig{
-		Name: serviceName,
+		log:    slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{})),
 	}
 }
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *HelloWorldAPIService) Run(ctx context.Context) rxd.ServiceResponse {
+
 	go func() {
 		<-ctx.Done() // wait for shutdown signal against this service
 
@@ -57,7 +54,7 @@ func (s *HelloWorldAPIService) Run(ctx context.Context) rxd.ServiceResponse {
 
 		err := s.server.Shutdown(timeoutCtx)
 		if err != nil {
-			s.
+			s.log.Error("server shutdown error", "error", err)
 		}
 	}()
 
@@ -71,7 +68,7 @@ func (s *HelloWorldAPIService) Run(ctx context.Context) rxd.ServiceResponse {
 		return rxd.NewResponse(err, rxd.Idle)
 	}
 
-	log.Println("server shutdown", "service", serviceName)
+	s.log.Info("server stopped", "service", serviceName)
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
@@ -85,6 +82,7 @@ func (s *HelloWorldAPIService) Init(ctx context.Context) rxd.ServiceResponse {
 	// without it, you ignore shutdown and continue to change states.
 	// choosing to ignore the Done signal would result in daemon.Start() never returning.
 	// All services must reach the Exit state before daemon.Start() will return.
+
 	select {
 	case <-ctx.Done():
 		return rxd.NewResponse(nil, rxd.Exit)
@@ -119,30 +117,48 @@ func (s *HelloWorldAPIService) Stop(ctx context.Context) rxd.ServiceResponse {
 	}
 }
 
-var _ rxd.Service = &HelloWorldAPIService{}
+var _ rxd.Servicer = &HelloWorldAPIService{}
 
 // Example entrypoint
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	l := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
 	// We create an instance of our service
 	helloWorld := NewHelloWorldService()
 
+	options := []rxd.DaemonOption{
+		rxd.UsingLogger(l),
+	}
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
 	daemon := rxd.NewDaemon(rxd.DaemonConfig{
 		Name:    "hello-world-daemon",
 		Signals: []os.Signal{os.Interrupt, syscall.SIGINT, syscall.SIGTERM},
+		Opts:    options,
 	})
 
-	err = daemon.AddService(helloWorld)
+	// err := daemon.AddService()
+	services := []rxd.Service{
+		{
+			Conf: rxd.ServiceConfig{
+				Name: serviceName,
+			},
+			Svc: helloWorld,
+		},
+	}
+
+	err := daemon.AddServices(services...)
+
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
 	// We can set the log severity we want to observe, LevelInfo is default
-	err := daemon.Start(ctx) // Blocks main thread
+	err = daemon.Start(ctx) // Blocks main thread
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)

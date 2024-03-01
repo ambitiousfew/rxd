@@ -12,16 +12,16 @@ import (
 type Daemon struct {
 	// DaemonConfig is the daemon-level configuration.
 	Config DaemonConfig
-	// Services is a slice of all services managed by the daemon.
-	Services []Service
-	// serviceConfigs is a map of service names to their respective configurations.
-	serviceConfigs map[string]ServiceConfig
+	// Services is a map of services managed by the daemon.
+	services map[string]Service
 	// serviceOpts is a map of service names to their respective service options.
-	serviceOpts map[string]*serviceOpts
+	serviceOpts map[Servicer]*serviceOpts
 	// scRequests is a channel for managing service context requests.
 	scRequests chan serviceContextRequest
 	// log is the parent logger for the daemon.
 	log *slog.Logger
+
+	started bool
 }
 
 func NewDaemon(config DaemonConfig) *Daemon {
@@ -30,21 +30,22 @@ func NewDaemon(config DaemonConfig) *Daemon {
 			Level: slog.LevelInfo,
 		})),
 	}
+
 	// Apply all functional options to update defaults.
 	for _, applyOption := range config.Opts {
 		applyOption(opts)
 	}
 
 	// set a "daemon" attribute to the name of the daemon config name
-	opts.log = opts.log.With("daemon", config.Name)
+	logger := opts.log.With("daemon", config.Name)
 
 	daemon := &Daemon{
-		Config:         config,
-		Services:       make([]Service, 0),
-		serviceConfigs: make(map[string]ServiceConfig),
-		serviceOpts:    make(map[string]*serviceOpts),
-		scRequests:     make(chan serviceContextRequest, 1),
-		log:            opts.log,
+		Config:      config,
+		services:    make(map[string]Service, 0),
+		serviceOpts: make(map[Servicer]*serviceOpts),
+		// serviceConfigs: make(map[string]ServiceConfig),
+		scRequests: make(chan serviceContextRequest, 1),
+		log:        logger,
 	}
 
 	return daemon
@@ -55,24 +56,28 @@ func (d *Daemon) addService(s Service) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	conf := s.Setup(ctx)
-	if _, ok := d.serviceConfigs[conf.Name]; ok {
+	if ctx.Err() != nil {
+		return ErrServiceSetupTimeout
+	}
+
+	if s.Conf.Name == "" {
+		return ErrServiceNameRequired
+	}
+
+	_, ok := d.services[s.Conf.Name]
+	if ok {
 		return ErrServiceAlreadyExists
 	}
 
-	opts := &serviceOpts{
-		log: d.log,
-	}
+	opts := &serviceOpts{}
 
-	for _, applyOption := range conf.RunOpts {
+	for _, applyOption := range s.Conf.RunOpts {
 		applyOption(opts)
 	}
 
-	opts.log = opts.log.With("service", conf.Name)
+	s.Conf.opts = opts
+	d.services[s.Conf.Name] = s
 
-	d.serviceConfigs[conf.Name] = conf
-	d.serviceOpts[conf.Name] = opts
-	d.Services = append(d.Services, s)
 	return nil
 }
 
@@ -92,7 +97,13 @@ func (d *Daemon) AddServices(s ...Service) error {
 
 // Start method refactored for the updated service lifecycle management.
 func (d *Daemon) Start(ctx context.Context) error {
-	if len(d.Services) < 1 {
+	if d.started {
+		return ErrAlreadyStarted
+	}
+
+	d.started = true
+
+	if len(d.services) < 1 {
 		return ErrNoServices
 	}
 
@@ -103,17 +114,15 @@ func (d *Daemon) Start(ctx context.Context) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, d.Config.Signals...)
 
-	// Start the service context request manager.
-	go manageServiceContexts(d.scRequests)
-
 	var wg sync.WaitGroup
 
-	for _, service := range d.Services {
+	for name, service := range d.services {
 		wg.Add(1)
 		// Start each service in a separate goroutine.
 		go func(s Service) {
 			defer wg.Done()
-			runService(allServicesCtx, s)
+			d.log.Debug("starting service", slog.String("name", name))
+			d.runService(allServicesCtx, s)
 		}(service)
 	}
 
@@ -143,62 +152,72 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 // runService is a wrapper for running a service in a separate goroutine.
 // It manages the service lifecycle and context.
-func runService(parentCtx context.Context, s Service) {
+func (d *Daemon) runService(parentCtx context.Context, s Service) {
 	// service-specific cancellable context
 	serviceCtx, serviceCancel := context.WithCancel(parentCtx)
 	defer serviceCancel()
 
-	conf := s.Setup(serviceCtx)
-	log := conf.opts.log // service-specific logger
+	serviceLog := d.log.With("service", s.Conf.Name)
 
-	// register this service's context/cancel with the service context manager
-	// d.scRequests <- serviceContextRequest{
-	// 	operation: AddContext,
-	// 	service:   s,
-	// 	context:   serviceCtx,
-	// 	cancel:    serviceCancel,
-	// }
-	var result ServiceResponse
+	// Intracom TODO: Report service state as entering 'setup'...
+
 	state := Init // Always begin with the Init state.
+
+	var hasStopped bool // track if stop has been called before.
+
+	var result ServiceResponse
 	for state != Exit {
+		// Intracom TODO: Report the next service state we will enter...
+
 		switch state {
 		case Init:
-			log.Debug("service entering 'init'")
-			result = s.Init(serviceCtx)
+			serviceLog.Debug("service entering 'init'")
+			result = s.Svc.Init(serviceCtx)
+
 		case Idle:
-			log.Debug("service entering 'idle'")
-			result = s.Idle(serviceCtx)
+			serviceLog.Debug("service entering 'idle'")
+			result = s.Svc.Idle(serviceCtx)
 		case Run:
-			log.Debug("service entering 'run'")
-			result = s.Run(serviceCtx)
+			serviceLog.Debug("service entering 'run'")
+			result = s.Svc.Run(serviceCtx)
+			if s.Conf.opts.runPolicy == RunOnce {
+				// if the service is set to run once, we will move to the exit state after running.
+				result.Next = Exit
+			}
 		case Stop:
-			log.Debug("service entering 'stop'")
-			result = s.Stop(serviceCtx)
+			serviceLog.Debug("service entering 'stop'")
+			result = s.Svc.Stop(serviceCtx)
+			hasStopped = true
 		}
 
 		if result.Err != nil {
-			log.Error("service error", slog.String("state", state.String()), slog.String("error", result.Err.Error()))
+			serviceLog.Error("service error", slog.String("state", state.String()), slog.String("error", result.Err.Error()))
+		}
+
+		if hasStopped && result.Next == Stop {
+			// if the service has been stopped and the next state is also stop, we will not continue.
+			serviceLog.Error("service response error", slog.String("state", state.String()), slog.String("error", "service has already stopped"))
+			break
+		}
+
+		if hasStopped && result.Next != Exit {
+			// if the service has been stopped but we are not planning to exit, reset the stopped flag.
+			hasStopped = false
 		}
 
 		state = result.Next // Move to the next state as indicated by the service.
 	}
 
-	// service has exited, cancel its context.
-	// if state == Exit {
-	// // If moving to Exit, we are exiting all the way...
-	// responseChan := make(chan *serviceContextResponse)
-	// // send request to retrieve context cancel for service
-	// d.scRequests <- serviceContextRequest{
-	// 	operation: GetContext,
-	// 	service:   s,
-	// 	response:  responseChan,
-	// }
+	if !hasStopped {
+		// ensure we perform a final stop if we haven't already.
+		result = s.Svc.Stop(serviceCtx)
+		if result.Err != nil {
+			serviceLog.Error("service error", slog.String("state", state.String()), slog.String("error", result.Err.Error()))
+		}
+	}
 
-	serviceCancel() // Cancel the service's context.
-	// exit service wrapper.
-
-	// response := <-responseChan
-	// response.cancel() // Cancel the service's context.
-
-	// }
+	// Cancel the service's context.
+	serviceCancel()
+	serviceLog.Debug("service has exited")
+	// Service has exited.
 }
