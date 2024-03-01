@@ -1,28 +1,26 @@
 package rxd
 
-import "context"
+// type ServiceContextOperation int
 
-type ServiceContextOperation int
+// const (
+// 	AddContext ServiceContextOperation = iota
+// 	DeleteContext
+// 	GetContext
+// )
 
-const (
-	AddContext ServiceContextOperation = iota
-	DeleteContext
-	GetContext
-)
+// type serviceContextRequest struct {
+// 	operation ServiceContextOperation
+// 	service   Service
+// 	context   context.Context
+// 	cancel    context.CancelFunc
+// 	response  chan *serviceContextResponse // Used for operations that require a response
+// }
 
-type serviceContextRequest struct {
-	operation ServiceContextOperation
-	service   Service
-	context   context.Context
-	cancel    context.CancelFunc
-	response  chan *serviceContextResponse // Used for operations that require a response
-}
-
-type serviceContextResponse struct {
-	context context.Context
-	cancel  context.CancelFunc
-	exists  bool
-}
+// type serviceContextResponse struct {
+// 	context context.Context
+// 	cancel  context.CancelFunc
+// 	exists  bool
+// }
 
 // func manageServiceContexts(requests chan serviceContextRequest) {
 // 	serviceContexts := make(map[Service]context.Context)

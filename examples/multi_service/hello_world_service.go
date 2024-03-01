@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,33 +21,49 @@ type HelloWorldAPIService struct {
 	log *slog.Logger
 }
 
+func usingSlogLogger(l *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			next.ServeHTTP(w, r)
+			duration := time.Since(start)
+			l.Info("request", "method", r.Method, "path", r.URL.Path, "duration_ms", duration.Milliseconds())
+		})
+	}
+}
+
 // NewHelloWorldService just a factory helper function to help create and return a new instance of the service.
 func NewHelloWorldService() rxd.Service {
-	ctx, cancel := context.WithCancel(context.Background())
-
+	serviceName := "hello-world-api"
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Write([]byte(`{"hello": "world"}`))
+		_, _ = w.Write([]byte(`{"hello": "world"}`))
 	})
 
+	log := log.New(os.Stderr, serviceName, log.LstdFlags)
+	l := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	// Add middleware to log requests
+	loggerMux := usingSlogLogger(l)(mux)
+
 	server := &http.Server{
-		Addr:    ":8000",
-		Handler: mux,
+		Addr:     ":8000",
+		Handler:  loggerMux,
+		ErrorLog: log,
 	}
 
 	s := &HelloWorldAPIService{
 		server: server,
-
-		ctx:    ctx,
-		cancel: cancel,
-
-		log: slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{})),
+		log:    l,
 	}
 
 	return rxd.Service{
 		Conf: rxd.ServiceConfig{
-			Name: "HelloWorldAPI",
+			Name: serviceName,
 		},
 		Svc: s,
 	}

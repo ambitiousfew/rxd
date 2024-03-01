@@ -27,7 +27,7 @@ type APIPollingService struct {
 
 // NewAPIPollingService just a factory helper function to help create and return a new instance of the service.
 func NewAPIPollingService() rxd.Service {
-
+	serviceName := "api-poll-client"
 	s := &APIPollingService{
 		client: &http.Client{
 			Timeout: 3 * time.Second,
@@ -41,7 +41,7 @@ func NewAPIPollingService() rxd.Service {
 
 	return rxd.Service{
 		Conf: rxd.ServiceConfig{
-			Name: "APIPollingService",
+			Name: serviceName,
 		},
 		Svc: s,
 	}

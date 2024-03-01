@@ -52,5 +52,5 @@ func main() {
 		log.Println(err)
 		os.Exit(1)
 	}
-	log.Println("daemon has completed")
+	log.Println("daemon has exited successfully.")
 }

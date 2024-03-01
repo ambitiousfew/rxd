@@ -14,7 +14,7 @@ import (
 
 var _ rxd.Servicer = &HelloWorldAPIService{}
 
-const serviceName = "HelloWorldAPI"
+const serviceName = "hello-world-api"
 
 // HelloWorldAPIService create a struct for your service which requires a config field along with any other state
 // your service might need to maintain throughout the life of the service.
@@ -24,21 +24,50 @@ type HelloWorldAPIService struct {
 	log    *slog.Logger
 }
 
+func usingSlogLogger(l *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			next.ServeHTTP(w, r)
+			duration := time.Since(start)
+			l.Info("request", "method", r.Method, "path", r.URL.Path, "duration_ms", duration.Milliseconds())
+		})
+	}
+}
+
 // NewHelloWorldService just a factory helper function to help create and return a new instance of the service.
-func NewHelloWorldService() *HelloWorldAPIService {
+func NewHelloWorldService() rxd.Service {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write([]byte(`{"hello": "world"}`))
 	})
 
+	log := log.New(os.Stderr, serviceName, log.LstdFlags)
+	l := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	// Add middleware to log requests
+	loggerMux := usingSlogLogger(l)(mux)
+
 	server := &http.Server{
-		Addr:    ":8000",
-		Handler: mux,
+		Addr:     ":8000",
+		Handler:  loggerMux,
+		ErrorLog: log,
 	}
-	return &HelloWorldAPIService{
+
+	s := &HelloWorldAPIService{
 		server: server,
-		log:    slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{})),
+		log:    l,
+	}
+
+	return rxd.Service{
+		Conf: rxd.ServiceConfig{
+			Name: serviceName,
+		},
+		Svc: s,
 	}
 }
 
@@ -59,7 +88,7 @@ func (s *HelloWorldAPIService) Run(ctx context.Context) rxd.ServiceResponse {
 	}()
 
 	// sc.Log.Info("server starting", "service", serviceName, "address", s.server.Addr)
-	log.Println("server starting", "service", serviceName, "address", s.server.Addr)
+	s.log.Info("server starting", "service", serviceName, "address", s.server.Addr)
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 
@@ -140,18 +169,7 @@ func main() {
 		Opts:    options,
 	})
 
-	// err := daemon.AddService()
-	services := []rxd.Service{
-		{
-			Conf: rxd.ServiceConfig{
-				Name: serviceName,
-			},
-			Svc: helloWorld,
-		},
-	}
-
-	err := daemon.AddServices(services...)
-
+	err := daemon.AddService(helloWorld)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
@@ -164,5 +182,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Println("successfully stopped daemon")
+	log.Println("daemon has exited successfully.")
 }
