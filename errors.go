@@ -12,4 +12,5 @@ const (
 	ErrAlreadyStarted       RxError = RxError("already started")
 	ErrServiceNameRequired  RxError = RxError("service name required")
 	ErrServiceSetupTimeout  RxError = RxError("service setup timeout")
+	ErrStateWatcherNotSet   RxError = RxError("state watcher not set")
 )

@@ -1,7 +1,5 @@
 package rxd
 
-import "context"
-
 func NewResponse(err error, state ServiceState) ServiceResponse {
 	return ServiceResponse{
 		Next: state,
@@ -22,8 +20,8 @@ type Service struct {
 
 // Servicer is the interface that all services must implement.
 type Servicer interface {
-	Init(context.Context) ServiceResponse
-	Idle(context.Context) ServiceResponse
-	Run(context.Context) ServiceResponse
-	Stop(context.Context) ServiceResponse
+	Init(ServiceContext) ServiceResponse
+	Idle(ServiceContext) ServiceResponse
+	Run(ServiceContext) ServiceResponse
+	Stop(ServiceContext) ServiceResponse
 }

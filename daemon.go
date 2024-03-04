@@ -17,7 +17,8 @@ type Daemon struct {
 	// serviceOpts is a map of service names to their respective service options.
 	serviceOpts map[Servicer]*serviceOpts
 	// statesC is a channel for all state updates from all services.
-	statesC chan stateUpdate
+	// statesC chan stateUpdate
+
 	// log is the parent logger for the daemon.
 	log *slog.Logger
 	// started is a flag to track if the daemon has been started.
@@ -43,11 +44,8 @@ func NewDaemon(config DaemonConfig) *Daemon {
 		Config:      config,
 		services:    make(map[string]Service, 0),
 		serviceOpts: make(map[Servicer]*serviceOpts),
-		// serviceConfigs: make(map[string]ServiceConfig),
-		// scRequests: make(chan serviceContextRequest, 1),
-
-		log:     logger,
-		started: false,
+		log:         logger,
+		started:     false,
 	}
 
 	return daemon
@@ -109,19 +107,16 @@ func (d *Daemon) Start(ctx context.Context) error {
 		return ErrNoServices
 	}
 
-	// ensure states channel is created and buffered with enough space for all services and lifecycle transitions.
-	d.statesC = make(chan stateUpdate, len(d.services)*4)
+	// state watcher channel for all state updates from all services.
+	sw := newStateWatcher(stateWatcherConfig{
+		// use the parent logger for the state watcher.
+		logger: d.log,
+		// ensure states channel is created and buffered with enough space for all services and lifecycle transitions.
+		bufferSize: len(d.services) * 4,
+	})
 
-	statesDoneC := make(chan struct{})
-	go func() {
-		// states watcher routine, relays all state transitions.
-		defer close(statesDoneC)
-		d.log.Debug("states watcher has started")
-		for state := range d.statesC {
-			d.log.Debug("states watcher update", slog.String("service", state.service), slog.String("state", state.state.String()))
-		}
-		d.log.Debug("states watcher has exited")
-	}()
+	// start the states watcher routine.
+	go sw.watch()
 
 	// allServicesCtx is the parent context for all services and is a child context of the callers's context.
 	allServicesCtx, allServicesCancel := context.WithCancel(ctx)
@@ -143,21 +138,21 @@ func (d *Daemon) Start(ctx context.Context) error {
 	}()
 
 	var wg sync.WaitGroup
-	for _, service := range d.services {
+	for _, s := range d.services {
 		wg.Add(1)
 		// Start each service in a separate goroutine.
-		go func(s Service) {
+		go func() {
 			defer wg.Done()
-			serviceStateC := make(chan ServiceState, 1)          // channel for service state transitions from rxd (start, stop, restart, reload).
-			serviceStateC <- Init                                // initial state for all services.
-			d.runServiceBroker(allServicesCtx, s, serviceStateC) // blocks, handles service lifecycles.
-		}(service)
+			serviceStateC := make(chan ServiceState, 1)              // channel for service state transitions from rxd (start, stop, restart, reload).
+			serviceStateC <- Init                                    // initial state for all services.
+			d.runServiceBroker(allServicesCtx, s, serviceStateC, sw) // blocks, handles service lifecycles.
+		}()
 	}
 
 	// Block start until all services have exited.
 	wg.Wait()
-	close(d.statesC)
-	<-statesDoneC // wait for states watcher to exit.
+
+	sw.stop()
 	return nil
 }
 
@@ -165,13 +160,13 @@ func (d *Daemon) Start(ctx context.Context) error {
 // it handles state requests coming from rxd and the callers service itself.
 // this is so rxd can signal state transitions like start, stop, restart, reload
 // and the caller can also trigger state transitions to Init, Idle, Run, Stop, Exit.
-func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <-chan ServiceState) {
+func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <-chan ServiceState, sw *stateWatcher) {
 	serviceLog := d.log.With("service", s.Conf.Name)
 	serviceLog.Debug("service broker has started")
 
 	var hasStarted, hasStopped bool // flags to track if the service has started or stopped.
 
-	states := map[ServiceState]func(context.Context) ServiceResponse{
+	states := map[ServiceState]func(ServiceContext) ServiceResponse{
 		Init: s.Svc.Init,
 		Idle: s.Svc.Idle,
 		Run:  s.Svc.Run,
@@ -187,8 +182,8 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 	var stopping bool // flag to track if the service is being shutdown.
 	for !stopping {
 		// Each new state is handled in a separate goroutine.
-		// This allows for concurrent state handling and cancellation.
-		serviceCtx, serviceCancel := context.WithCancel(parentCtx)
+		// create a new service context that is passed to lifecycle methods.
+		serviceCtx, serviceCancel := newServiceContextWithCancel(s.Conf.Name, parentCtx, sw)
 
 		var nextState ServiceState
 		select {
@@ -203,10 +198,11 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 		// service has entered at least one lifecycle method.
 		if hasStarted {
 			// we received a new state to change to.
-			serviceCancel()                                           // cancel the previous state context.
-			<-doneC                                                   // give the routine a chance to complete before moving to the next state.
-			serviceCtx, serviceCancel = context.WithCancel(parentCtx) // recreate service context and the cancel function.
-			doneC = make(chan struct{})                               // re-create the service's done signal channel.
+			serviceCancel() // cancel the previous state context.
+			<-doneC         // give the routine a chance to complete before moving to the next state.
+
+			serviceCtx, serviceCancel = serviceCtx.WithCancel(parentCtx)
+			doneC = make(chan struct{}) // re-create the service's done signal channel.
 		}
 
 		hasStarted = true
@@ -240,8 +236,10 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 			}
 
 			serviceLog.Debug("service entering state", slog.String("state", nextState.String()))
+
 			// inform the states watcher what we are doing next.
-			d.statesC <- stateUpdate{service: s.Conf.Name, state: nextState}
+			// TODO: consider returning errors from this method to debug log.
+			sw.publish(serviceCtx, s.Conf.Name, nextState)
 
 			// blocking run of lifecycle method happens here.
 			result := stateFunc(serviceCtx) // Init, Idle, Run, Stop

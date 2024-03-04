@@ -73,10 +73,10 @@ func NewHelloWorldService() rxd.Service {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(ctx context.Context) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Run(sc rxd.ServiceContext) rxd.ServiceResponse {
 
 	go func() {
-		<-ctx.Done() // wait for shutdown signal against this service
+		<-sc.Done() // wait for shutdown signal against this service
 
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
@@ -106,14 +106,14 @@ func (s *HelloWorldAPIService) Run(ctx context.Context) rxd.ServiceResponse {
 	return rxd.NewResponse(nil, rxd.Stop)
 }
 
-func (s *HelloWorldAPIService) Init(ctx context.Context) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Init(sc rxd.ServiceContext) rxd.ServiceResponse {
 	// always respect the context Done signal in case shutdown is taking place.
 	// without it, you ignore shutdown and continue to change states.
 	// choosing to ignore the Done signal would result in daemon.Start() never returning.
 	// All services must reach the Exit state before daemon.Start() will return.
 
 	select {
-	case <-ctx.Done():
+	case <-sc.Done():
 		return rxd.NewResponse(nil, rxd.Exit)
 	default:
 		// Init moves to Idle
@@ -121,10 +121,10 @@ func (s *HelloWorldAPIService) Init(ctx context.Context) rxd.ServiceResponse {
 	}
 }
 
-func (s *HelloWorldAPIService) Idle(ctx context.Context) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Idle(sc rxd.ServiceContext) rxd.ServiceResponse {
 	log.Println("idle state")
 	select {
-	case <-ctx.Done():
+	case <-sc.Done():
 		return rxd.NewResponse(nil, rxd.Exit)
 	default:
 		// Idle moves to Run
@@ -132,12 +132,12 @@ func (s *HelloWorldAPIService) Idle(ctx context.Context) rxd.ServiceResponse {
 	}
 }
 
-func (s *HelloWorldAPIService) Stop(ctx context.Context) rxd.ServiceResponse {
+func (s *HelloWorldAPIService) Stop(sc rxd.ServiceContext) rxd.ServiceResponse {
 	// Stop provides an opportunity to perform any cleanups that should be done before the service is exited or re-initialized.
 	// State changes to Exit will always run Stop first.
 	log.Println("stopping server")
 	select {
-	case <-ctx.Done():
+	case <-sc.Done():
 		return rxd.NewResponse(nil, rxd.Exit)
 	default:
 		// Stop could move to Exit or even back to Init

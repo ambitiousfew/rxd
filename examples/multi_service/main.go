@@ -13,13 +13,13 @@ import (
 
 // Service Names
 const (
-	HelloWorldAPI = "HelloWorldAPI"
-	PollService   = "PollService"
+	HelloWorldAPI = "hello-world-api"
+	PollService   = "api-poller"
 )
 
 // Example entrypoint
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// create a polling client, poller depends on API service being up.
@@ -27,16 +27,19 @@ func main() {
 	// create an http api server
 	apiServer := NewHelloWorldService()
 
-	l := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+	l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
+
+	_ = l // ignore unused l
 
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon(rxd.DaemonConfig{
 		Name:    "multi-service-example",
 		Signals: []os.Signal{os.Interrupt, syscall.SIGINT, syscall.SIGTERM},
-		Opts: []rxd.DaemonOption{
-			rxd.UsingLogger(l),
+		Opts:    []rxd.DaemonOption{
+			// uncomment to enable the debug logger
+			// rxd.UsingLogger(l),
 		},
 	})
 
