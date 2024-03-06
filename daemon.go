@@ -166,6 +166,7 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 
 	var hasStarted, hasStopped bool // flags to track if the service has started or stopped.
 
+	// map of service states to their respective lifecycle methods for lookups.
 	states := map[ServiceState]func(ServiceContext) ServiceResponse{
 		Init: s.Svc.Init,
 		Idle: s.Svc.Idle,

@@ -13,8 +13,9 @@ import (
 
 // Service Names
 const (
-	HelloWorldAPI = "hello-world-api"
-	PollService   = "api-poller"
+	HelloWorldAPI  = "hello-world-api"
+	PollService    = "api-poller"
+	MonitorService = "service-monitor"
 )
 
 // Example entrypoint
@@ -26,6 +27,9 @@ func main() {
 	pollClient := NewAPIPollingService()
 	// create an http api server
 	apiServer := NewHelloWorldService()
+
+	// create an http api server
+	monitor := NewServiceMonitor()
 
 	l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
@@ -43,7 +47,7 @@ func main() {
 		},
 	})
 
-	err := daemon.AddServices(pollClient, apiServer)
+	err := daemon.AddServices(pollClient, apiServer, monitor)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)

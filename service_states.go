@@ -1,8 +1,6 @@
 package rxd
 
-import (
-	"fmt"
-)
+import "strings"
 
 type stateUpdate struct {
 	service string
@@ -52,23 +50,12 @@ const (
 )
 
 const (
-	_prefix             string = "_rxd"
-	internalAllStates   string = _prefix + ".all.states"
-	internalExitStates  string = _prefix + ".enter.states"
-	internalEnterStates string = _prefix + ".exit.states"
+	_prefix           string = "_rxd"
+	internalStates    string = _prefix + ".states"
+	internalAllStates string = internalStates + ".all"
 )
 
-func internalAllStatesConsumer(name string) string {
-	// consumer name: _rxd.all.states.<consumer_group>
-	return fmt.Sprintf("%s.%s", internalAllStates, name)
-}
-
-func internalEnterStatesConsumer(name string, state ServiceState) string {
-	// consumer name: _rxd.enter.states.<target_state>.<consumer_group>
-	return fmt.Sprintf("%s.%s.%s", internalEnterStates, state, name)
-}
-
-func internalExitStatesConsumer(name string, state ServiceState) string {
-	// consumer name: _rxd.exit.states.<target_state>.<consumer_group>
-	return fmt.Sprintf("%s.%s.%s", internalExitStates, state, name)
+func internalStatesConsumer(action ServiceAction, target ServiceState, consumer string) string {
+	// consumer name: _rxd.states.entering.<target_state>.<consumer_group>
+	return strings.Join([]string{internalStates, action.String(), target.String(), consumer}, ".")
 }

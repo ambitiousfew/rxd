@@ -52,7 +52,8 @@ func NewAPIPollingService() rxd.Service {
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
 func (s *APIPollingService) Idle(sc rxd.ServiceContext) rxd.ServiceResponse {
 	s.log.Info("service is idling")
-	enteredStateC, cancel := sc.AnyServicesEnterState(rxd.Run, HelloWorldAPI)
+
+	enteredStateC, cancel := sc.WatchAllServices(rxd.Entering, rxd.Run, HelloWorldAPI)
 	defer cancel()
 
 	s.log.Info("waiting for API to be ready")

@@ -74,7 +74,7 @@ func (sw *stateWatcher) unsubscribe(ctx context.Context, consumer string) error 
 	}
 
 	// NOTE: if the request was sent, now we MUST wait for the response
-	// closing the channel before request broker can reply would cause a panic.
+	// closing the response channel before request broker can reply would cause a panic.
 	<-responseC
 	return nil
 }
