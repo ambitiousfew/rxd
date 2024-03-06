@@ -7,6 +7,11 @@ import (
 	"os"
 )
 
+type stateUpdate struct {
+	service string
+	state   ServiceState
+}
+
 type stateWatcher struct {
 	requestC chan interface{}
 	updateC  chan stateUpdate

@@ -5,24 +5,6 @@ import (
 	"time"
 )
 
-type ServiceAction int
-
-func (s ServiceAction) String() string {
-	switch s {
-	case Entering:
-		return "entering"
-	case Exiting:
-		return "exiting"
-	default:
-		return "unknown"
-	}
-}
-
-const (
-	Entering ServiceAction = iota
-	Exiting
-)
-
 var _ ServiceContext = &serviceContext{}
 
 type ServiceWatcher interface {
@@ -51,22 +33,24 @@ type serviceContext struct {
 	context.Context               // Embedding context.Context
 }
 
+// newServiceContext is an internal helper function to create a new service context.
 func newServiceContext(name string, parent context.Context, sw *stateWatcher) *serviceContext {
 	return &serviceContext{name: name, sw: sw, Context: parent}
 }
 
+// newServiceContext is an internal helper function to create a new service context with a cancel function.
 func newServiceContextWithCancel(name string, parent context.Context, sw *stateWatcher) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	return newServiceContext(name, ctx, sw), cancel
 }
 
 // SetValue returns a new context with the provided value set.
-func (c *serviceContext) SetValue(key, value interface{}) *serviceContext {
+func (c *serviceContext) SetValue(key, value interface{}) ServiceContext {
 	return newServiceContext(c.name, context.WithValue(c.Context, key, value), c.sw)
 }
 
 // GetValue retrieves a value from the context.
-func (c *serviceContext) GetValue(key interface{}) interface{} {
+func (c *serviceContext) GetValue(key interface{}) any {
 	return c.Context.Value(key) // Leveraging the embedded context's Value method.
 }
 

@@ -196,7 +196,7 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 		case nextState = <-returnedStateC: // caller requesting move to new state
 		}
 
-		// service has entered at least one lifecycle method.
+		// service has entered at least one lifecycle method (not in unknown state)
 		if hasStarted {
 			// we received a new state to change to.
 			serviceCancel() // cancel the previous state context.
@@ -204,11 +204,9 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 
 			serviceCtx, serviceCancel = serviceCtx.WithCancel(parentCtx)
 			doneC = make(chan struct{}) // re-create the service's done signal channel.
+		} else {
+			hasStarted = true
 		}
-
-		hasStarted = true
-
-		// TODO: Might be able to limit using a semaphore here?
 
 		// service-specific lifecycle routine
 		go func() {
@@ -261,5 +259,4 @@ func (d *Daemon) runServiceBroker(parentCtx context.Context, s Service, stateC <
 
 	<-doneC // ensure all states have exited before returning.
 	serviceLog.Debug("service broker has exited")
-	// Service has exited.
 }

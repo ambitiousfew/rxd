@@ -2,11 +2,6 @@ package rxd
 
 import "strings"
 
-type stateUpdate struct {
-	service string
-	state   ServiceState
-}
-
 type ServiceStates map[string]ServiceState
 
 func (s ServiceStates) copy() ServiceStates {

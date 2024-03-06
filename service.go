@@ -1,5 +1,8 @@
 package rxd
 
+// NewResponse is a helper function to create a new ServiceResponse
+// where a ServiceResponse represents the next lifecycle state the caller
+// wishes to move to and any error that occurred during the current state.
 func NewResponse(err error, state ServiceState) ServiceResponse {
 	return ServiceResponse{
 		Next: state,
@@ -7,7 +10,8 @@ func NewResponse(err error, state ServiceState) ServiceResponse {
 	}
 }
 
-// ServiceResponse is used by services to indicate their next desired state.
+// ServiceResponse is used by service lifecycle methods to indicate their next desired state
+// and any errors that occurred during the current state.
 type ServiceResponse struct {
 	Next ServiceState
 	Err  error
@@ -16,6 +20,16 @@ type ServiceResponse struct {
 type Service struct {
 	Conf ServiceConfig
 	Svc  Servicer
+}
+
+func NewService(name string, svc Servicer, options ...ServiceOption) Service {
+	return Service{
+		Conf: ServiceConfig{
+			Name:    name,
+			RunOpts: options,
+		},
+		Svc: svc,
+	}
 }
 
 // Servicer is the interface that all services must implement.
