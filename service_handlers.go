@@ -6,11 +6,12 @@ import (
 	"time"
 )
 
-type PolicyServiceHandler interface {
+type ServiceHandler interface {
 	Handle(ctx context.Context, ds DaemonService, errC chan<- serviceError) error
 }
 
-func GetPolicyHandler(config RunPolicyConfig) PolicyServiceHandler {
+// GetServiceHandler returns the appropriate service handler based on the given policy config
+func GetServiceHandler(config RunPolicyConfig) ServiceHandler {
 	switch config.Policy {
 	case PolicyRunContinous:
 		return RunContinuousHandler{
@@ -21,6 +22,9 @@ func GetPolicyHandler(config RunPolicyConfig) PolicyServiceHandler {
 	}
 }
 
+// RunContinuousHandler is a service handler that runs the service continuously
+// until the context is cancelled or an error occurs.
+// RestartDelay is the delay before the service is restarted after it has stopped.
 type RunContinuousHandler struct {
 	RestartDelay time.Duration
 }
@@ -110,6 +114,7 @@ func (h RunContinuousHandler) Handle(ctx context.Context, ds DaemonService, errC
 	return nil
 }
 
+// invalidServiceHandler is a service handler that always returns an error
 type invalidServiceHandler struct{}
 
 func (h invalidServiceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- serviceError) error {

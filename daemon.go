@@ -18,7 +18,7 @@ type Daemon interface {
 
 type daemon struct {
 	services map[string]DaemonService
-	policies map[string]PolicyServiceHandler
+	policies map[string]ServiceHandler
 	// iSignals *intracom.Intracom[rxdSignal] // signals from daemon to manager
 	// iStates  *intracom.Intracom[States]    // services state updates to manager
 	errC    chan serviceError
@@ -40,7 +40,7 @@ func (se serviceError) Error() string {
 func NewDaemon(name string, options ...DaemonOption) Daemon {
 	d := &daemon{
 		services: make(map[string]DaemonService),
-		policies: make(map[string]PolicyServiceHandler),
+		policies: make(map[string]ServiceHandler),
 		// services: make(map[string]ServiceHandler),
 		errC:    make(chan serviceError, 100),
 		log:     &DefaultLogger{},
@@ -121,7 +121,7 @@ func (d *daemon) Start(parent context.Context) error {
 	// launch all services in their own routine.
 	for _, ds := range d.services {
 		// retrieve the policy for the current service.
-		p, ok := d.policies[ds.Name]
+		h, ok := d.policies[ds.Name]
 		if !ok {
 			d.errC <- serviceError{
 				serviceName: ds.Name,
@@ -135,8 +135,8 @@ func (d *daemon) Start(parent context.Context) error {
 		wg.Add(1)
 
 		// d.log.Debug("starting service", "name", dsvc.Name, "policy", dsvc.RunPolicy)
-		go func(service DaemonService, policy PolicyServiceHandler) {
-			err := p.Handle(ctx, service, d.errC)
+		go func(service DaemonService, handler ServiceHandler) {
+			err := handler.Handle(ctx, service, d.errC)
 			if err != nil {
 				d.errC <- serviceError{
 					serviceName: service.Name,
@@ -145,7 +145,7 @@ func (d *daemon) Start(parent context.Context) error {
 				}
 			}
 			wg.Done()
-		}(ds, p)
+		}(ds, h)
 
 	}
 
@@ -239,16 +239,6 @@ func (d *daemon) addService(service Service) error {
 		return errors.New("cannot add a service once the daemon is started")
 	}
 
-	// ensure the service name hasn't already been added.
-	// if service, exists := d.services.Load(s.Name); exists {
-	// 	return fmt.Errorf("service with the name '%s' already exists", service.(*ServiceContext).Name)
-	// }
-
-	// d.services.Store(s.Name, s)
-	// d.total++
-	// if service.Runner == nil {
-	// 	return ErrNilService
-	// }
 	if service.Runner == nil {
 		return ErrNilService
 	}
@@ -270,7 +260,7 @@ func (d *daemon) addService(service Service) error {
 		Runner: service.Runner,
 	}
 	// add the service policy handler to the daemon policies
-	d.policies[service.Name] = service.PolicyHandler
+	d.policies[service.Name] = service.Handler
 
 	return nil
 }

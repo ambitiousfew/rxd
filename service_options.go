@@ -11,9 +11,9 @@ type ServiceOption func(*Service)
 // 	}
 // }
 
-func UsingPolicyHandler(handler PolicyServiceHandler) ServiceOption {
+func UsingServiceHandler(handler ServiceHandler) ServiceOption {
 	return func(s *Service) {
-		s.PolicyHandler = handler
+		s.Handler = handler
 	}
 }
 

@@ -36,11 +36,6 @@ func (vs *invalidService) Stop(ctx context.Context) error {
 	return nil
 }
 
-func meetsInterface[T any](i T, n any) bool {
-	_, ok := n.(T)
-	return ok
-}
-
 func TestValidService(t *testing.T) {
 	var vs any = &validService{}
 

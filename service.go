@@ -47,27 +47,22 @@ type DaemonService struct {
 
 // Service is used as a data-transfer object to pass to the Daemon, where it becomes a DaemonService to the policy handler.
 type Service struct {
-	Name          string
-	Runner        ServiceRunner
-	PolicyConfig  RunPolicyConfig
-	PolicyHandler PolicyServiceHandler
+	Name    string
+	Runner  ServiceRunner
+	Handler ServiceHandler
 }
 
 func NewService(name string, runner ServiceRunner, options ...ServiceOption) Service {
 	defaultPolicy := RunPolicyConfig{
 		Policy:       PolicyRunContinous,
-		RestartDelay: 10 * time.Second,
+		RestartDelay: 3 * time.Second,
 	}
 
 	s := Service{
 		Name:   name,
 		Runner: runner,
 		// reasonable default if policy handler isnt set
-		PolicyConfig: RunPolicyConfig{
-			Policy:       PolicyRunContinous,
-			RestartDelay: 10 * time.Second,
-		},
-		PolicyHandler: GetPolicyHandler(defaultPolicy),
+		Handler: GetServiceHandler(defaultPolicy),
 	}
 
 	for _, option := range options {

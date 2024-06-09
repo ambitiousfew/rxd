@@ -109,36 +109,31 @@ func (s *HelloWorldAPIService) Stop(ctx context.Context) error {
 
 // Example entrypoint
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
 
-	logger := slog.New(handler).With("service", "hello-world-example")
+	logger := slog.New(logHandler).With("service", "hello-world-example")
 
 	// We create an instance of our service
 	helloWorld := NewHelloWorldService()
 	helloWorld.log = logger
 
+	serviceHandler := rxd.GetServiceHandler(rxd.RunPolicyConfig{
+		Policy:       rxd.PolicyRunContinous, // default policy
+		RestartDelay: 10 * time.Second,
+	})
+
 	// We create an instance of our ServiceConfig
-	opts := []rxd.ServiceOption{
-		// rxd.UsingRunPolicy(rxd.RunUntilSignaled),
-		// rxd.UsingRunPolicyConfig(rxd.RunPolicyConfig{
-		// 	RestartDelay: 10 * time.Second,
-		// }),
-
-		rxd.UsingPolicyHandler(rxd.GetPolicyHandler(rxd.RunPolicyConfig{
-			Policy:       rxd.PolicyRunContinous,
-			RestartDelay: 10 * time.Second,
-		})),
-
+	serviceOpts := []rxd.ServiceOption{
 		// NOTE: Users can inject their own policy now if they want to.
-		// rxd.UsingPolicyHandler(rxd.GetPolicyHandler(rxd.PolicyRunContinous)),
+		rxd.UsingServiceHandler(serviceHandler),
 	}
 
-	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld, opts...)
+	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld, serviceOpts...)
 
 	dopts := []rxd.DaemonOption{
 		rxd.UsingLogger(logger),
