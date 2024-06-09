@@ -1,43 +1,78 @@
 package rxd
 
-const (
-	// InitState is in the ServiceResponse to inform manager to move us to the Init state (Initial Default).
-	InitState State = iota
-	// IdleState is in the ServiceResponse to inform manager to move us to the Idle state
-	IdleState
-	// RunState is in the ServiceResponse to inform manager to move us to the Run state
-	RunState
-	// StopState is in the ServiceResponse to inform manager to move us to the Stop state
-	StopState
-	// ExitState is in the ServiceResponse to inform manager to act as the final response type for Stop.
-	ExitState
+import (
+	"context"
+	"time"
 )
 
-// State is used to determine the "next state" the service should enter
-// when the current state has completed/errored returned. State should
-// reflect different states that the interface can enter.
+const (
+	StateInit State = iota
+	StateIdle
+	StateRun
+	StateStop
+	StateExit
+)
+
 type State int
 
 func (s State) String() string {
 	switch s {
-	case InitState:
+	case StateInit:
 		return "init"
-	case IdleState:
+	case StateIdle:
 		return "idle"
-	case RunState:
+	case StateRun:
 		return "run"
-	case StopState:
+	case StateStop:
 		return "stop"
-	case ExitState:
+	case StateExit:
 		return "exit"
 	default:
 		return "unknown"
 	}
 }
 
-type Service interface {
-	Init(*ServiceContext) ServiceResponse
-	Idle(*ServiceContext) ServiceResponse
-	Run(*ServiceContext) ServiceResponse
-	Stop(*ServiceContext) ServiceResponse
+type ServiceRunner interface {
+	Init(context.Context) error
+	Idle(context.Context) error
+	Run(context.Context) error
+	Stop(context.Context) error
+}
+
+// DaemonService is passed to the policy handler to have its ServiceRunner handled there.
+type DaemonService struct {
+	Name   string
+	Runner ServiceRunner
+}
+
+// Service is used as a data-transfer object to pass to the Daemon, where it becomes a DaemonService to the policy handler.
+type Service struct {
+	Name          string
+	Runner        ServiceRunner
+	PolicyConfig  RunPolicyConfig
+	PolicyHandler PolicyServiceHandler
+}
+
+func NewService(name string, runner ServiceRunner, options ...ServiceOption) Service {
+	defaultPolicy := RunPolicyConfig{
+		Policy:       PolicyRunContinous,
+		RestartDelay: 10 * time.Second,
+	}
+
+	s := Service{
+		Name:   name,
+		Runner: runner,
+		// reasonable default if policy handler isnt set
+		PolicyConfig: RunPolicyConfig{
+			Policy:       PolicyRunContinous,
+			RestartDelay: 10 * time.Second,
+		},
+		PolicyHandler: GetPolicyHandler(defaultPolicy),
+	}
+
+	for _, option := range options {
+		option(&s)
+	}
+
+	return s
 }

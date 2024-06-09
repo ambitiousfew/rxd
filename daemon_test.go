@@ -2,8 +2,6 @@ package rxd
 
 import (
 	"context"
-	"os"
-	"syscall"
 	"testing"
 )
 
@@ -11,16 +9,21 @@ func TestDaemonAddService(t *testing.T) {
 	serviceName := "valid-service"
 
 	vs := &validService{}
-	vsOpts := NewServiceOpts() // use defaults
-	validSvc := NewService(serviceName, vs, vsOpts)
 
-	d := NewDaemon(DaemonConfig{
-		Name:    "test-daemon",
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
+	opts := []ServiceOption{
+		// UsingRunPolicy(RunOncePolicy),
+	}
+	validSvc := NewService(serviceName, vs, opts...)
 
-	if d.total != 0 {
-		t.Errorf("daemon should not yet have any services")
+	dIface := NewDaemon("test-daemon")
+
+	d, ok := dIface.(*daemon)
+	if !ok {
+		t.Errorf("could not cast Daemon interface to daemon struct")
+	}
+
+	if len(d.services) != 0 {
+		t.Errorf("daemon should have no services added yet")
 	}
 
 	err := d.AddService(validSvc)
@@ -28,23 +31,25 @@ func TestDaemonAddService(t *testing.T) {
 		t.Errorf("error adding service: %s", err)
 	}
 
-	if d.total != 1 {
-		t.Errorf("daemon AddService did not correctly add new service")
+	if len(d.services) != 1 {
+		t.Errorf("daemon should have one service added")
 	}
 
-	_, found := d.services.Load(serviceName)
+	_, found := d.services[serviceName]
 	if !found {
 		t.Errorf("could not find the service '%s' in the daemon services map", serviceName)
 	}
 }
 
 func TestDaemonStartWithNoServices(t *testing.T) {
-	d := NewDaemon(DaemonConfig{
-		Name:    "test-daemon",
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
+	dIface := NewDaemon("test-daemon")
 
-	if d.total != 0 {
+	d, ok := dIface.(*daemon)
+	if !ok {
+		t.Errorf("could not cast Daemon interface to daemon struct")
+	}
+
+	if len(d.services) != 0 {
 		t.Errorf("daemon should not yet have any services")
 	}
 
@@ -62,13 +67,14 @@ func TestDaemonStartSingleService(t *testing.T) {
 	serviceName := "valid-service"
 
 	vs := &validService{}
-	vsOpts := NewServiceOpts()
-	validSvc := NewService(serviceName, vs, vsOpts)
 
-	d := NewDaemon(DaemonConfig{
-		Name:    "test-daemon",
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
+	opts := []ServiceOption{
+		// UsingRunPolicy(RunOncePolicy),
+	}
+
+	validSvc := NewService(serviceName, vs, opts...)
+
+	d := NewDaemon("test-daemon")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

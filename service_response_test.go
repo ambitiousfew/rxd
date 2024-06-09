@@ -8,9 +8,9 @@ import (
 func TestNewServiceResponse(t *testing.T) {
 	err := fmt.Errorf("testing")
 	// defaultOpts contains default runPolicy of RunUntilStoppedPolicy
-	response := NewResponse(err, InitState)
+	response := NewResponse(err, StateInit)
 
-	wantState := InitState
+	wantState := StateInit
 	wantError := err
 
 	if response.NextState != wantState {

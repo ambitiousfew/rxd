@@ -1,36 +1,39 @@
 package rxd
 
 import (
+	"context"
 	"testing"
 )
 
+var _ ServiceRunner = (*validService)(nil)
+
 type validService struct{}
 
-func (vs *validService) Init(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, IdleState)
+func (vs *validService) Init(ctx context.Context) error {
+	return nil
 }
-func (vs *validService) Idle(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, RunState)
+func (vs *validService) Idle(ctx context.Context) error {
+	return nil
 }
-func (vs *validService) Run(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, StopState)
+func (vs *validService) Run(ctx context.Context) error {
+	return nil
 }
-func (vs *validService) Stop(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, ExitState)
+func (vs *validService) Stop(ctx context.Context) error {
+	return nil
 }
 
 type invalidService struct{}
 
-func (vs *invalidService) Init(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, IdleState)
+func (vs *invalidService) Init(ctx context.Context) error {
+	return nil
 }
 
 // missing Idle
-func (vs *invalidService) Run(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, StopState)
+func (vs *invalidService) Run(ctx context.Context) error {
+	return nil
 }
-func (vs *invalidService) Stop(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, ExitState)
+func (vs *invalidService) Stop(ctx context.Context) error {
+	return nil
 }
 
 func meetsInterface[T any](i T, n any) bool {
