@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -18,19 +17,28 @@ const (
 
 // Example entrypoint
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	// Create Poll Service config with RunPolicy option.
-	pollOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunOncePolicy))
-	// Pass config to instance of service struct
-	pollClient := NewAPIPollingService()
-	pollRxdSvc := rxd.NewService(PollService, pollClient, pollOpts)
+	// Setup a logger for the daemon
+	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+	parentLogger := slog.New(handler)
 
-	apiOpts := rxd.NewServiceOpts(rxd.UsingRunPolicy(rxd.RunUntilStoppedPolicy))
+	// Create Poll Service config with RunPolicy option.
+	pollOptions := []rxd.ServiceOption{}
+	// Pass config to instance of service struct
+	pollClient := NewAPIPollingService(parentLogger.With("service", PollService))
+
+	pollSvc := rxd.NewService(PollService, pollClient, pollOptions...)
+
+	apiOpts := []rxd.ServiceOption{
+		// rxd.UsingLogger(parentLogger.With("service", HelloWorldAPI)),
+	}
 	// Create Hello World service passing config to instance of service struct.
-	apiServer := NewHelloWorldService()
-	apiSvc := rxd.NewService(HelloWorldAPI, apiServer, apiOpts)
+	apiServer := NewHelloWorldService(parentLogger.With("service", HelloWorldAPI))
+	apiSvc := rxd.NewService(HelloWorldAPI, apiServer, apiOpts...)
 
 	// We can add polling client as a dependent of API Server so
 	// any stage polling client is interested in observing of API Server
@@ -39,30 +47,23 @@ func main() {
 	// We are interested in when API Server reaches a RunState and when its reached a StopState
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})
-
-	logger := slog.New(handler)
+	dopts := []rxd.DaemonOption{
+		rxd.UsingLogger(parentLogger),
+	}
 	// Pass N services for daemon to manage and start
-	daemon := rxd.NewDaemon(rxd.DaemonConfig{
-		Name:       "multi-service-example",
-		LogHandler: logger.Handler(),
-		// IntracomLogHandler: logger.Handler(),
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
+	daemon := rxd.NewDaemon("multi-service-example", dopts...)
 
-	err := daemon.AddServices(pollRxdSvc, apiSvc)
+	err := daemon.AddServices(apiSvc, pollSvc)
 	if err != nil {
-		logger.Error(err.Error())
+		parentLogger.Error(err.Error())
 		os.Exit(1)
 	}
 	// tell the daemon to Start - this blocks until the underlying
 	// services manager stops running, which it wont until all services complete.
 	err = daemon.Start(ctx)
 	if err != nil {
-		logger.Error(err.Error())
+		parentLogger.Error(err.Error())
 		os.Exit(1)
 	}
-	logger.Info("daemon has completed")
+	parentLogger.Info("daemon has completed")
 }
