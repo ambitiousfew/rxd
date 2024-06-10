@@ -123,8 +123,8 @@ func main() {
 	helloWorld.log = logger
 
 	serviceHandler := rxd.GetServiceHandler(rxd.RunPolicyConfig{
-		Policy:       rxd.PolicyRunContinous, // default policy
-		RestartDelay: 10 * time.Second,
+		Policy:       rxd.PolicyRunOnce, // default policy
+		RestartDelay: 10 * time.Second,  // RunOnce will ignore this
 	})
 
 	// We create an instance of our ServiceConfig

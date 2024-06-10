@@ -236,7 +236,7 @@ func (d *daemon) AddService(service Service) error {
 // addService is a helper function to add a service to the daemon.
 func (d *daemon) addService(service Service) error {
 	if d.started.Load() {
-		return errors.New("cannot add a service once the daemon is started")
+		return ErrAddingServiceOnceStarted
 	}
 
 	if service.Runner == nil {

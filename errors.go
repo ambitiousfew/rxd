@@ -1,12 +1,13 @@
 package rxd
 
 const (
-	ErrDaemonStarted          Error = Error("daemon has already been started")
-	ErrDuplicateServiceName   Error = Error("duplicate service name found")
-	ErrNoServices             Error = Error("no services to run")
-	ErrNoServiceName          Error = Error("no service name provided")
-	ErrNilService             Error = Error("nil service provided")
-	ErrDuplicateServicePolicy Error = Error("duplicate service policy found")
+	ErrDaemonStarted            Error = Error("daemon has already been started")
+	ErrDuplicateServiceName     Error = Error("duplicate service name found")
+	ErrNoServices               Error = Error("no services to run")
+	ErrNoServiceName            Error = Error("no service name provided")
+	ErrNilService               Error = Error("nil service provided")
+	ErrDuplicateServicePolicy   Error = Error("duplicate service policy found")
+	ErrAddingServiceOnceStarted Error = Error("cannot add a service once the daemon is started")
 )
 
 type Error string
