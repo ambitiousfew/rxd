@@ -7,7 +7,7 @@ import (
 )
 
 type ServiceHandler interface {
-	Handle(ctx context.Context, ds DaemonService, errC chan<- serviceError) error
+	Handle(ctx context.Context, ds DaemonService, errC chan<- ServiceError) error
 }
 
 // GetServiceHandler returns the appropriate service handler based on the given policy config
@@ -31,7 +31,7 @@ type RunContinuousHandler struct {
 	RestartDelay time.Duration
 }
 
-func (h RunContinuousHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- serviceError) error {
+func (h RunContinuousHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- ServiceError) error {
 	state := StateInit
 	hasStopped := false
 	defaultDelay := 10 * time.Nanosecond
@@ -53,10 +53,10 @@ func (h RunContinuousHandler) Handle(ctx context.Context, ds DaemonService, errC
 		switch state {
 		case StateInit:
 			if err := ds.Runner.Init(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateInit,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateInit,
 				}
 				state = StateStop
 			} else {
@@ -64,10 +64,10 @@ func (h RunContinuousHandler) Handle(ctx context.Context, ds DaemonService, errC
 			}
 		case StateIdle:
 			if err := ds.Runner.Idle(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateIdle,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateIdle,
 				}
 				state = StateStop
 			} else {
@@ -75,20 +75,20 @@ func (h RunContinuousHandler) Handle(ctx context.Context, ds DaemonService, errC
 			}
 		case StateRun:
 			if err := ds.Runner.Run(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateIdle,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateIdle,
 				}
 			}
 			state = StateStop
 
 		case StateStop:
 			if err := ds.Runner.Stop(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateStop,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateStop,
 				}
 			}
 
@@ -124,7 +124,7 @@ type RunOnceHandler struct {
 	RestartDelay time.Duration
 }
 
-func (h RunOnceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- serviceError) error {
+func (h RunOnceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- ServiceError) error {
 	state := StateInit
 	hasStopped := false
 
@@ -139,10 +139,10 @@ func (h RunOnceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<
 		switch state {
 		case StateInit:
 			if err := ds.Runner.Init(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateInit,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateInit,
 				}
 				state = StateExit
 			} else {
@@ -150,10 +150,10 @@ func (h RunOnceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<
 			}
 		case StateIdle:
 			if err := ds.Runner.Idle(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateIdle,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateIdle,
 				}
 				state = StateExit
 			} else {
@@ -161,20 +161,20 @@ func (h RunOnceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<
 			}
 		case StateRun:
 			if err := ds.Runner.Run(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateIdle,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateIdle,
 				}
 			}
 			state = StateExit
 
 		case StateStop:
 			if err := ds.Runner.Stop(ctx); err != nil {
-				errC <- serviceError{
-					serviceName: ds.Name,
-					err:         err,
-					state:       StateStop,
+				errC <- ServiceError{
+					ServiceName: ds.Name,
+					Err:         err,
+					State:       StateStop,
 				}
 			}
 
@@ -198,6 +198,6 @@ func (h RunOnceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<
 // invalidServiceHandler is a service handler that always returns an error
 type invalidServiceHandler struct{}
 
-func (h invalidServiceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- serviceError) error {
+func (h invalidServiceHandler) Handle(ctx context.Context, ds DaemonService, errC chan<- ServiceError) error {
 	return errors.New("invalid service handler")
 }

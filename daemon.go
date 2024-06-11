@@ -21,19 +21,19 @@ type daemon struct {
 	policies map[string]ServiceHandler
 	// iSignals *intracom.Intracom[rxdSignal] // signals from daemon to manager
 	// iStates  *intracom.Intracom[States]    // services state updates to manager
-	errC    chan serviceError
+	errC    chan ServiceError
 	log     Logger
 	started atomic.Bool
 }
 
-type serviceError struct {
-	serviceName string
-	state       State
-	err         error
+type ServiceError struct {
+	ServiceName string
+	State       State
+	Err         error
 }
 
-func (se serviceError) Error() string {
-	return se.err.Error()
+func (se ServiceError) Error() string {
+	return se.Err.Error()
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
@@ -42,7 +42,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		services: make(map[string]DaemonService),
 		policies: make(map[string]ServiceHandler),
 		// services: make(map[string]ServiceHandler),
-		errC:    make(chan serviceError, 100),
+		errC:    make(chan ServiceError, 100),
 		log:     &DefaultLogger{},
 		started: atomic.Bool{},
 	}
@@ -113,7 +113,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 	go func() {
 		for err := range d.errC {
-			d.log.Error(err.Error(), "service", err.serviceName, "state", err.state.String())
+			d.log.Error(err.Error(), "service", err.ServiceName, "state", err.State.String())
 		}
 	}()
 
@@ -123,10 +123,10 @@ func (d *daemon) Start(parent context.Context) error {
 		// retrieve the policy for the current service.
 		h, ok := d.policies[ds.Name]
 		if !ok {
-			d.errC <- serviceError{
-				serviceName: ds.Name,
-				state:       StateInit,
-				err:         errors.New("failed to get policy for service"),
+			d.errC <- ServiceError{
+				ServiceName: ds.Name,
+				State:       StateInit,
+				Err:         errors.New("failed to get policy for service"),
 			}
 			// TODO: Should we skip and continue or make Start fail?
 			continue
@@ -137,11 +137,12 @@ func (d *daemon) Start(parent context.Context) error {
 		// d.log.Debug("starting service", "name", dsvc.Name, "policy", dsvc.RunPolicy)
 		go func(service DaemonService, handler ServiceHandler) {
 			err := handler.Handle(ctx, service, d.errC)
+
 			if err != nil {
-				d.errC <- serviceError{
-					serviceName: service.Name,
-					state:       StateInit,
-					err:         err,
+				d.errC <- ServiceError{
+					ServiceName: service.Name,
+					State:       StateInit,
+					Err:         err,
 				}
 			}
 			wg.Done()

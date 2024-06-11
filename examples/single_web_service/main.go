@@ -109,7 +109,7 @@ func (s *HelloWorldAPIService) Stop(ctx context.Context) error {
 
 // Example entrypoint
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
