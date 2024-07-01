@@ -5,59 +5,45 @@ import (
 	"time"
 )
 
-// // ServiceContext all services will require a config as a *ServiceContext in their service struct.
-// // This config contains preconfigured shutdown channel,
-// type ServiceContext struct {
-// 	Name string
-// 	Log  *slog.Logger
-
-// 	ShutdownCtx context.Context
-// 	cancel      context.CancelFunc
-
-// 	service   Service
-// 	runPolicy RunPolicy
-// 	// opts    *serviceOpts
-
-// 	iStates *intracom.Intracom[States]
-
-// 	stopCalled     atomic.Int32 // 0 = not called, 1 = called
-// 	shutdownCalled atomic.Int32 // 0 = not called, 1 = called
-
-// 	doneC chan struct{}
-// }
-
-type ServiceContext struct {
+type ServiceContext interface {
 	context.Context
-	name string
-	log  Logger
+	Name() string
 }
 
-func NewServiceContext(ctx context.Context, name string, log Logger) *ServiceContext {
-	return &ServiceContext{
+type serviceContext struct {
+	context.Context
+	name string
+}
+
+func NewServiceContext(ctx context.Context, name string) ServiceContext {
+	return serviceContext{
 		Context: ctx,
 		name:    name,
-		log:     log,
 	}
 }
 
-func (sc *ServiceContext) Deadline() (deadline time.Time, ok bool) {
+func (sc serviceContext) Name() string {
+	return sc.name
+}
+
+func (sc serviceContext) Deadline() (deadline time.Time, ok bool) {
 	return sc.Context.Deadline()
 }
 
-func (sc *ServiceContext) Done() <-chan struct{} {
+func (sc serviceContext) Done() <-chan struct{} {
 	return sc.Context.Done()
 }
 
-func (sc *ServiceContext) Err() error {
+func (sc serviceContext) Err() error {
 	return sc.Context.Err()
 }
 
-func (sc *ServiceContext) Value(key interface{}) interface{} {
+func (sc serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
 }
 
 // // NewServiceContext creates a new service context instance given a name, service, and service options.
-// func NewService(name string, service Service, opts *serviceOpts) *ServiceContext {
+// func NewService(name string, service Service, opts serviceOpts) *ServiceContext {
 // 	if opts == nil {
 // 		opts = NewServiceOpts() // if nil is passed, use defaults
 // 	}

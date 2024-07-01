@@ -1,73 +1,61 @@
 package rxd
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
-const (
-	StateInit State = iota
-	StateIdle
-	StateRun
-	StateStop
-	StateExit
-)
-
-type State int
-
-func (s State) String() string {
-	switch s {
-	case StateInit:
-		return "init"
-	case StateIdle:
-		return "idle"
-	case StateRun:
-		return "run"
-	case StateStop:
-		return "stop"
-	case StateExit:
-		return "exit"
-	default:
-		return "unknown"
-	}
+type ServiceHandler interface {
+	Handle(ctx context.Context, service DaemonService, errC chan<- error)
 }
 
 type ServiceRunner interface {
-	Init(context.Context) error
-	Idle(context.Context) error
-	Run(context.Context) error
-	Stop(context.Context) error
+	Init(ServiceContext) error
+	Idle(ServiceContext) error
+	Run(ServiceContext) error
+	Stop(ServiceContext) error
 }
 
-// DaemonService is passed to the policy handler to have its ServiceRunner handled there.
-type DaemonService struct {
-	Name   string
-	Runner ServiceRunner
+const (
+	Init State = iota
+	Idle
+	Run
+	Stop
+	Exit
+)
+
+type State uint8
+
+func (s State) String() string {
+	switch s {
+	case Init:
+		return "Init"
+	case Idle:
+		return "Idle"
+	case Run:
+		return "Run"
+	case Stop:
+		return "Stop"
+	case Exit:
+		return "Exit"
+	default:
+		return "Unknown"
+	}
 }
 
-// Service is used as a data-transfer object to pass to the Daemon, where it becomes a DaemonService to the policy handler.
 type Service struct {
-	Name    string
-	Runner  ServiceRunner
-	Handler ServiceHandler
+	Name      string
+	Runner    ServiceRunner
+	RunPolicy RunPolicy
 }
 
-func NewService(name string, runner ServiceRunner, options ...ServiceOption) Service {
-	defaultPolicy := RunPolicyConfig{
-		Policy:       PolicyRunContinous,
-		RestartDelay: 3 * time.Second,
+func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {
+	service := Service{
+		Name:      name,
+		Runner:    runner,
+		RunPolicy: PolicyContinue,
 	}
 
-	s := Service{
-		Name:   name,
-		Runner: runner,
-		// reasonable default if policy handler isnt set
-		Handler: GetServiceHandler(defaultPolicy),
+	for _, opt := range opts {
+		opt(&service)
 	}
 
-	for _, option := range options {
-		option(&s)
-	}
-
-	return s
+	return service
 }

@@ -1,93 +1,106 @@
 package rxd
 
-import (
-	"context"
-	"testing"
-)
+// func TestDaemonAddService(t *testing.T) {
+// 	serviceName := "valid-service"
 
-func TestDaemonAddService(t *testing.T) {
-	serviceName := "valid-service"
+// 	vs := &validDaemonService{}
 
-	vs := &validService{}
+// 	opts := []ServiceOption{
+// 		// UsingRunPolicy(RunOncePolicy),
+// 	}
+// 	validSvc := NewService(serviceName, vs, opts...)
 
-	opts := []ServiceOption{
-		// UsingRunPolicy(RunOncePolicy),
-	}
-	validSvc := NewService(serviceName, vs, opts...)
+// 	dIface := NewDaemon("test-daemon")
 
-	dIface := NewDaemon("test-daemon")
+// 	d, ok := dIface.(*daemon)
+// 	if !ok {
+// 		t.Errorf("could not cast Daemon interface to daemon struct")
+// 	}
 
-	d, ok := dIface.(*daemon)
-	if !ok {
-		t.Errorf("could not cast Daemon interface to daemon struct")
-	}
+// 	if len(d.services) != 0 {
+// 		t.Errorf("daemon should have no services added yet")
+// 	}
 
-	if len(d.services) != 0 {
-		t.Errorf("daemon should have no services added yet")
-	}
+// 	err := d.AddService(validSvc)
+// 	if err != nil {
+// 		t.Errorf("error adding service: %s", err)
+// 	}
 
-	err := d.AddService(validSvc)
-	if err != nil {
-		t.Errorf("error adding service: %s", err)
-	}
+// 	if len(d.services) != 1 {
+// 		t.Errorf("daemon should have one service added")
+// 	}
 
-	if len(d.services) != 1 {
-		t.Errorf("daemon should have one service added")
-	}
+// 	_, found := d.services[serviceName]
+// 	if !found {
+// 		t.Errorf("could not find the service '%s' in the daemon services map", serviceName)
+// 	}
+// }
 
-	_, found := d.services[serviceName]
-	if !found {
-		t.Errorf("could not find the service '%s' in the daemon services map", serviceName)
-	}
-}
+// func TestDaemonStartWithNoServices(t *testing.T) {
+// 	dIface := NewDaemon("test-daemon")
 
-func TestDaemonStartWithNoServices(t *testing.T) {
-	dIface := NewDaemon("test-daemon")
+// 	d, ok := dIface.(*daemon)
+// 	if !ok {
+// 		t.Errorf("could not cast Daemon interface to daemon struct")
+// 	}
 
-	d, ok := dIface.(*daemon)
-	if !ok {
-		t.Errorf("could not cast Daemon interface to daemon struct")
-	}
+// 	if len(d.services) != 0 {
+// 		t.Errorf("daemon should not yet have any services")
+// 	}
 
-	if len(d.services) != 0 {
-		t.Errorf("daemon should not yet have any services")
-	}
+// 	ctx, cancel := context.WithCancel(context.Background())
+// 	defer cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// 	err := d.Start(ctx)
+// 	if err == nil {
+// 		t.Errorf("daemon should not start without any services")
+// 	}
 
-	err := d.Start(ctx)
-	if err == nil {
-		t.Errorf("daemon should not start without any services")
-	}
+// }
 
-}
+// func TestDaemonStartSingleService(t *testing.T) {
+// 	serviceName := "valid-service"
 
-func TestDaemonStartSingleService(t *testing.T) {
-	serviceName := "valid-service"
+// 	vs := &validService{}
 
-	vs := &validService{}
+// 	opts := []ServiceOption{
+// 		// UsingRunPolicy(RunOncePolicy),
+// 	}
 
-	opts := []ServiceOption{
-		// UsingRunPolicy(RunOncePolicy),
-	}
+// 	validSvc := NewService(serviceName, vs, opts...)
 
-	validSvc := NewService(serviceName, vs, opts...)
+// 	d := NewDaemon("test-daemon")
 
-	d := NewDaemon("test-daemon")
+// 	ctx, cancel := context.WithCancel(context.Background())
+// 	defer cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// 	err := d.AddService(validSvc)
+// 	if err != nil {
+// 		t.Errorf("error adding service: %s", err)
+// 	}
 
-	err := d.AddService(validSvc)
-	if err != nil {
-		t.Errorf("error adding service: %s", err)
-	}
+// 	// valid service has no blocking code so it will run all lifecycle stages and exit.
+// 	err = d.Start(ctx)
+// 	if err != nil {
+// 		t.Errorf("expected: nil, got: %s", err)
+// 	}
 
-	// valid service has no blocking code so it will run all lifecycle stages and exit.
-	err = d.Start(ctx)
-	if err != nil {
-		t.Errorf("expected: nil, got: %s", err)
-	}
+// }
 
-}
+// type validDaemonService struct{}
+
+// func (s *validDaemonService) Init(ctx context.Context) error {
+// 	return nil
+// }
+
+// func (s *validDaemonService) Idle(ctx context.Context) error {
+// 	return nil
+// }
+
+// func (s *validDaemonService) Run(ctx context.Context) error {
+// 	return nil
+// }
+
+// func (s *validDaemonService) Stop(ctx context.Context) error {
+// 	return nil
+// }

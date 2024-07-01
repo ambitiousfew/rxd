@@ -1,10 +1,10 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -19,11 +19,11 @@ type APIPollingService struct {
 	apiBase       string
 	retryDuration time.Duration
 	maxPollCount  int
-	log           rxd.Logger
+	log           *slog.Logger
 }
 
 // NewAPIPollingService just a factory helper function to help create and return a new instance of the service.
-func NewAPIPollingService(log rxd.Logger) *APIPollingService {
+func NewAPIPollingService(log *slog.Logger) *APIPollingService {
 	return &APIPollingService{
 		client: &http.Client{
 			Timeout: 3 * time.Second,
@@ -37,7 +37,7 @@ func NewAPIPollingService(log rxd.Logger) *APIPollingService {
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *APIPollingService) Idle(ctx context.Context) error {
+func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
 
 	// APIPolling service is registering its interest in ALL services passed ENTERING a "RunState"
 	// So if HelloWorldAPI is the only passed service here and it ENTERS a "RunState" then
@@ -65,7 +65,7 @@ func (s *APIPollingService) Idle(ctx context.Context) error {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *APIPollingService) Run(ctx context.Context) error {
+func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
@@ -94,9 +94,8 @@ func (s *APIPollingService) Run(ctx context.Context) error {
 
 			resp, err := s.client.Get(s.apiBase + "/api")
 			if err != nil {
-				return err
 				// if we error, reset timer and try again...
-				// timer.Reset(s.retryDuration)
+				timer.Reset(s.retryDuration)
 				continue
 			}
 
@@ -126,14 +125,14 @@ func (s *APIPollingService) Run(ctx context.Context) error {
 }
 
 // Stop handles anything you might need to do to clean up before ending your service.
-func (s *APIPollingService) Stop(ctx context.Context) error {
+func (s *APIPollingService) Stop(ctx rxd.ServiceContext) error {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
 	s.log.Info("stopping")
 	return nil
 }
 
-func (s *APIPollingService) Init(ctx context.Context) error {
+func (s *APIPollingService) Init(ctx rxd.ServiceContext) error {
 	s.log.Info("initializing")
 	return nil
 }

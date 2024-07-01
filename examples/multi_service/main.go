@@ -24,22 +24,23 @@ func main() {
 	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})
-	parentLogger := slog.New(handler)
 
+	parentLogger := slog.New(handler)
 	// Create Poll Service config with RunPolicy option.
-	pollOptions := []rxd.ServiceOption{}
 	// Pass config to instance of service struct
 	pollClient := NewAPIPollingService(parentLogger.With("service", PollService))
-
-	pollSvc := rxd.NewService(PollService, pollClient, pollOptions...)
-
-	apiOpts := []rxd.ServiceOption{
-		// rxd.UsingLogger(parentLogger.With("service", HelloWorldAPI)),
+	pollOpts := []rxd.ServiceOption{
+		rxd.UsingRunPolicy(rxd.PolicyContinue),
 	}
+
 	// Create Hello World service passing config to instance of service struct.
 	apiServer := NewHelloWorldService(parentLogger.With("service", HelloWorldAPI))
-	apiSvc := rxd.NewService(HelloWorldAPI, apiServer, apiOpts...)
+	apiOpts := []rxd.ServiceOption{
+		rxd.UsingRunPolicy(rxd.PolicyContinue),
+	}
 
+	apiSvc := rxd.NewService(HelloWorldAPI, apiServer, apiOpts...)
+	pollSvc := rxd.NewService(PollService, pollClient, pollOpts...)
 	// We can add polling client as a dependent of API Server so
 	// any stage polling client is interested in observing of API Server
 	// will be reported down to poll client when API Server reaches that stage.
@@ -48,7 +49,7 @@ func main() {
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 
 	dopts := []rxd.DaemonOption{
-		rxd.UsingLogger(parentLogger),
+		// rxd.UsingLogger(parentLogger),
 	}
 	// Pass N services for daemon to manage and start
 	daemon := rxd.NewDaemon("multi-service-example", dopts...)

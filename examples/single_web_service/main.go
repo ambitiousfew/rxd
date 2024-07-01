@@ -33,9 +33,10 @@ func NewHelloWorldService() *HelloWorldAPIService {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(ctx context.Context) error {
+func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
+	doneC := make(chan struct{})
 	go func() {
-
+		defer close(doneC)
 		// DEBUG: we are trying to make the server shutdown to see if it will stop the service to check policy
 		errTimeout := time.NewTimer(7 * time.Second)
 		defer errTimeout.Stop()
@@ -56,25 +57,18 @@ func (s *HelloWorldAPIService) Run(ctx context.Context) error {
 		}
 	}()
 
-	// sc.Log.Info("server starting", "service", sc.Name, "address", s.server.Addr)
 	s.log.Info("server starting", "address", s.server.Addr)
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
-		// Stop running, move back to an Idle retry state
-		return errors.New("server shutdown")
+		return errors.New("server shutdown: " + err.Error())
 	}
 
-	// sc.Log.Info("server shutdown")
-
-	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
-	// Lets stop this service properly
-
-	// Run moves to StopState when the server is shutdown
+	<-doneC // wait for signal routine to finish...
 	return nil
 }
 
-func (s *HelloWorldAPIService) Init(ctx context.Context) error {
+func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 	// handle initializing the primary focus of what the service will run.
 	// Stop will be responsible for cleaning up any resources that were created during Init.
 	if s.server != nil {
@@ -96,12 +90,12 @@ func (s *HelloWorldAPIService) Init(ctx context.Context) error {
 	return nil
 }
 
-func (s *HelloWorldAPIService) Idle(ctx context.Context) error {
+func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
 	s.log.Info("entering idle")
 	return nil
 }
 
-func (s *HelloWorldAPIService) Stop(ctx context.Context) error {
+func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
 	s.log.Info("entering stop")
 	s.server = nil
 	return nil
@@ -122,21 +116,14 @@ func main() {
 	helloWorld := NewHelloWorldService()
 	helloWorld.log = logger
 
-	serviceHandler := rxd.GetServiceHandler(rxd.RunPolicyConfig{
-		Policy:       rxd.PolicyRunOnce, // default policy
-		RestartDelay: 10 * time.Second,  // RunOnce will ignore this
-	})
-
-	// We create an instance of our ServiceConfig
 	serviceOpts := []rxd.ServiceOption{
-		// NOTE: Users can inject their own policy now if they want to.
-		rxd.UsingServiceHandler(serviceHandler),
+		rxd.UsingRunPolicy(rxd.PolicyContinue),
 	}
 
 	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld, serviceOpts...)
 
 	dopts := []rxd.DaemonOption{
-		rxd.UsingLogger(logger),
+		// rxd.UsingLogger(logger),
 	}
 
 	// We pass 1 or more potentially long-running services to NewDaemon to run.
