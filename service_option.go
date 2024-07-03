@@ -1,9 +1,9 @@
 package rxd
 
-type ServiceOption func(*Service)
+type ServiceOption func(*DaemonService)
 
-func UsingRunPolicy(policy RunPolicy) ServiceOption {
-	return func(s *Service) {
-		s.RunPolicy = policy
+func UsingHandler(handler ServiceHandler) ServiceOption {
+	return func(s *DaemonService) {
+		s.Handler = handler
 	}
 }

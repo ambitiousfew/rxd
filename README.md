@@ -25,5 +25,5 @@ Description=My Notifying Service
 Type=notify # WatchdogSec is required if this is set.
 ExecStart=/path/to/my-service
 NotifyAccess=main
-# WatchdogSec=10s  # Service must send a watchdog notification every 10 seconds, required it Type=notify is set.
+WatchdogSec=10s  # Service must send a watchdog notification every 10 seconds, required it Type=notify is set.
 ```

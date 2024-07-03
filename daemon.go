@@ -12,13 +12,14 @@ import (
 )
 
 type Daemon interface {
-	AddServices(services ...Service) error
-	AddService(service Service) error
+	AddServices(services ...DaemonService) error
+	AddService(service DaemonService) error
 	Start(ctx context.Context) error
 }
 
 type daemon struct {
-	services        map[string]DaemonService
+	services        map[string]Service
+	handlers        map[string]ServiceHandler
 	started         atomic.Bool
 	errC            chan error
 	reportAliveSecs uint64
@@ -27,7 +28,8 @@ type daemon struct {
 // NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(name string, options ...DaemonOption) Daemon {
 	d := &daemon{
-		services:        make(map[string]DaemonService),
+		services:        make(map[string]Service),
+		handlers:        make(map[string]ServiceHandler),
 		errC:            make(chan error, 100),
 		started:         atomic.Bool{},
 		reportAliveSecs: 0,
@@ -51,6 +53,10 @@ func (d *daemon) Start(parent context.Context) error {
 		return ErrNoServices
 	}
 
+	// daemon child context from parent
+	daemonCtx, daemonCancel := context.WithCancel(parent)
+	defer daemonCancel()
+
 	// TODO: To eventually support running rxd on multiple platforms, we need to
 	// abstract the notifier to be a part of the daemon configuration.
 	// For now, we are only supporting systemd.
@@ -63,15 +69,9 @@ func (d *daemon) Start(parent context.Context) error {
 		return err
 	}
 
-	// daemon child context from parent
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-
-	errC := make(chan error, 1) // error channel for system notifier
-
 	// Start the notifier, this will start the watchdog portion.
 	// so we can notify systemd that we have not hung.
-	err = notifier.Start(ctx, errC)
+	err = notifier.Start(daemonCtx, d.errC)
 	if err != nil {
 		return err
 	}
@@ -79,17 +79,9 @@ func (d *daemon) Start(parent context.Context) error {
 	go func() {
 		// error handler routine
 		// closed after the wait group is done.
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case err := <-d.errC:
-				// errors from the services
-				log.Println(err.Error())
-			case err := <-errC:
-				// errors from the notifier
-				log.Println(err.Error())
-			}
+		for err := range d.errC {
+			// errors from the services
+			log.Println(err.Error())
 		}
 	}()
 
@@ -100,7 +92,7 @@ func (d *daemon) Start(parent context.Context) error {
 		defer signal.Stop(signalC)
 
 		select {
-		case <-ctx.Done():
+		case <-daemonCtx.Done():
 			d.errC <- errors.New("daemon received context done signal")
 		case <-signalC:
 			d.errC <- errors.New("daemon os signal received")
@@ -114,29 +106,39 @@ func (d *daemon) Start(parent context.Context) error {
 			d.errC <- err
 		}
 		// if we received a signal to stop, cancel the context
-		cancel()
+		daemonCancel()
 	}()
 
-	var wg sync.WaitGroup
+	var dwg sync.WaitGroup
 	// launch all services in their own routine.
-	for _, ds := range d.services {
-		wg.Add(1)
+	for _, service := range d.services {
+		dwg.Add(1)
+
+		handler := d.handlers[service.Name]
+		if err != nil && handler == nil {
+			// TODO: daemon log error or something? or maybe preflight checks before this?
+			continue
+		}
 
 		// launch the service in its own routine
-		go func(service DaemonService, handler ServiceHandler) {
-			serviceCtx, serviceCancel := context.WithCancel(ctx)
-			defer serviceCancel()
+		go func(wg *sync.WaitGroup, ctx context.Context, svc Service, h ServiceHandler) {
+			sctx, scancel := NewServiceContextWithCancel(ctx, svc.Name)
+			defer scancel()
 
 			// run the service according to the handler policy
-			handler.Handle(serviceCtx, service, d.errC)
-
+			h.Handle(sctx, svc, d.errC)
 			wg.Done()
-		}(ds, ds.Handler)
+
+		}(&dwg, daemonCtx, service, handler)
 
 	}
 
+	err = notifier.Notify(NotifyStateReady)
+	if err != nil {
+		d.errC <- err
+	}
 	// block, waiting for all services to exit their lifecycles.
-	wg.Wait()
+	dwg.Wait()
 
 	// close the error channel, so the error handler routine can exit.
 	close(d.errC)
@@ -147,7 +149,7 @@ func (d *daemon) Start(parent context.Context) error {
 // if any service fails to be added, the error is logged and the next service is attempted.
 // any services that fail likely are failing due to name overlap and will be skipped
 // if daemon is already started, no new services can be added.
-func (d *daemon) AddServices(services ...Service) error {
+func (d *daemon) AddServices(services ...DaemonService) error {
 	for _, service := range services {
 		err := d.addService(service)
 		if err != nil {
@@ -159,12 +161,12 @@ func (d *daemon) AddServices(services ...Service) error {
 
 // AddService adds a service to the daemon.
 // if the service fails to be added, the error will be returned.
-func (d *daemon) AddService(service Service) error {
+func (d *daemon) AddService(service DaemonService) error {
 	return d.addService(service)
 }
 
 // addService is a helper function to add a service to the daemon.
-func (d *daemon) addService(service Service) error {
+func (d *daemon) addService(service DaemonService) error {
 	if d.started.Load() {
 		return ErrAddingServiceOnceStarted
 	}
@@ -178,11 +180,13 @@ func (d *daemon) addService(service Service) error {
 	}
 
 	// add the service to the daemon services
-	d.services[service.Name] = DaemonService{
-		Name:    service.Name,
-		Runner:  service.Runner,
-		Handler: service.RunPolicy,
+	d.services[service.Name] = Service{
+		Name:   service.Name,
+		Runner: service.Runner,
 	}
+
+	// add the handler to a similar map of service name to handlers
+	d.handlers[service.Name] = service.Handler
 
 	return nil
 }

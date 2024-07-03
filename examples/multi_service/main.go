@@ -11,6 +11,7 @@ import (
 
 // Service Names
 const (
+	DaemonName    = "multi-service-daemon"
 	HelloWorldAPI = "HelloWorldAPI"
 	PollService   = "PollService"
 )
@@ -29,18 +30,11 @@ func main() {
 	// Create Poll Service config with RunPolicy option.
 	// Pass config to instance of service struct
 	pollClient := NewAPIPollingService(parentLogger.With("service", PollService))
-	pollOpts := []rxd.ServiceOption{
-		rxd.UsingRunPolicy(rxd.PolicyContinue),
-	}
-
 	// Create Hello World service passing config to instance of service struct.
 	apiServer := NewHelloWorldService(parentLogger.With("service", HelloWorldAPI))
-	apiOpts := []rxd.ServiceOption{
-		rxd.UsingRunPolicy(rxd.PolicyContinue),
-	}
 
-	apiSvc := rxd.NewService(HelloWorldAPI, apiServer, apiOpts...)
-	pollSvc := rxd.NewService(PollService, pollClient, pollOpts...)
+	apiSvc := rxd.NewService(HelloWorldAPI, apiServer)
+	pollSvc := rxd.NewService(PollService, pollClient)
 	// We can add polling client as a dependent of API Server so
 	// any stage polling client is interested in observing of API Server
 	// will be reported down to poll client when API Server reaches that stage.
@@ -48,11 +42,8 @@ func main() {
 	// We are interested in when API Server reaches a RunState and when its reached a StopState
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 
-	dopts := []rxd.DaemonOption{
-		// rxd.UsingLogger(parentLogger),
-	}
 	// Pass N services for daemon to manage and start
-	daemon := rxd.NewDaemon("multi-service-example", dopts...)
+	daemon := rxd.NewDaemon(DaemonName)
 
 	err := daemon.AddServices(apiSvc, pollSvc)
 	if err != nil {

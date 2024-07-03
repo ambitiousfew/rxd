@@ -22,6 +22,14 @@ func NewServiceContext(ctx context.Context, name string) ServiceContext {
 	}
 }
 
+func NewServiceContextWithCancel(ctx context.Context, name string) (ServiceContext, context.CancelFunc) {
+	sctx, cancel := context.WithCancel(ctx)
+	return serviceContext{
+		Context: sctx,
+		name:    name,
+	}, cancel
+}
+
 func (sc serviceContext) Name() string {
 	return sc.name
 }

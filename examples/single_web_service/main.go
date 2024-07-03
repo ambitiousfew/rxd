@@ -101,6 +101,8 @@ func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
 	return nil
 }
 
+const DaemonName = "hello-world-daemon"
+
 // Example entrypoint
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -110,24 +112,16 @@ func main() {
 		Level: slog.LevelDebug,
 	})
 
-	logger := slog.New(logHandler).With("service", "hello-world-example")
+	logger := slog.New(logHandler).With("service", DaemonName)
 
 	// We create an instance of our service
 	helloWorld := NewHelloWorldService()
 	helloWorld.log = logger
 
-	serviceOpts := []rxd.ServiceOption{
-		rxd.UsingRunPolicy(rxd.PolicyContinue),
-	}
+	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld)
 
-	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld, serviceOpts...)
-
-	dopts := []rxd.DaemonOption{
-		// rxd.UsingLogger(logger),
-	}
-
-	// We pass 1 or more potentially long-running services to NewDaemon to run.
-	daemon := rxd.NewDaemon("hello-world-example", dopts...)
+	// Create a new daemon instance with a name and options
+	daemon := rxd.NewDaemon(DaemonName)
 
 	err := daemon.AddService(apiSvc)
 	if err != nil {
