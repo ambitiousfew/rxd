@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+
 	"net/http"
 	"time"
 
@@ -19,11 +19,10 @@ type APIPollingService struct {
 	apiBase       string
 	retryDuration time.Duration
 	maxPollCount  int
-	log           *slog.Logger
 }
 
 // NewAPIPollingService just a factory helper function to help create and return a new instance of the service.
-func NewAPIPollingService(log *slog.Logger) *APIPollingService {
+func NewAPIPollingService() *APIPollingService {
 	return &APIPollingService{
 		client: &http.Client{
 			Timeout: 3 * time.Second,
@@ -32,7 +31,6 @@ func NewAPIPollingService(log *slog.Logger) *APIPollingService {
 		retryDuration: 10 * time.Second,
 		apiBase:       "http://localhost:8000",
 		maxPollCount:  5,
-		log:           log,
 	}
 }
 
@@ -75,7 +73,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 	// exitStateC, cancel := rxd.AnyServicesExitState(sc, rxd.RunState, HelloWorldAPI)
 	// defer cancel()
 
-	s.log.Info("starting to poll")
+	ctx.LogInfo("starting to poll", nil)
 
 	var pollCount int
 	for {
@@ -88,7 +86,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				s.log.Info("reached maximum poll count, stopping")
+				ctx.LogInfo("reached maximum poll count, stopping", nil)
 				return nil
 			}
 
@@ -114,7 +112,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			s.log.Info(fmt.Sprintf("received response from the API: %v", respBody))
+			ctx.LogInfo(fmt.Sprintf("received response from the API: %v", respBody), nil)
 			// Increment polling counter
 			pollCount++
 
@@ -128,12 +126,12 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 func (s *APIPollingService) Stop(ctx rxd.ServiceContext) error {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	s.log.Info("stopping")
+	ctx.LogInfo("stopping", nil)
 	return nil
 }
 
 func (s *APIPollingService) Init(ctx rxd.ServiceContext) error {
-	s.log.Info("initializing")
+	ctx.LogInfo("initializing", nil)
 	return nil
 }
 

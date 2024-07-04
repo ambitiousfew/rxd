@@ -7,18 +7,10 @@ type ServiceRunner interface {
 	Stop(ServiceContext) error
 }
 
-const (
-	Init State = iota
-	Idle
-	Run
-	Stop
-	Exit
-)
-
 // Service is a struct that contains the Name of the service, the ServiceRunner
 // this struct is what is passed into a Handler for the  handler to decide how to
 // interact with the service using the ServiceRunner.
-type Service struct {
+type service struct {
 	Name   string
 	Runner ServiceRunner
 }
@@ -36,7 +28,7 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Daemon
 	ds := DaemonService{
 		Name:    name,
 		Runner:  runner,
-		Handler: ServiceHandlerContinous{},
+		Handler: DefaultHandler{},
 	}
 
 	for _, opt := range opts {

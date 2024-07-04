@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -20,14 +19,12 @@ var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
 type HelloWorldAPIService struct {
 	// fields this specific server uses
 	server *http.Server
-	log    *slog.Logger
 }
 
 // NewHelloWorldService just a factory helper function to help create and return a new instance of the service.
 func NewHelloWorldService() *HelloWorldAPIService {
 	return &HelloWorldAPIService{
 		server: nil,
-		log:    slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	}
 }
 
@@ -44,20 +41,20 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 		select {
 		case <-ctx.Done():
 		case <-errTimeout.C:
-			s.log.Info("timer has elapsed, forcing server shutdown")
+			ctx.LogInfo("timer has elapsed, forcing server shutdown", nil)
 		}
 
 		// NOTE: because Stop and Run cannot execute at the same time, we need to stop the server here
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if err := s.server.Shutdown(ctx); err != nil {
-			s.log.Error("error shutting down server", "error", err)
+		if err := s.server.Shutdown(timeoutCtx); err != nil {
+			ctx.LogError("error shutting down server", map[string]any{"error": err})
 		} else {
-			s.log.Info("server shutdown")
+			ctx.LogInfo("server shutdown", nil)
 		}
 	}()
 
-	s.log.Info("server starting", "address", s.server.Addr)
+	ctx.LogInfo("server starting", map[string]any{"address": s.server.Addr})
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
@@ -72,11 +69,11 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 	// handle initializing the primary focus of what the service will run.
 	// Stop will be responsible for cleaning up any resources that were created during Init.
 	if s.server != nil {
-		s.log.Error("server already initialized")
+		ctx.LogError("server already initialized", nil)
 		return errors.New("server already initialized")
 	}
 
-	s.log.Info("entering init")
+	ctx.LogInfo("entering init", nil)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -91,37 +88,44 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 }
 
 func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
-	s.log.Info("entering idle")
+	ctx.LogInfo("entering idle", nil)
 	return nil
 }
 
 func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
-	s.log.Info("entering stop")
+	ctx.LogInfo("entering stop", nil)
 	s.server = nil
 	return nil
 }
 
-const DaemonName = "hello-world-daemon"
+const DaemonName = "single-service"
 
 // Example entrypoint
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
+	// logger options
 
-	logger := slog.New(logHandler).With("service", DaemonName)
+	// lopts := []rxd.LoggerOption{
+	// 	rxd.UsingLogName(DaemonName),
+	// 	rxd.UsingLogLevel(rxd.LogLevelDebug),
+	// 	rxd.UsingLogTimeFormat("2006/01/02T15:04"),
+	// }
+
+	logger := rxd.NewDefaultLogger(rxd.LogLevelDebug)
+
+	// daemon options
+	dopts := []rxd.DaemonOption{
+		rxd.UsingDaemonLogger(logger),
+	}
+	// Create a new daemon instance with a name and options
+	daemon := rxd.NewDaemon(DaemonName, dopts...)
 
 	// We create an instance of our service
 	helloWorld := NewHelloWorldService()
-	helloWorld.log = logger
 
-	apiSvc := rxd.NewService("HelloWorldAPI", helloWorld)
-
-	// Create a new daemon instance with a name and options
-	daemon := rxd.NewDaemon(DaemonName)
+	apiSvc := rxd.NewService("helloworld-api", helloWorld)
 
 	err := daemon.AddService(apiSvc)
 	if err != nil {
@@ -129,11 +133,59 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = daemon.Start(ctx) // Blocks main thread
+	// Blocks main thread, runs added services in their own goroutines
+	err = daemon.Start(ctx)
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
-	logger.Info("successfully stopped daemon")
+	logger.Info("successfully stopped daemon", nil)
 }
+
+// type myLogger struct {
+// 	logger *log.Logger
+// 	level  rxd.LogLevel
+// }
+
+// func (l *myLogger) log(level rxd.LogLevel, msg string, fields map[string]any) {
+// 	// if the level is less than the logger level, we don't log
+// 	if level < l.level {
+// 		return
+// 	}
+
+// 	var b strings.Builder
+// 	b.WriteString(time.Now().Format(time.RFC3339) + " ")
+// 	b.WriteString("[" + level.String() + "] ")
+// 	b.WriteString(msg + " ")
+
+// 	for k, v := range fields {
+// 		b.WriteString(" " + k + "=" + fmt.Sprintf("%v", v))
+// 	}
+
+// 	l.logger.Println(b.String())
+// }
+
+// func (l *myLogger) Error(msg string, fields map[string]any) {
+// 	l.log(rxd.LogLevelError, msg, fields)
+// }
+
+// func (l *myLogger) Warn(msg string, fields map[string]any) {
+// 	l.log(rxd.LogLevelWarning, msg, fields)
+// }
+
+// func (l *myLogger) Notice(msg string, fields map[string]any) {
+// 	l.log(rxd.LogLevelNotice, msg, fields)
+// }
+
+// func (l *myLogger) Info(msg string, fields map[string]any) {
+// 	l.log(rxd.LogLevelInfo, msg, fields)
+// }
+
+// func (l *myLogger) Debug(msg string, fields map[string]any) {
+// 	l.log(rxd.LogLevelDebug, msg, fields)
+// }
+
+// func (l *myLogger) With(group string) rxd.Logger {
+// 	return &myLogger{logger: l.logger}
+// }

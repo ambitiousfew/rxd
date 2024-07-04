@@ -1,18 +1,26 @@
 package rxd
 
+const (
+	StateInit State = iota
+	StateIdle
+	StateRun
+	StateStop
+	StateExit
+)
+
 type State uint8
 
 func (s State) String() string {
 	switch s {
-	case Init:
+	case StateInit:
 		return "Init"
-	case Idle:
+	case StateIdle:
 		return "Idle"
-	case Run:
+	case StateRun:
 		return "Run"
-	case Stop:
+	case StateStop:
 		return "Stop"
-	case Exit:
+	case StateExit:
 		return "Exit"
 	default:
 		return "Unknown"

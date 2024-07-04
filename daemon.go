@@ -3,7 +3,6 @@ package rxd
 import (
 	"context"
 	"errors"
-	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -15,24 +14,30 @@ type Daemon interface {
 	AddServices(services ...DaemonService) error
 	AddService(service DaemonService) error
 	Start(ctx context.Context) error
+	Logger() Logger
 }
 
 type daemon struct {
-	services        map[string]Service
+	services        map[string]service
 	handlers        map[string]ServiceHandler
 	started         atomic.Bool
 	errC            chan error
 	reportAliveSecs uint64
+	log             Logger
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(name string, options ...DaemonOption) Daemon {
+	// default logger
+	dl := NewDefaultLogger(LogLevelInfo)
+
 	d := &daemon{
-		services:        make(map[string]Service),
+		services:        make(map[string]service),
 		handlers:        make(map[string]ServiceHandler),
 		errC:            make(chan error, 100),
 		started:         atomic.Bool{},
 		reportAliveSecs: 0,
+		log:             dl,
 	}
 
 	for _, option := range options {
@@ -41,6 +46,10 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 
 	return d
 
+}
+
+func (d *daemon) Logger() Logger {
+	return d.log
 }
 
 func (d *daemon) Start(parent context.Context) error {
@@ -76,13 +85,15 @@ func (d *daemon) Start(parent context.Context) error {
 		return err
 	}
 
+	errDoneC := make(chan struct{})
 	go func() {
 		// error handler routine
 		// closed after the wait group is done.
 		for err := range d.errC {
 			// errors from the services
-			log.Println(err.Error())
+			d.log.Error("daemon error", map[string]any{"error": err})
 		}
+		close(errDoneC)
 	}()
 
 	// signal watcher
@@ -111,25 +122,25 @@ func (d *daemon) Start(parent context.Context) error {
 
 	var dwg sync.WaitGroup
 	// launch all services in their own routine.
-	for _, service := range d.services {
+	for _, svc := range d.services {
 		dwg.Add(1)
 
-		handler := d.handlers[service.Name]
+		handler := d.handlers[svc.Name]
 		if err != nil && handler == nil {
 			// TODO: daemon log error or something? or maybe preflight checks before this?
 			continue
 		}
 
 		// launch the service in its own routine
-		go func(wg *sync.WaitGroup, ctx context.Context, svc Service, h ServiceHandler) {
-			sctx, scancel := NewServiceContextWithCancel(ctx, svc.Name)
+		go func(wg *sync.WaitGroup, ctx context.Context, s service, h ServiceHandler) {
+			sctx, scancel := NewServiceContextWithCancel(ctx, s.Name, d.log)
 			defer scancel()
 
 			// run the service according to the handler policy
-			h.Handle(sctx, svc, d.errC)
+			h.Handle(sctx, s, d.errC)
 			wg.Done()
 
-		}(&dwg, daemonCtx, service, handler)
+		}(&dwg, daemonCtx, svc, handler)
 
 	}
 
@@ -139,9 +150,10 @@ func (d *daemon) Start(parent context.Context) error {
 	}
 	// block, waiting for all services to exit their lifecycles.
 	dwg.Wait()
-
-	// close the error channel, so the error handler routine can exit.
+	// close the error channel to signal the error handler routine to exit
 	close(d.errC)
+	// wait for error handler to finish emptying the error channel and writing to log
+	<-errDoneC
 	return nil
 }
 
@@ -166,27 +178,31 @@ func (d *daemon) AddService(service DaemonService) error {
 }
 
 // addService is a helper function to add a service to the daemon.
-func (d *daemon) addService(service DaemonService) error {
+func (d *daemon) addService(svc DaemonService) error {
 	if d.started.Load() {
 		return ErrAddingServiceOnceStarted
 	}
 
-	if service.Runner == nil {
+	if svc.Runner == nil {
 		return ErrNilService
 	}
 
-	if service.Name == "" {
+	if svc.Name == "" {
 		return ErrNoServiceName
 	}
 
+	if svc.Handler == nil {
+		svc.Handler = DefaultHandler{}
+	}
+
 	// add the service to the daemon services
-	d.services[service.Name] = Service{
-		Name:   service.Name,
-		Runner: service.Runner,
+	d.services[svc.Name] = service{
+		Name:   svc.Name,
+		Runner: svc.Runner,
 	}
 
 	// add the handler to a similar map of service name to handlers
-	d.handlers[service.Name] = service.Handler
+	d.handlers[svc.Name] = svc.Handler
 
 	return nil
 }

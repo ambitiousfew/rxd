@@ -8,25 +8,33 @@ import (
 type ServiceContext interface {
 	context.Context
 	Name() string
+	LogError(message string, fields map[string]any)
+	LogWarn(message string, fields map[string]any)
+	LogNotice(message string, fields map[string]any)
+	LogInfo(message string, fields map[string]any)
+	LogDebug(message string, fields map[string]any)
 }
 
 type serviceContext struct {
 	context.Context
 	name string
+	log  Logger
 }
 
-func NewServiceContext(ctx context.Context, name string) ServiceContext {
+func newServiceContext(ctx context.Context, name string, log Logger) ServiceContext {
 	return serviceContext{
 		Context: ctx,
 		name:    name,
+		log:     log,
 	}
 }
 
-func NewServiceContextWithCancel(ctx context.Context, name string) (ServiceContext, context.CancelFunc) {
+func NewServiceContextWithCancel(ctx context.Context, name string, log Logger) (ServiceContext, context.CancelFunc) {
 	sctx, cancel := context.WithCancel(ctx)
 	return serviceContext{
 		Context: sctx,
 		name:    name,
+		log:     log.With(name),
 	}, cancel
 }
 
@@ -48,6 +56,30 @@ func (sc serviceContext) Err() error {
 
 func (sc serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
+}
+
+func (sc serviceContext) With(group string) Logger {
+	return sc.log.With(group)
+}
+
+func (sc serviceContext) LogError(msg string, fields map[string]interface{}) {
+	sc.log.Error(msg, fields)
+}
+
+func (sc serviceContext) LogWarn(msg string, fields map[string]interface{}) {
+	sc.log.Warn(msg, fields)
+}
+
+func (sc serviceContext) LogNotice(msg string, fields map[string]interface{}) {
+	sc.log.Notice(msg, fields)
+}
+
+func (sc serviceContext) LogInfo(msg string, fields map[string]interface{}) {
+	sc.log.Info(msg, fields)
+}
+
+func (sc serviceContext) LogDebug(msg string, fields map[string]interface{}) {
+	sc.log.Debug(msg, fields)
 }
 
 // // NewServiceContext creates a new service context instance given a name, service, and service options.
