@@ -38,11 +38,8 @@ func NewAPIPollingService() *APIPollingService {
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
 func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "entered idle state")
-	statesC, cancel := ctx.WatchAllServices(rxd.WatchConfig{
-		Action:      rxd.Entering,
-		TargetState: rxd.StateRun,
-	}, ServiceHelloWorldAPI)
 
+	statesC, cancel := ctx.WatchAllServices(rxd.Entering, rxd.StateRun, ServiceHelloWorldAPI)
 	defer cancel()
 
 	for {
@@ -67,10 +64,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 	// Here we are registering our interest in ANY of the services passed EXITING a "RunState"
 	// So if any service given here for some reasons LEAVES their RunState, we will be notified.
 
-	statesC, cancel := ctx.WatchAllServices(rxd.WatchConfig{
-		Action:      rxd.Exiting,
-		TargetState: rxd.StateRun,
-	}, ServiceHelloWorldAPI)
+	statesC, cancel := ctx.WatchAllServices(rxd.Exiting, rxd.StateRun, ServiceHelloWorldAPI)
 	defer cancel()
 
 	ctx.Log(log.LevelInfo, "starting to poll")

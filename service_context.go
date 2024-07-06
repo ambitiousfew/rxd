@@ -10,8 +10,8 @@ import (
 
 type ServiceWatcher interface {
 	WatchAllStates(ServiceFilter) (<-chan ServiceStates, context.CancelFunc)
-	WatchAnyServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc)
-	WatchAllServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc)
+	WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc)
+	WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc)
 }
 
 type ServiceContext interface {
@@ -38,10 +38,6 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 		ic:      icStates,
 	}, cancel
 }
-
-// func (sc serviceContext) Intracom() intracom.Intracom {
-// 	return sc.ic
-// }
 
 func (sc serviceContext) Name() string {
 	return sc.name
@@ -80,13 +76,7 @@ func (sc serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
 }
 
-type WatchConfig struct {
-	Action         ServiceAction // Entering or Exiting
-	TargetState    State         // the state to watch for
-	ConsumerSuffix string        // if not spawning child routines from service, leave blank.
-}
-
-func (sc serviceContext) WatchAllServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc) {
+func (sc serviceContext) WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
 
@@ -94,7 +84,7 @@ func (sc serviceContext) WatchAllServices(cfg WatchConfig, services ...string) (
 		defer cancel()
 
 		// subscribe to the internal states on behalf of the service context given.
-		consumer := internalStatesConsumer(cfg.Action, cfg.TargetState, sc.name)
+		consumer := internalStatesConsumer(action, target, sc.name)
 		sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
@@ -115,14 +105,14 @@ func (sc serviceContext) WatchAllServices(cfg WatchConfig, services ...string) (
 
 				interestedServices := make(ServiceStates, len(services))
 				for _, name := range services {
-					switch cfg.Action {
+					switch action {
 					case Entering:
-						if val, ok := states[name]; ok && val == cfg.TargetState {
+						if val, ok := states[name]; ok && val == target {
 							interestedServices[name] = val
 						}
 
 					case Exiting:
-						if val, ok := states[name]; ok && val != cfg.TargetState {
+						if val, ok := states[name]; ok && val != target {
 							interestedServices[name] = val
 						}
 					default:
@@ -147,7 +137,7 @@ func (sc serviceContext) WatchAllServices(cfg WatchConfig, services ...string) (
 	return ch, cancel
 }
 
-func (sc serviceContext) WatchAnyServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc) {
+func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
 
@@ -155,7 +145,7 @@ func (sc serviceContext) WatchAnyServices(cfg WatchConfig, services ...string) (
 		defer cancel()
 
 		// subscribe to the internal states on behalf of the service context given.
-		consumer := internalStatesConsumer(cfg.Action, cfg.TargetState, sc.name)
+		consumer := internalStatesConsumer(action, target, sc.name)
 		sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
 			Topic:         internalServiceStates,
 			ConsumerGroup: consumer,
@@ -176,14 +166,14 @@ func (sc serviceContext) WatchAnyServices(cfg WatchConfig, services ...string) (
 
 				interestedServices := make(ServiceStates, len(services))
 				for _, service := range services {
-					switch cfg.Action {
+					switch action {
 					case Entering:
-						if val, ok := states[service]; ok && val == cfg.TargetState {
+						if val, ok := states[service]; ok && val == target {
 							interestedServices[service] = val
 						}
 
 					case Exiting:
-						if val, ok := states[service]; ok && val != cfg.TargetState {
+						if val, ok := states[service]; ok && val != target {
 							interestedServices[service] = val
 						}
 					}
