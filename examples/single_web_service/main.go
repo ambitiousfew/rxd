@@ -22,11 +22,7 @@ func main() {
 	// A logger is required. You can use the default logger or pass your own that meets log.ger interface.
 	// logger := rxd.NewDefaultLogger(log.LevelDebug)
 	logger := standard.NewDefaultLogger(log.LevelDebug)
-	// defaultLogger := journald.New(log.LevelDebug)
-	// logger := rxd.NewLogger(os.Stdout, os.Stderr,
-	// 	rxd.UsingLogMsgFormat("{time}: {level} {message}"),
-	// 	rxd.UsingLogLevel(log.LevelDebug),
-	// )
+	// logger := journald.New(log.LevelDebug)
 
 	// daemon options
 	dopts := []rxd.DaemonOption{}

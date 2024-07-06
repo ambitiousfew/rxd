@@ -1,7 +1,9 @@
 package log
 
+import "strconv"
+
 type Logger interface {
-	Log(level Level, message string, args ...any)
+	Log(level Level, message string, extra ...Field)
 	SetLevel(level Level)
 }
 
@@ -48,5 +50,44 @@ func (l Level) String() string {
 		return "DEBUG"
 	default:
 		return "UNKNOWN"
+	}
+}
+
+type Field struct {
+	Key   string
+	Value string
+}
+
+func Int(key string, value any) Field {
+	switch t := value.(type) {
+	case int:
+		return Field{Key: key, Value: strconv.Itoa(t)}
+	case int64:
+		return Field{Key: key, Value: strconv.FormatInt(t, 10)}
+	case uint:
+		return Field{Key: key, Value: strconv.FormatUint(uint64(t), 10)}
+	case uint64:
+		return Field{Key: key, Value: strconv.FormatUint(t, 10)}
+	default:
+		return Field{Key: key, Value: "<unknown value type for int field>"}
+	}
+}
+
+func String(key, value string) Field {
+	return Field{Key: key, Value: value}
+}
+
+func Bool(key string, value bool) Field {
+	return Field{Key: key, Value: strconv.FormatBool(value)}
+}
+
+func Float(key string, value any) Field {
+	switch t := value.(type) {
+	case float32:
+		return Field{Key: key, Value: strconv.FormatFloat(float64(t), 'f', -1, 32)}
+	case float64:
+		return Field{Key: key, Value: strconv.FormatFloat(t, 'f', -1, 64)}
+	default:
+		return Field{Key: key, Value: "<unknown value type for float field>"}
 	}
 }

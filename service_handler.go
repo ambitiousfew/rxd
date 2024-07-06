@@ -8,7 +8,7 @@ import (
 
 // ServiceHandler interface defines the methods that a service handler must implement
 type ServiceHandler interface {
-	Handle(ctx ServiceContext, runner ServiceRunner)
+	Handle(ctx ServiceContext, runner ServiceRunner, stateUpdateC chan<- StateUpdate)
 }
 
 // DefaultHandler is a service handler that runs the service continuously
@@ -19,19 +19,21 @@ type DefaultHandler struct{}
 
 // Handle runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
-// errC is a channel that is used to report errors that occur during the service execution.
 // which is then handled by the daemon.
-func (h DefaultHandler) Handle(sctx ServiceContext, sr ServiceRunner) {
-	var hasStopped bool
-	var state State
-
+func (h DefaultHandler) Handle(sctx ServiceContext, sr ServiceRunner, stateUpdateC chan<- StateUpdate) {
+	serviceName := sctx.Name()
 	// Set the default timeout to 0 to default resets on everything else except stop.
 	defaultTimeout := 0 * time.Nanosecond
 
 	timeout := time.NewTimer(defaultTimeout)
 	defer timeout.Stop()
 
+	// initial state
+	var state State = StateInit
+
+	var hasStopped bool
 	for state != StateExit {
+		stateUpdateC <- StateUpdate{State: state, Name: serviceName}
 		select {
 		case <-sctx.Done():
 			state = StateExit
@@ -45,6 +47,9 @@ func (h DefaultHandler) Handle(sctx ServiceContext, sr ServiceRunner) {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateExit // or Stop with timeout?
 				}
+				// reset the hasStopped flag since we just restarted the service.
+				hasStopped = false
+
 			case StateIdle:
 				state = StateRun
 				err := sr.Idle(sctx)

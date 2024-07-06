@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,7 +32,7 @@ type standardLogger struct {
 // - stdout is os.Stdout
 // - stderr is os.Stderr
 func NewDefaultLogger(level log.Level) log.Logger {
-	return New(
+	return NewLogger(
 		os.Stdout,
 		os.Stderr,
 		WithLogLevel(level),
@@ -48,7 +47,7 @@ func NewDefaultLogger(level log.Level) log.Logger {
 // - no log group, can override with: With(<group name>)
 // - time format is RFC3339, can override with: UsingLogTimeFormat(<time format>)
 // - log level is INFO, can override with: UsingLogLevel(<log level>)
-func New(stdout, stderr io.Writer, opts ...StandardOption) log.Logger {
+func NewLogger(stdout, stderr io.Writer, opts ...StandardOption) log.Logger {
 	l := &standardLogger{
 		timefmt: time.RFC3339,
 		msgfmt:  "{time} [{level}] {message}",
@@ -79,15 +78,9 @@ func (l *standardLogger) SetLevel(level log.Level) {
 }
 
 // Log handles the logging of messages to the logger
-func (l *standardLogger) Log(level log.Level, msg string, args ...any) {
+func (l *standardLogger) Log(level log.Level, msg string, fields ...log.Field) {
 	// if the logger level is less than level passed, we don't log
 	if l.level < level {
-		return
-	}
-
-	// args must be key-value pairs so they come in pairs of two.
-	if len(args) > 0 && len(args)%2 != 0 {
-		l.logErr("invalid number of arguments: " + strconv.Itoa(len(args)) + ", must be key-value pairs")
 		return
 	}
 
@@ -103,17 +96,8 @@ func (l *standardLogger) Log(level log.Level, msg string, args ...any) {
 		return
 	}
 
-	for i, arg := range args {
-		val, ok := arg.(string)
-		if !ok {
-			continue
-		}
-
-		if i%2 == 0 {
-			b.WriteString(" " + val + "=")
-		} else {
-			b.WriteString(val)
-		}
+	for _, field := range fields {
+		b.WriteString(" " + field.Key + "=" + field.Value)
 	}
 
 	switch level {

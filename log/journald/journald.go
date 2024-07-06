@@ -22,10 +22,10 @@ type journaldLogger struct {
 	errMu  sync.Mutex
 }
 
-// NewJournaldLogger creates a new instance of the journal logger that logs only what is necessary
+// NewLogger creates a new instance of the journal logger that logs only what is necessary
 // to journal and allows for the journal to handle opening the stdout and stderr streams and tagging
 // timestamps and program name.
-func New(level log.Level, opts ...Option) log.Logger {
+func NewLogger(level log.Level, opts ...Option) log.Logger {
 	jlogger := &journaldLogger{
 		severityPrefix: false,
 		level:          level,
@@ -46,17 +46,9 @@ func (l *journaldLogger) SetLevel(level log.Level) {
 	l.level = level
 }
 
-func (l *journaldLogger) Log(level log.Level, msg string, args ...any) {
+func (l *journaldLogger) Log(level log.Level, msg string, fields ...log.Field) {
 	// if the logger level is less than level passed, we don't log
 	if l.level < level {
-		return
-	}
-
-	// TODO: args must be key-value pairs so they come in pairs of two.
-	// dig into slow and see if there is a better way to handle this.
-	// maybe it would be better as a type that can be passed in.
-	if len(args) > 0 && len(args)%2 != 0 {
-		l.logErr("invalid number of arguments: " + strconv.Itoa(len(args)) + ", must be key-value pairs")
 		return
 	}
 
@@ -69,13 +61,8 @@ func (l *journaldLogger) Log(level log.Level, msg string, args ...any) {
 	b.WriteString("[" + level.String() + "] ")
 	b.WriteString(msg)
 
-	for i, arg := range args {
-		val := arg.(string)
-		if i%2 == 0 {
-			b.WriteString(" " + val + "=")
-		} else {
-			b.WriteString(val)
-		}
+	for _, field := range fields {
+		b.WriteString(" " + field.Key + "=" + field.Value)
 	}
 
 	message := b.String()

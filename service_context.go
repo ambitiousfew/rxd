@@ -4,30 +4,56 @@ import (
 	"context"
 	"time"
 
+	"github.com/ambitiousfew/rxd/intracom"
 	"github.com/ambitiousfew/rxd/log"
 )
 
+type ServiceWatcher interface {
+	WatchAllStates(ServiceFilter) (<-chan ServiceStates, context.CancelFunc)
+	WatchAnyServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc)
+	WatchAllServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc)
+}
+
 type ServiceContext interface {
 	context.Context
+	ServiceWatcher
+	Name() string
 	Log(level log.Level, message string)
-	// intracom for intra-service communication
-	// Subscribe()
-	// Register()
+	With(name string) ServiceContext
 }
 
 type serviceContext struct {
 	context.Context
 	name string
 	logC chan<- DaemonLog
+	ic   intracom.Intracom[ServiceStates]
 }
 
-func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog) (ServiceContext, context.CancelFunc) {
+func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Intracom[ServiceStates]) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	return serviceContext{
 		Context: ctx,
 		name:    name,
 		logC:    logC,
+		ic:      icStates,
 	}, cancel
+}
+
+// func (sc serviceContext) Intracom() intracom.Intracom {
+// 	return sc.ic
+// }
+
+func (sc serviceContext) Name() string {
+	return sc.name
+}
+
+func (sc serviceContext) With(name string) ServiceContext {
+	return serviceContext{
+		Context: sc.Context,
+		name:    sc.name + "_" + name,
+		logC:    sc.logC,
+		ic:      sc.ic,
+	}
 }
 
 func (sc serviceContext) Log(level log.Level, message string) {
@@ -54,126 +80,196 @@ func (sc serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
 }
 
-// // NewServiceContext creates a new service context instance given a name, service, and service options.
-// func NewService(name string, service Service, opts serviceOpts) *ServiceContext {
-// 	if opts == nil {
-// 		opts = NewServiceOpts() // if nil is passed, use defaults
-// 	}
+type WatchConfig struct {
+	Action         ServiceAction // Entering or Exiting
+	TargetState    State         // the state to watch for
+	ConsumerSuffix string        // if not spawning child routines from service, leave blank.
+}
 
-// 	var log *slog.Logger
-// 	if opts.logHandler != nil {
-// 		// overrides the logger that manager would attach to the service context
-// 		log = slog.New(opts.logHandler).With("service", name)
-// 	}
+func (sc serviceContext) WatchAllServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc) {
+	ch := make(chan ServiceStates, 1)
+	watchCtx, cancel := context.WithCancel(sc)
 
-// 	return &ServiceContext{
-// 		Name:        name,
-// 		ShutdownCtx: opts.ctx,
-// 		Log:         log, // if nil, manager takes care of it.
+	go func(ctx context.Context) {
+		defer cancel()
 
-// 		runPolicy: opts.runPolicy,
-// 		cancel:    opts.cancel,
+		// subscribe to the internal states on behalf of the service context given.
+		consumer := internalStatesConsumer(cfg.Action, cfg.TargetState, sc.name)
+		sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropOldest,
+		})
+		defer unsub()
 
-// 		// 0 = not called, 1 = called
-// 		shutdownCalled: atomic.Int32{},
-// 		service:        service,
-// 		// attach the service name to the child logger automatically
-// 		doneC: make(chan struct{}),
-// 	}
-// }
+		for {
+			select {
+			case <-ctx.Done():
+				return
 
-// func (sc *ServiceContext) hasStopped() bool {
-// 	return sc.stopCalled.Load() == 1
-// }
+			case states, open := <-sub:
+				if !open {
+					return
+				}
 
-// func (sc *ServiceContext) shutdown() {
-// 	if sc.shutdownCalled.Swap(1) == 1 {
-// 		return
-// 	}
-// 	sc.cancel() // cancel context to signal shutdown to service
-// }
+				interestedServices := make(ServiceStates, len(services))
+				for _, name := range services {
+					switch cfg.Action {
+					case Entering:
+						if val, ok := states[name]; ok && val == cfg.TargetState {
+							interestedServices[name] = val
+						}
 
-// // startService is run in its own routine by daemon.
-// // it is a wrapper around the service's lifecycle methods and
-// // is responsible for calling the service's lifecycle methods and enforcing the service's run policy.
-// func startService(wg *sync.WaitGroup, stateUpdateC chan<- StateUpdate, sc *ServiceContext) {
-// 	// All services begin at Init stage
-// 	var svcResp ServiceResponse = NewResponse(nil, InitState)
-// 	service := sc.service
+					case Exiting:
+						if val, ok := states[name]; ok && val != cfg.TargetState {
+							interestedServices[name] = val
+						}
+					default:
+						// ignore
+						continue
+					}
+				}
 
-// 	for {
-// 		// inform state watcher of this service's upcoming state transition
-// 		stateUpdateC <- StateUpdate{Name: sc.Name, State: svcResp.NextState}
+				// if we found all those we care about.
+				if len(interestedServices) == len(services) {
+					select {
+					case <-ctx.Done():
+						return
+					case ch <- interestedServices: // send out the states
+					}
+				}
 
-// 		// Determine the next state the service should be in.
-// 		// Run the method associated with the next state.
-// 		switch svcResp.NextState {
+			}
+		}
+	}(watchCtx)
 
-// 		case InitState:
+	return ch, cancel
+}
 
-// 			svcResp = service.Init(sc)
-// 			if svcResp.Error != nil {
-// 				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
-// 			}
+func (sc serviceContext) WatchAnyServices(cfg WatchConfig, services ...string) (<-chan ServiceStates, context.CancelFunc) {
+	ch := make(chan ServiceStates, 1)
+	watchCtx, cancel := context.WithCancel(sc)
 
-// 		case IdleState:
-// 			svcResp = service.Idle(sc)
-// 			if svcResp.Error != nil {
-// 				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
-// 			}
+	go func(ctx context.Context) {
+		defer cancel()
 
-// 		case RunState:
-// 			svcResp = service.Run(sc)
-// 			if svcResp.Error != nil {
-// 				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
-// 			}
+		// subscribe to the internal states on behalf of the service context given.
+		consumer := internalStatesConsumer(cfg.Action, cfg.TargetState, sc.name)
+		sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropOldest,
+		})
+		defer unsub()
 
-// 			// Enforce Run policies
-// 			switch sc.runPolicy {
-// 			case RunOncePolicy:
-// 				// regardless of success/fail, we exit
-// 				svcResp.NextState = ExitState
+		for {
+			select {
+			case <-ctx.Done():
+				return
 
-// 			case RetryUntilSuccessPolicy:
-// 				if svcResp.Error == nil {
-// 					svcResp := service.Stop(sc)
-// 					if svcResp.Error != nil {
-// 						continue
-// 					}
-// 					sc.stopCalled.Store(1)
-// 					// If Run didnt error, we assume successful run once and stop service.
-// 					svcResp.NextState = ExitState
-// 				}
-// 			}
-// 		case StopState:
-// 			svcResp = service.Stop(sc)
-// 			if svcResp.Error != nil {
-// 				sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
-// 			}
-// 			sc.stopCalled.Store(1)
+			case states, open := <-sub:
+				if !open {
+					return
+				}
 
-// 		case ExitState:
-// 			if !sc.hasStopped() {
-// 				// inform state watcher of this service's upcoming state transition since we wont loop again after this.
-// 				stateUpdateC <- StateUpdate{Name: sc.Name, State: svcResp.NextState}
-// 				// Ensure we still run Stop in case the user sent us ExitState from any other lifecycle method
-// 				svcResp = service.Stop(sc)
-// 				if svcResp.Error != nil {
-// 					sc.Log.Error(fmt.Sprintf("%s %s", sc.Name, svcResp.Error.Error()))
-// 				}
-// 				sc.stopCalled.Store(1)
-// 			}
+				interestedServices := make(ServiceStates, len(services))
+				for _, service := range services {
+					switch cfg.Action {
+					case Entering:
+						if val, ok := states[service]; ok && val == cfg.TargetState {
+							interestedServices[service] = val
+						}
 
-// 			sc.shutdown()
-// 			// we are done with this service, exit the service wrapper routine.
-// 			sc.Log.Debug("service exiting")
-// 			close(sc.doneC)
+					case Exiting:
+						if val, ok := states[service]; ok && val != cfg.TargetState {
+							interestedServices[service] = val
+						}
+					}
+				}
 
-// 			wg.Done()
-// 			return
+				// if we found all those we care about.
+				if len(interestedServices) > 0 {
+					select {
+					case <-ctx.Done(): // user cancelled us
+						return
+					case ch <- interestedServices: // send out the states we cared about
+					}
+				}
+			}
 
-// 		default:
-// 			sc.Log.Error(fmt.Sprintf("unknown state '%s' returned from service", svcResp.NextState))
-// 		}
-// 	}
-// }
+		}
+
+	}(watchCtx)
+
+	return ch, cancel
+}
+
+func (sc serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceStates, context.CancelFunc) {
+	ch := make(chan ServiceStates, 1)
+	watchCtx, cancel := context.WithCancel(sc)
+
+	go func(ctx context.Context) {
+		defer cancel()
+
+		consumer := internalAllStatesConsumer(sc.name)
+		// subscribe to the internal states on behalf of the service context given.
+		sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
+			Topic:         internalServiceStates,
+			ConsumerGroup: consumer,
+			BufferSize:    1,
+			BufferPolicy:  intracom.DropOldest,
+		})
+		defer unsub()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case states, open := <-sub:
+				if !open {
+					return
+				}
+
+				// if no filters are given or mode is set to none, then we just send out all the states we have.
+				if len(filter.Names) == 0 || filter.Mode == None {
+					select {
+					case <-ctx.Done():
+						return
+					case ch <- states:
+						// no filtering applied, send out all the states we have.
+					}
+					continue
+				}
+
+				// if we have filters, then we need to filter the states we have.
+				filteredInterests := make(ServiceStates, len(filter.Names))
+				for name, state := range states {
+					switch filter.Mode {
+					case Include:
+						// if the FilterSet given contains the service name, then we include it.
+						if _, ok := filter.Names[name]; ok {
+							filteredInterests[name] = state
+						}
+
+					case Exclude:
+						// if the FilterSet given does not contain the service name, then we include it.
+						if _, ok := filter.Names[name]; !ok {
+							filteredInterests[name] = state
+						}
+					}
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- filteredInterests: // send out the states
+				}
+			}
+		}
+	}(watchCtx)
+
+	return ch, cancel
+}

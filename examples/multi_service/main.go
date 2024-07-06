@@ -7,7 +7,7 @@ import (
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/log/journald"
+	"github.com/ambitiousfew/rxd/log/standard"
 )
 
 // Service Names
@@ -40,13 +40,13 @@ func main() {
 	}
 
 	// 1st run
-	// logger := rxd.NewDefaultLogger(rxd.LogLevelDebug)
+	logger := standard.NewDefaultLogger(log.LevelDebug)
 
 	// 2nd run
-	// logger := journald.NewLogger(rxd.LogLevelDebug)
+	// logger := journald.NewLogger(log.LevelDebug)
 
 	// 3rd run
-	logger := journald.New(log.LevelInfo, journald.WithSeverityPrefix(true))
+	// logger := journald.NewLogger(log.LevelInfo, journald.WithSeverityPrefix(true))
 
 	// We can add polling client as a dependent of API Server so
 	// any stage polling client is interested in observing of API Server

@@ -37,26 +37,21 @@ func NewAPIPollingService() *APIPollingService {
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
 func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
+	ctx.Log(log.LevelInfo, "entered idle state")
+	statesC, cancel := ctx.WatchAllServices(rxd.WatchConfig{
+		Action:      rxd.Entering,
+		TargetState: rxd.StateRun,
+	}, ServiceHelloWorldAPI)
 
-	// APIPolling service is registering its interest in ALL services passed ENTERING a "RunState"
-	// So if HelloWorldAPI is the only passed service here and it ENTERS a "RunState" then
-	//  APIPolling service will be notified of that state change.
-	// This is how we are able to listen to state changes of other services running within RxD.
-	// enteredStateC, cancel := rxd.AllServicesEnterState(sc, rxd.RunState, HelloWorldAPI)
-	// defer cancel()
+	defer cancel()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		// case <-enteredStateC:
-		default:
-			// if we receive a state change over this channel, it will only happen
-			// because ALL services we are interested in have entered their run state.
-			// HelloWorldAPI should be running, APIPolling can now move from
-			// Idle to Run state.
-
-			// We must exit Idle and specify the next state we want to enter.
+		case <-statesC:
+			ctx.Log(log.LevelInfo, "Hello World API has entered Run state")
+			// Hello World API should have entered a RunState, so we can move to our next state (Run) now.
 			return nil
 		}
 	}
@@ -65,14 +60,18 @@ func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
+	ctx.Log(log.LevelInfo, "entered run state")
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
 
 	// Here we are registering our interest in ANY of the services passed EXITING a "RunState"
 	// So if any service given here for some reasons LEAVES their RunState, we will be notified.
 
-	// exitStateC, cancel := rxd.AnyServicesExitState(sc, rxd.RunState, HelloWorldAPI)
-	// defer cancel()
+	statesC, cancel := ctx.WatchAllServices(rxd.WatchConfig{
+		Action:      rxd.Exiting,
+		TargetState: rxd.StateRun,
+	}, ServiceHelloWorldAPI)
+	defer cancel()
 
 	ctx.Log(log.LevelInfo, "starting to poll")
 
@@ -81,9 +80,9 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		// case <-exitStateC:
-		// Polling service can wait to be Notified of a specific state change, or even a state to be put into.
-		// return nil
+		case <-statesC:
+			// Hello World API should have exited Run state, so we need to move out of run too.
+			return nil
 
 		case <-timer.C:
 			if pollCount > s.maxPollCount {

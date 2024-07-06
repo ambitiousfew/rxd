@@ -24,6 +24,7 @@ func NewHelloWorldService() *HelloWorldAPIService {
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
 func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
+	ctx.Log(log.LevelInfo, "entered idle state")
 	// if all is well here, move to the RunState or retry back to Init if something went wrong.
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -43,6 +44,7 @@ func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
+	ctx.Log(log.LevelInfo, "entered run state")
 	doneC := make(chan struct{})
 	go func() {
 		defer close(doneC)

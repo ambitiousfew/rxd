@@ -2,6 +2,11 @@ package rxd
 
 import "context"
 
+type SystemNotifier interface {
+	Start(ctx context.Context, errC chan<- DaemonLog) error
+	Notify(state NotifyState) error
+}
+
 const (
 	NotifyStateStopped NotifyState = iota
 	NotifyStateStopping
@@ -30,13 +35,4 @@ func (s NotifyState) String() string {
 	default:
 		return ""
 	}
-}
-
-type SystemNotifier interface {
-	Start(ctx context.Context, errC chan<- DaemonLog) error
-	Notify(state NotifyState) error
-	// NotifyReady() error
-	// NotifyReloading() error
-	// NotifyStopping() error
-	// NotifyAlive() error
 }
