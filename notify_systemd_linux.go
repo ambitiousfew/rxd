@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
 type systemdNotifier struct {
@@ -60,7 +62,7 @@ func (n *systemdNotifier) Notify(state NotifyState) error {
 	return err
 }
 
-func (n *systemdNotifier) Start(ctx context.Context, errC chan<- error) error {
+func (n *systemdNotifier) Start(ctx context.Context, logC chan<- DaemonLog) error {
 	if n.watchdog == 0 {
 		// do nothing if watchdog is not set
 		return nil
@@ -77,7 +79,11 @@ func (n *systemdNotifier) Start(ctx context.Context, errC chan<- error) error {
 				err := n.Notify(NotifyStateAlive)
 				if err != nil {
 					// TODO: log error via channel??
-					errC <- err
+					logC <- DaemonLog{
+						Level:   log.LevelError,
+						Message: err.Error(),
+						Name:    "internal:systemd-notifier",
+					}
 				}
 			}
 		}

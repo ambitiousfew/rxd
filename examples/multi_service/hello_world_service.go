@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/log"
 )
 
 type HelloWorldAPIService struct {
@@ -27,7 +28,7 @@ func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 
-	// ctx.LogInfo("intentionally delaying for 8s before run begins")
+	// ctx.Log(log.LevelInfo, "intentionally delaying for 8s before run begi)
 	for {
 		select {
 		case <-ctx.Done():
@@ -49,18 +50,18 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 		// since ListenAndServe will block and we need a way to end the
 		// server as well as inform the server to stop all requests ASAP.
 		<-ctx.Done()
-		ctx.LogInfo("received a shutdown signal, cancel server context to stop server gracefully", nil)
+		ctx.Log(log.LevelInfo, "received a shutdown signal, cancel server context to stop server gracefully")
 
 		timedCtx, timedCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer timedCancel()
 
 		err := s.server.Shutdown(timedCtx)
 		if err != nil {
-			ctx.LogError(err.Error(), nil)
+			ctx.Log(log.LevelError, err.Error())
 		}
 	}()
 
-	ctx.LogInfo(fmt.Sprintf("server starting at %s", s.server.Addr), nil)
+	ctx.Log(log.LevelInfo, fmt.Sprintf("server starting at %s", s.server.Addr))
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 
@@ -70,7 +71,7 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 	}
 
 	<-doneC
-	ctx.LogInfo("server shutdown", nil)
+	ctx.Log(log.LevelInfo, "server shutdown")
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
@@ -78,7 +79,7 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 }
 
 func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
-	ctx.LogInfo("initializing", nil)
+	ctx.Log(log.LevelInfo, "initializing")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +99,7 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	ctx.LogInfo("stopping", nil)
+	ctx.Log(log.LevelInfo, "stopping")
 	s.server = nil
 	return nil
 }

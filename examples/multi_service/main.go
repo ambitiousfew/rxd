@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/log/journald"
 )
 
 // Service Names
@@ -26,7 +28,7 @@ func main() {
 	// Create Hello World service passing config to instance of service struct.
 	apiServer := NewHelloWorldService()
 
-	services := []rxd.DaemonService{
+	services := []rxd.Service{
 		{
 			Name:   ServiceHelloWorldAPI,
 			Runner: apiServer,
@@ -37,6 +39,15 @@ func main() {
 		},
 	}
 
+	// 1st run
+	// logger := rxd.NewDefaultLogger(rxd.LogLevelDebug)
+
+	// 2nd run
+	// logger := journald.NewLogger(rxd.LogLevelDebug)
+
+	// 3rd run
+	logger := journald.New(log.LevelInfo, journald.WithSeverityPrefix(true))
+
 	// We can add polling client as a dependent of API Server so
 	// any stage polling client is interested in observing of API Server
 	// will be reported down to poll client when API Server reaches that stage.
@@ -45,20 +56,19 @@ func main() {
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 
 	// Pass N services for daemon to manage and start
-	daemon := rxd.NewDaemon(DaemonName)
-	logger := daemon.Logger()
+	daemon := rxd.NewDaemon(DaemonName, logger)
 
 	err := daemon.AddServices(services...)
 	if err != nil {
-		logger.Error(err.Error(), nil)
+		logger.Log(log.LevelError, err.Error())
 		os.Exit(1)
 	}
 	// tell the daemon to Start - this blocks until the underlying
 	// services manager stops running, which it wont until all services complete.
 	err = daemon.Start(ctx)
 	if err != nil {
-		logger.Error(err.Error(), nil)
+		logger.Log(log.LevelError, err.Error())
 		os.Exit(1)
 	}
-	logger.Info("daemon has completed", nil)
+	logger.Log(log.LevelInfo, "successfully stopped daemon")
 }

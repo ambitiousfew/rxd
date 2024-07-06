@@ -33,7 +33,7 @@ func (s NotifyState) String() string {
 }
 
 type SystemNotifier interface {
-	Start(ctx context.Context, errC chan<- error) error
+	Start(ctx context.Context, errC chan<- DaemonLog) error
 	Notify(state NotifyState) error
 	// NotifyReady() error
 	// NotifyReloading() error

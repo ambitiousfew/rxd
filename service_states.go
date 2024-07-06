@@ -13,16 +13,16 @@ type State uint8
 func (s State) String() string {
 	switch s {
 	case StateInit:
-		return "Init"
+		return "init"
 	case StateIdle:
-		return "Idle"
+		return "idle"
 	case StateRun:
-		return "Run"
+		return "run"
 	case StateStop:
-		return "Stop"
+		return "stop"
 	case StateExit:
-		return "Exit"
+		return "exit"
 	default:
-		return "Unknown"
+		return "unknown"
 	}
 }

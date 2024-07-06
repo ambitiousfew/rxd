@@ -3,13 +3,58 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"os"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/log/standard"
 )
+
+const DaemonName = "single-service"
+
+// Example entrypoint
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// A logger is required. You can use the default logger or pass your own that meets log.ger interface.
+	// logger := rxd.NewDefaultLogger(log.LevelDebug)
+	logger := standard.NewDefaultLogger(log.LevelDebug)
+	// defaultLogger := journald.New(log.LevelDebug)
+	// logger := rxd.NewLogger(os.Stdout, os.Stderr,
+	// 	rxd.UsingLogMsgFormat("{time}: {level} {message}"),
+	// 	rxd.UsingLogLevel(log.LevelDebug),
+	// )
+
+	// daemon options
+	dopts := []rxd.DaemonOption{}
+	// Create a new daemon instance with a name and options
+	daemon := rxd.NewDaemon(DaemonName, logger, dopts...)
+
+	// We create an instance of our service
+	helloWorld := NewHelloWorldService()
+
+	apiSvc := rxd.NewService("helloworld-api", helloWorld)
+
+	err := daemon.AddService(apiSvc)
+	if err != nil {
+		logger.Log(log.LevelError, err.Error())
+		os.Exit(1)
+	}
+
+	// Blocks main thread, runs added services in their own goroutines
+	err = daemon.Start(ctx)
+	if err != nil {
+		logger.Log(log.LevelError, err.Error())
+		os.Exit(1)
+	}
+
+	logger.Log(log.LevelInfo, "successfully stopped daemon")
+}
+
+// HelloWorldAPIService is a simple service that runs a web server that returns a JSON response.
 
 // HelloWorldAPIService must meet Service interface or line below errors.
 var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
@@ -41,20 +86,20 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 		select {
 		case <-ctx.Done():
 		case <-errTimeout.C:
-			ctx.LogInfo("timer has elapsed, forcing server shutdown", nil)
+			ctx.Log(log.LevelError, "timeout waiting for context to close")
 		}
 
 		// NOTE: because Stop and Run cannot execute at the same time, we need to stop the server here
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := s.server.Shutdown(timeoutCtx); err != nil {
-			ctx.LogError("error shutting down server", map[string]any{"error": err})
+			ctx.Log(log.LevelError, "error shutting down server: "+err.Error())
 		} else {
-			ctx.LogInfo("server shutdown", nil)
+			ctx.Log(log.LevelInfo, "server shutdown")
 		}
 	}()
 
-	ctx.LogInfo("server starting", map[string]any{"address": s.server.Addr})
+	ctx.Log(log.LevelInfo, "server starting with address: "+s.server.Addr)
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
@@ -69,11 +114,11 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 	// handle initializing the primary focus of what the service will run.
 	// Stop will be responsible for cleaning up any resources that were created during Init.
 	if s.server != nil {
-		ctx.LogError("server already initialized", nil)
+		ctx.Log(log.LevelInfo, "server already initialized")
 		return errors.New("server already initialized")
 	}
 
-	ctx.LogInfo("entering init", nil)
+	ctx.Log(log.LevelInfo, "entering init")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -88,104 +133,12 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 }
 
 func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
-	ctx.LogInfo("entering idle", nil)
+	ctx.Log(log.LevelInfo, "entering idle")
 	return nil
 }
 
 func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
-	ctx.LogInfo("entering stop", nil)
+	ctx.Log(log.LevelInfo, "entering stop")
 	s.server = nil
 	return nil
 }
-
-const DaemonName = "single-service"
-
-// Example entrypoint
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// logger options
-
-	// lopts := []rxd.LoggerOption{
-	// 	rxd.UsingLogName(DaemonName),
-	// 	rxd.UsingLogLevel(rxd.LogLevelDebug),
-	// 	rxd.UsingLogTimeFormat("2006/01/02T15:04"),
-	// }
-
-	logger := rxd.NewDefaultLogger(rxd.LogLevelDebug)
-
-	// daemon options
-	dopts := []rxd.DaemonOption{
-		rxd.UsingDaemonLogger(logger),
-	}
-	// Create a new daemon instance with a name and options
-	daemon := rxd.NewDaemon(DaemonName, dopts...)
-
-	// We create an instance of our service
-	helloWorld := NewHelloWorldService()
-
-	apiSvc := rxd.NewService("helloworld-api", helloWorld)
-
-	err := daemon.AddService(apiSvc)
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-
-	// Blocks main thread, runs added services in their own goroutines
-	err = daemon.Start(ctx)
-	if err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
-
-	logger.Info("successfully stopped daemon", nil)
-}
-
-// type myLogger struct {
-// 	logger *log.Logger
-// 	level  rxd.LogLevel
-// }
-
-// func (l *myLogger) log(level rxd.LogLevel, msg string, fields map[string]any) {
-// 	// if the level is less than the logger level, we don't log
-// 	if level < l.level {
-// 		return
-// 	}
-
-// 	var b strings.Builder
-// 	b.WriteString(time.Now().Format(time.RFC3339) + " ")
-// 	b.WriteString("[" + level.String() + "] ")
-// 	b.WriteString(msg + " ")
-
-// 	for k, v := range fields {
-// 		b.WriteString(" " + k + "=" + fmt.Sprintf("%v", v))
-// 	}
-
-// 	l.logger.Println(b.String())
-// }
-
-// func (l *myLogger) Error(msg string, fields map[string]any) {
-// 	l.log(rxd.LogLevelError, msg, fields)
-// }
-
-// func (l *myLogger) Warn(msg string, fields map[string]any) {
-// 	l.log(rxd.LogLevelWarning, msg, fields)
-// }
-
-// func (l *myLogger) Notice(msg string, fields map[string]any) {
-// 	l.log(rxd.LogLevelNotice, msg, fields)
-// }
-
-// func (l *myLogger) Info(msg string, fields map[string]any) {
-// 	l.log(rxd.LogLevelInfo, msg, fields)
-// }
-
-// func (l *myLogger) Debug(msg string, fields map[string]any) {
-// 	l.log(rxd.LogLevelDebug, msg, fields)
-// }
-
-// func (l *myLogger) With(group string) rxd.Logger {
-// 	return &myLogger{logger: l.logger}
-// }

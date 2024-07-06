@@ -2,42 +2,43 @@ package rxd
 
 import (
 	"context"
-	"errors"
 	"os"
 	"os/signal"
 	"sync"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
 type Daemon interface {
-	AddServices(services ...DaemonService) error
-	AddService(service DaemonService) error
+	AddServices(services ...Service) error
+	AddService(service Service) error
 	Start(ctx context.Context) error
-	Logger() Logger
 }
 
 type daemon struct {
-	services        map[string]service
-	handlers        map[string]ServiceHandler
-	started         atomic.Bool
-	errC            chan error
-	reportAliveSecs uint64
-	log             Logger
+	name            string                    // name of the daemon will be used in logging
+	signals         []os.Signal               // OS signals you want your daemon to listen for
+	services        map[string]daemonService  // map of service name to struct carrying the service runner and name.
+	handlers        map[string]ServiceHandler // map of service name to service handler that will run the service runner methods.
+	started         atomic.Bool               // flag to indicate if the daemon has been started
+	reportAliveSecs uint64                    // system service manager alive report timeout in seconds aka watchdog timeout
+	logC            chan DaemonLog            // log channel for the daemon to log service logs to
+	logger          log.Logger                // logger for the daemon
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
-func NewDaemon(name string, options ...DaemonOption) Daemon {
-	// default logger
-	dl := NewDefaultLogger(LogLevelInfo)
-
+func NewDaemon(name string, log log.Logger, options ...DaemonOption) Daemon {
 	d := &daemon{
-		services:        make(map[string]service),
+		name:            name,
+		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		services:        make(map[string]daemonService),
 		handlers:        make(map[string]ServiceHandler),
-		errC:            make(chan error, 100),
+		logC:            make(chan DaemonLog, 100),
 		started:         atomic.Bool{},
 		reportAliveSecs: 0,
-		log:             dl,
+		logger:          log,
 	}
 
 	for _, option := range options {
@@ -46,10 +47,6 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 
 	return d
 
-}
-
-func (d *daemon) Logger() Logger {
-	return d.log
 }
 
 func (d *daemon) Start(parent context.Context) error {
@@ -63,16 +60,15 @@ func (d *daemon) Start(parent context.Context) error {
 	}
 
 	// daemon child context from parent
-	daemonCtx, daemonCancel := context.WithCancel(parent)
-	defer daemonCancel()
+	dctx, dcancel := context.WithCancel(parent)
+	defer dcancel()
 
 	// TODO: To eventually support running rxd on multiple platforms, we need to
 	// abstract the notifier to be a part of the daemon configuration.
-	// For now, we are only supporting systemd.
+	// notifier := GetSystemNotifier(ctx) --- probably...
+	// For now, we are only supporting linux - systemd.
 	// NOTE: Since service manager selection is part of the build runtime.
 	// we will probably have to do this via mixture of global and init().
-
-	// notifier := GetSystemNotifier(ctx) --- probably...
 	notifier, err := NewSystemdNotifier(os.Getenv("NOTIFY_SOCKET"), d.reportAliveSecs)
 	if err != nil {
 		return err
@@ -80,33 +76,33 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// Start the notifier, this will start the watchdog portion.
 	// so we can notify systemd that we have not hung.
-	err = notifier.Start(daemonCtx, d.errC)
+	err = notifier.Start(dctx, d.logC)
 	if err != nil {
 		return err
 	}
 
-	errDoneC := make(chan struct{})
+	// Daemon service(s) log handler routine
+	logDoneC := make(chan struct{})
 	go func() {
 		// error handler routine
 		// closed after the wait group is done.
-		for err := range d.errC {
-			// errors from the services
-			d.log.Error("daemon error", map[string]any{"error": err})
+		for entry := range d.logC {
+			d.logger.Log(entry.Level, entry.Message, "service", entry.Name)
 		}
-		close(errDoneC)
+		close(logDoneC)
 	}()
 
-	// signal watcher
+	// Daemon signal watcher, listens for signals to stop the daemon such as OS signals or context done.
 	go func() {
 		signalC := make(chan os.Signal, 1)
 		signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
 		defer signal.Stop(signalC)
 
 		select {
-		case <-daemonCtx.Done():
-			d.errC <- errors.New("daemon received context done signal")
+		case <-dctx.Done():
+			d.logger.Log(log.LevelNotice, "daemon context done", "rxd", "signal-watcher")
 		case <-signalC:
-			d.errC <- errors.New("daemon os signal received")
+			d.logger.Log(log.LevelNotice, "daemon received signal to stop", "rxd", "signal-watcher")
 		}
 
 		// inform systemd that we are stopping/cleaning up
@@ -114,46 +110,49 @@ func (d *daemon) Start(parent context.Context) error {
 		// since the watchdog notify continues to until the context is cancelled.
 		err = notifier.Notify(NotifyStateStopping)
 		if err != nil {
-			d.errC <- err
+			d.logger.Log(log.LevelError, "error sending 'stopping' notification", "rxd", "systemd-notifier")
 		}
 		// if we received a signal to stop, cancel the context
-		daemonCancel()
+		dcancel()
 	}()
 
 	var dwg sync.WaitGroup
 	// launch all services in their own routine.
-	for _, svc := range d.services {
+	for _, service := range d.services {
 		dwg.Add(1)
 
-		handler := d.handlers[svc.Name]
+		handler := d.handlers[service.name]
 		if err != nil && handler == nil {
-			// TODO: daemon log error or something? or maybe preflight checks before this?
+			// TODO: Should we be doing pre-flight checks?
+			// is it better to log the error and still try to start the daemon with the services that dont error
+			// or is it better to fail fast and exit the daemon with an error?
+			d.logger.Log(log.LevelError, "error getting handler for service", "service", service.name)
 			continue
 		}
 
 		// launch the service in its own routine
-		go func(wg *sync.WaitGroup, ctx context.Context, s service, h ServiceHandler) {
-			sctx, scancel := NewServiceContextWithCancel(ctx, s.Name, d.log)
-			defer scancel()
-
+		go func(wg *sync.WaitGroup, ctx context.Context, svc daemonService, h ServiceHandler) {
+			sctx, scancel := newServiceContextWithCancel(ctx, svc.name, d.logC)
 			// run the service according to the handler policy
-			h.Handle(sctx, s, d.errC)
+			h.Handle(sctx, svc.runner)
+			scancel()
 			wg.Done()
 
-		}(&dwg, daemonCtx, svc, handler)
+		}(&dwg, dctx, service, handler)
 
 	}
 
 	err = notifier.Notify(NotifyStateReady)
 	if err != nil {
-		d.errC <- err
+		d.logger.Log(log.LevelError, "error sending 'ready' notification", "rxd", "systemd-notifier")
 	}
 	// block, waiting for all services to exit their lifecycles.
 	dwg.Wait()
 	// close the error channel to signal the error handler routine to exit
-	close(d.errC)
-	// wait for error handler to finish emptying the error channel and writing to log
-	<-errDoneC
+	// close(d.errC)
+	close(d.logC)
+	// wait for logging routine to empty the log channel and writing to logger
+	<-logDoneC
 	return nil
 }
 
@@ -161,7 +160,7 @@ func (d *daemon) Start(parent context.Context) error {
 // if any service fails to be added, the error is logged and the next service is attempted.
 // any services that fail likely are failing due to name overlap and will be skipped
 // if daemon is already started, no new services can be added.
-func (d *daemon) AddServices(services ...DaemonService) error {
+func (d *daemon) AddServices(services ...Service) error {
 	for _, service := range services {
 		err := d.addService(service)
 		if err != nil {
@@ -173,36 +172,36 @@ func (d *daemon) AddServices(services ...DaemonService) error {
 
 // AddService adds a service to the daemon.
 // if the service fails to be added, the error will be returned.
-func (d *daemon) AddService(service DaemonService) error {
+func (d *daemon) AddService(service Service) error {
 	return d.addService(service)
 }
 
 // addService is a helper function to add a service to the daemon.
-func (d *daemon) addService(svc DaemonService) error {
+func (d *daemon) addService(service Service) error {
 	if d.started.Load() {
 		return ErrAddingServiceOnceStarted
 	}
 
-	if svc.Runner == nil {
+	if service.Runner == nil {
 		return ErrNilService
 	}
 
-	if svc.Name == "" {
+	if service.Name == "" {
 		return ErrNoServiceName
 	}
 
-	if svc.Handler == nil {
-		svc.Handler = DefaultHandler{}
+	if service.Handler == nil {
+		service.Handler = DefaultHandler{}
 	}
 
 	// add the service to the daemon services
-	d.services[svc.Name] = service{
-		Name:   svc.Name,
-		Runner: svc.Runner,
+	d.services[service.Name] = daemonService{
+		name:   service.Name,
+		runner: service.Runner,
 	}
 
 	// add the handler to a similar map of service name to handlers
-	d.handlers[svc.Name] = svc.Handler
+	d.handlers[service.Name] = service.Handler
 
 	return nil
 }

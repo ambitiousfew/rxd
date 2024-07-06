@@ -1,8 +1,14 @@
 package rxd
 
+import (
+	"time"
+
+	"github.com/ambitiousfew/rxd/log"
+)
+
 // ServiceHandler interface defines the methods that a service handler must implement
 type ServiceHandler interface {
-	Handle(ctx ServiceContext, service service, errC chan<- error)
+	Handle(ctx ServiceContext, runner ServiceRunner)
 }
 
 // DefaultHandler is a service handler that runs the service continuously
@@ -15,54 +21,68 @@ type DefaultHandler struct{}
 // service contains the service runner that will be executed.
 // errC is a channel that is used to report errors that occur during the service execution.
 // which is then handled by the daemon.
-func (h DefaultHandler) Handle(ctx ServiceContext, service service, errC chan<- error) {
+func (h DefaultHandler) Handle(sctx ServiceContext, sr ServiceRunner) {
 	var hasStopped bool
 	var state State
 
+	// Set the default timeout to 0 to default resets on everything else except stop.
+	defaultTimeout := 0 * time.Nanosecond
+
+	timeout := time.NewTimer(defaultTimeout)
+	defer timeout.Stop()
+
 	for state != StateExit {
 		select {
-		case <-ctx.Done():
+		case <-sctx.Done():
 			state = StateExit
-		default:
+		case <-timeout.C:
 			switch state {
 			case StateInit:
 				state = StateIdle
-				err := service.Runner.Init(ctx)
+				err := sr.Init(sctx)
 				if err != nil {
-					errC <- err
+					// errC <- err
+					sctx.Log(log.LevelError, err.Error())
 					state = StateExit // or Stop with timeout?
 				}
 			case StateIdle:
 				state = StateRun
-				err := service.Runner.Idle(ctx)
+				err := sr.Idle(sctx)
 				if err != nil {
-					errC <- err
+					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
 				}
 			case StateRun:
 				state = StateStop
-				err := service.Runner.Run(ctx)
+				err := sr.Run(sctx)
 				if err != nil {
-					errC <- err
+					sctx.Log(log.LevelError, err.Error())
 				}
 			case StateStop:
 				state = StateInit
-				err := service.Runner.Stop(ctx)
+				err := sr.Stop(sctx)
 				if err != nil {
-					errC <- err
+					sctx.Log(log.LevelError, err.Error())
 				}
 
 				// TODO: Add a timeout to the stop state to prevent
 				// the service from cycling too quickly between retries.
 				hasStopped = true
+
+				// TODO: This would be configurable via the service options
+				timeout.Reset(3 * time.Second)
+				continue // skip the default timeout reset
 			}
+
+			// fallback to the default timeout duration if we make it here.
+			timeout.Reset(defaultTimeout)
 		}
 	}
 
 	if !hasStopped {
-		err := service.Runner.Stop(ctx)
+		err := sr.Stop(sctx)
 		if err != nil {
-			errC <- err
+			sctx.Log(log.LevelError, err.Error())
 		}
 	}
 

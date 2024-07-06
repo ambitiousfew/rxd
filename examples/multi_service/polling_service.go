@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/log"
 )
 
 // APIPollingService create a struct for your service which requires a config field along with any other state
@@ -73,7 +74,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 	// exitStateC, cancel := rxd.AnyServicesExitState(sc, rxd.RunState, HelloWorldAPI)
 	// defer cancel()
 
-	ctx.LogInfo("starting to poll", nil)
+	ctx.Log(log.LevelInfo, "starting to poll")
 
 	var pollCount int
 	for {
@@ -86,7 +87,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				ctx.LogInfo("reached maximum poll count, stopping", nil)
+				ctx.Log(log.LevelInfo, "reached maximum poll count, stopping")
 				return nil
 			}
 
@@ -112,7 +113,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			ctx.LogInfo(fmt.Sprintf("received response from the API: %v", respBody), nil)
+			ctx.Log(log.LevelInfo, fmt.Sprintf("received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 
@@ -126,12 +127,12 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 func (s *APIPollingService) Stop(ctx rxd.ServiceContext) error {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
-	ctx.LogInfo("stopping", nil)
+	ctx.Log(log.LevelInfo, "stopping")
 	return nil
 }
 
 func (s *APIPollingService) Init(ctx rxd.ServiceContext) error {
-	ctx.LogInfo("initializing", nil)
+	ctx.Log(log.LevelInfo, "initializing")
 	return nil
 }
 

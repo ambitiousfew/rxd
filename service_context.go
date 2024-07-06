@@ -3,43 +3,39 @@ package rxd
 import (
 	"context"
 	"time"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
 type ServiceContext interface {
 	context.Context
-	Name() string
-	LogError(message string, fields map[string]any)
-	LogWarn(message string, fields map[string]any)
-	LogNotice(message string, fields map[string]any)
-	LogInfo(message string, fields map[string]any)
-	LogDebug(message string, fields map[string]any)
+	Log(level log.Level, message string)
+	// intracom for intra-service communication
+	// Subscribe()
+	// Register()
 }
 
 type serviceContext struct {
 	context.Context
 	name string
-	log  Logger
+	logC chan<- DaemonLog
 }
 
-func newServiceContext(ctx context.Context, name string, log Logger) ServiceContext {
+func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog) (ServiceContext, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
 	return serviceContext{
 		Context: ctx,
 		name:    name,
-		log:     log,
-	}
-}
-
-func NewServiceContextWithCancel(ctx context.Context, name string, log Logger) (ServiceContext, context.CancelFunc) {
-	sctx, cancel := context.WithCancel(ctx)
-	return serviceContext{
-		Context: sctx,
-		name:    name,
-		log:     log.With(name),
+		logC:    logC,
 	}, cancel
 }
 
-func (sc serviceContext) Name() string {
-	return sc.name
+func (sc serviceContext) Log(level log.Level, message string) {
+	sc.logC <- DaemonLog{
+		Level:   level,
+		Message: message,
+		Name:    sc.name,
+	}
 }
 
 func (sc serviceContext) Deadline() (deadline time.Time, ok bool) {
@@ -56,30 +52,6 @@ func (sc serviceContext) Err() error {
 
 func (sc serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
-}
-
-func (sc serviceContext) With(group string) Logger {
-	return sc.log.With(group)
-}
-
-func (sc serviceContext) LogError(msg string, fields map[string]interface{}) {
-	sc.log.Error(msg, fields)
-}
-
-func (sc serviceContext) LogWarn(msg string, fields map[string]interface{}) {
-	sc.log.Warn(msg, fields)
-}
-
-func (sc serviceContext) LogNotice(msg string, fields map[string]interface{}) {
-	sc.log.Notice(msg, fields)
-}
-
-func (sc serviceContext) LogInfo(msg string, fields map[string]interface{}) {
-	sc.log.Info(msg, fields)
-}
-
-func (sc serviceContext) LogDebug(msg string, fields map[string]interface{}) {
-	sc.log.Debug(msg, fields)
 }
 
 // // NewServiceContext creates a new service context instance given a name, service, and service options.
