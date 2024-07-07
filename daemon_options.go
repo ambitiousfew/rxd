@@ -19,3 +19,25 @@ func WithSignals(signals ...os.Signal) DaemonOption {
 		d.signals = signals
 	}
 }
+
+func WithRPC(cfg RPCConfig) DaemonOption {
+	return func(d *daemon) {
+		d.rpcEnabled = true
+
+		addr := cfg.Addr
+		port := cfg.Port
+
+		if addr == "" {
+			addr = "127.0.0.1"
+		}
+
+		if port == 0 {
+			port = 1337
+		}
+
+		d.rpcConfig = RPCConfig{
+			Addr: addr,
+			Port: port,
+		}
+	}
+}

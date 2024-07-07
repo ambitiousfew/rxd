@@ -1,6 +1,9 @@
 package log
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 type Logger interface {
 	Log(level Level, message string, extra ...Field)
@@ -8,9 +11,10 @@ type Logger interface {
 }
 
 const (
+	levelUnknown Level = iota - 1 // -1
 	// LevelEmergency (0) Rarely used by user applications but import for critical services
 	// examples include: when the system is unusable, system-wide outaged, situations that require immediate attention and human intervention
-	LevelEmergency Level = iota // 0
+	LevelEmergency // 0
 	// LevelAlert (1) less commonly used but used in applications where immediate attention is required
 	// examples include: security applications (breach detected), loss of connectivity, or failure of a key component thats leads to downtime.
 	LevelAlert
@@ -34,10 +38,16 @@ const (
 	LevelDebug
 )
 
-type Level uint8
+type Level int8
 
 func (l Level) String() string {
 	switch l {
+	case LevelEmergency:
+		return "EMERGENCY"
+	case LevelAlert:
+		return "ALERT"
+	case LevelCritical:
+		return "CRITICAL"
 	case LevelError:
 		return "ERROR"
 	case LevelWarning:
@@ -50,6 +60,29 @@ func (l Level) String() string {
 		return "DEBUG"
 	default:
 		return "UNKNOWN"
+	}
+}
+
+func LevelFromString(level string) Level {
+	switch strings.ToUpper(level) {
+	case "EMERGENCY":
+		return LevelEmergency
+	case "ALERT":
+		return LevelAlert
+	case "CRITICAL":
+		return LevelCritical
+	case "ERROR":
+		return LevelError
+	case "WARNING":
+		return LevelWarning
+	case "NOTICE":
+		return LevelNotice
+	case "INFO":
+		return LevelInfo
+	case "DEBUG":
+		return LevelDebug
+	default:
+		return levelUnknown
 	}
 }
 

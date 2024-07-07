@@ -2,11 +2,15 @@ package rxd
 
 import (
 	"context"
+	"net/http"
+	"net/rpc"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/ambitiousfew/rxd/intracom"
 	"github.com/ambitiousfew/rxd/log"
@@ -28,6 +32,8 @@ type daemon struct {
 	logC            chan DaemonLog                   // log channel for the daemon to log service logs to
 	logger          log.Logger                       // logger for the daemon
 	started         atomic.Bool                      // flag to indicate if the daemon has been started
+	rpcEnabled      bool                             // flag to indicate if the daemon has rpc enabled
+	rpcConfig       RPCConfig                        // rpc configuration for the daemon
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
@@ -172,12 +178,56 @@ func (d *daemon) Start(parent context.Context) error {
 		}(&dwg, dctx, service, handler, stateUpdateC)
 	}
 
+	// --- Daemon RPC Server ---
+	var server *http.Server
+
+	if d.rpcEnabled {
+		mux := http.NewServeMux()
+		rpcServer := rpc.NewServer()
+
+		cmdHandler := CommandHandler{
+			logger: d.logger,
+		}
+
+		err := rpcServer.Register(cmdHandler)
+		if err != nil {
+			// couldnt register the rpc handler, log the error and continue without rpc
+			d.logger.Log(log.LevelError, "error registering rpc handler", log.String("rxd", "rpc-server"))
+		} else {
+			// rpc handlers registered successfully, try to start the rpc server
+			addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
+			mux.Handle("/rpc", rpcServer)
+			server = &http.Server{
+				Addr:    addr,
+				Handler: mux,
+			}
+
+			go func() {
+				d.logger.Log(log.LevelInfo, "starting rpc server at "+addr, log.String("rxd", "rpc-server"))
+				if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					d.logger.Log(log.LevelError, "error starting rpc server", log.String("rxd", "rpc-server"))
+					return
+				}
+				d.logger.Log(log.LevelInfo, "stopped running and exited successfully", log.String("rxd", "rpc-server"))
+			}()
+		}
+	}
+
 	err = notifier.Notify(NotifyStateReady)
 	if err != nil {
 		d.logger.Log(log.LevelError, "error sending 'ready' notification", log.String("rxd", "systemd-notifier"))
 	}
 	// block, waiting for all services to exit their lifecycles.
 	dwg.Wait()
+
+	// --- Clean up RPC if it was enabled and set ---
+	if server != nil {
+		timedctx, timedcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer timedcancel()
+		if err := server.Shutdown(timedctx); err != nil {
+			return err
+		}
+	}
 
 	d.logger.Log(log.LevelDebug, "cleaning up log and states channels", log.String("rxd", d.name))
 	// close the error channel to signal the error handler routine to exit
