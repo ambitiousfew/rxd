@@ -23,11 +23,11 @@ type daemon struct {
 	signals         []os.Signal                      // OS signals you want your daemon to listen for
 	services        map[string]daemonService         // map of service name to struct carrying the service runner and name.
 	handlers        map[string]ServiceHandler        // map of service name to service handler that will run the service runner methods.
-	started         atomic.Bool                      // flag to indicate if the daemon has been started
+	icStates        intracom.Intracom[ServiceStates] // intracom comms bus for states
 	reportAliveSecs uint64                           // system service manager alive report timeout in seconds aka watchdog timeout
 	logC            chan DaemonLog                   // log channel for the daemon to log service logs to
 	logger          log.Logger                       // logger for the daemon
-	icStates        intracom.Intracom[ServiceStates] // intracom comms bus for states
+	started         atomic.Bool                      // flag to indicate if the daemon has been started
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
@@ -37,11 +37,11 @@ func NewDaemon(name string, log log.Logger, options ...DaemonOption) Daemon {
 		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services:        make(map[string]daemonService),
 		handlers:        make(map[string]ServiceHandler),
-		logC:            make(chan DaemonLog, 100),
-		started:         atomic.Bool{},
-		reportAliveSecs: 0,
-		logger:          log,
 		icStates:        intracom.New[ServiceStates]("rxd-states", log),
+		reportAliveSecs: 0,
+		logC:            make(chan DaemonLog, 100),
+		logger:          log,
+		started:         atomic.Bool{},
 	}
 
 	for _, option := range options {

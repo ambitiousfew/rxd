@@ -107,11 +107,13 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 				for _, name := range services {
 					switch action {
 					case Entering:
+						// entering is the same as the target state, so we check for the exact target state.
 						if val, ok := states[name]; ok && val == target {
 							interestedServices[name] = val
 						}
 
 					case Exiting:
+						// exiting is the opposite of entering, so we check for the opposite of the target state.
 						if val, ok := states[name]; ok && val != target {
 							interestedServices[name] = val
 						}
@@ -127,6 +129,7 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 					case <-ctx.Done():
 						return
 					case ch <- interestedServices: // send out the states
+						// TODO: should we stop here, or reset and keep collecting the interested services?
 					}
 				}
 
