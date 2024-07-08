@@ -12,9 +12,17 @@ const (
 	DropNewestAfterTimeout
 )
 
+// type SubscriberConfig struct {
+// 	Topic         string
+// 	ConsumerGroup string
+// 	BufferSize    int
+// 	BufferPolicy  BufferPolicy
+// 	DropTimeout   time.Duration
+// }
+
 type SubscriberConfig struct {
-	Topic         string
 	ConsumerGroup string
+	ErrIfExists   bool
 	BufferSize    int
 	BufferPolicy  BufferPolicy
 	DropTimeout   time.Duration
