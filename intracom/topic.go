@@ -1,14 +1,14 @@
 package intracom
 
 import (
-	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 type Topic[T any] interface {
-	Subscribe(ctx context.Context, conf SubscriberConfig) (<-chan T, error)
-	Unsubscribe(ctx context.Context, consumerGroup string) error
+	Subscribe(conf SubscriberConfig) (<-chan T, error)
+	Unsubscribe(consumer string) error
 }
 
 type TopicConfig struct {
@@ -17,49 +17,104 @@ type TopicConfig struct {
 }
 
 type topic[T any] struct {
-	publishC    chan T
-	subscribers map[string]chan T
+	subscribers map[string]*subscriber[T]
+	closed      atomic.Bool
 	mu          sync.RWMutex
 }
 
-func NewTopic[T any](publishC chan T) Topic[T] {
-	return &topic[T]{
-		publishC:    publishC,
-		subscribers: make(map[string]chan T),
+func newTopic[T any](publishC <-chan T) *topic[T] {
+	t := &topic[T]{
+		subscribers: make(map[string]*subscriber[T]),
+		closed:      atomic.Bool{},
 		mu:          sync.RWMutex{},
 	}
+
+	// start a broadcaster for this topic
+	go t.broadcast(publishC)
+	return t
 }
 
-func (t *topic[T]) Subscribe(ctx context.Context, conf SubscriberConfig) (<-chan T, error) {
+func (t *topic[T]) Subscribe(conf SubscriberConfig) (<-chan T, error) {
+	if t.closed.Load() {
+		return nil, errors.New("cannot subscribe, topic already closed")
+	}
+
 	t.mu.RLock()
-	ch, ok := t.subscribers[conf.ConsumerGroup]
-	t.mu.RUnlock()
+	sub, ok := t.subscribers[conf.ConsumerGroup]
 	if ok {
+		defer t.mu.RUnlock()
 		// subscriber already exists
 		if conf.ErrIfExists {
 			// return error if subscriber already exists
 			return nil, errors.New("consumer group '" + conf.ConsumerGroup + " already exists")
 		}
 		// subscriber already exists so return the channel
-		return ch, nil
+		return sub.ch, nil
 	}
+	t.mu.RUnlock()
 
 	// subscriber did not exist so create a new one.
-	ch = make(chan T, conf.BufferSize)
+	sub = newSubscriber[T](conf)
 	t.mu.Lock()
-	t.subscribers[conf.ConsumerGroup] = ch
+	t.subscribers[conf.ConsumerGroup] = sub
 	t.mu.Unlock()
-	return ch, nil
+	return sub.ch, nil
 }
 
-func (t *topic[T]) Unsubscribe(ctx context.Context, consumerGroup string) error {
+func (t *topic[T]) Unsubscribe(consumer string) error {
+	if t.closed.Load() {
+		return errors.New("cannot unsubscribe, topic already closed")
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	ch, ok := t.subscribers[consumerGroup]
+	sub, ok := t.subscribers[consumer]
 	if !ok {
-		return errors.New("consumer group '" + consumerGroup + "' does not exist")
+		return errors.New("consumer group '" + consumer + "' does not exist")
 	}
-	close(ch)
-	delete(t.subscribers, consumerGroup)
+
+	sub.close()
+	delete(t.subscribers, consumer)
 	return nil
+}
+
+func (t *topic[T]) close() error {
+	if t.closed.Swap(true) {
+		return errors.New("topic already closed")
+	}
+
+	t.mu.Lock()
+	for name, sub := range t.subscribers {
+		sub.close()
+		delete(t.subscribers, name)
+	}
+	t.mu.Unlock()
+	return nil
+}
+
+// broadcaster is a blocking function that will handle all requests to the channel.
+// it will also handle broadcasting messages to all subscribers the topic its created for.
+//
+// NOTE: This function is only called from the broker routine.
+//
+// Parameters:
+// - broadcastC: the channel used to receive requests to the broadcaster (subscribe, unsubscribe, close)
+// - publishC: the channel used to publish messages to the broadcaster
+// - doneC: the channel used to signal when the broadcaster is done for graceful shutdown
+func (t *topic[T]) broadcast(publishC <-chan T) {
+	for msg := range publishC {
+		var wg sync.WaitGroup
+		t.mu.RLock()
+		for _, sub := range t.subscribers {
+			wg.Add(1)
+			go func() {
+				sub.send(msg)
+				wg.Done()
+			}()
+		}
+		t.mu.RUnlock()
+
+		// wait for all subscribers to finish sending the message
+		wg.Wait()
+	}
 }

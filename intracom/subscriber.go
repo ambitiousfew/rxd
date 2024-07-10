@@ -3,7 +3,7 @@ package intracom
 import "time"
 
 type subscriber[T any] struct {
-	topic         string
+	// topic         string
 	consumerGroup string
 	bufferSize    int
 	bufferPolicy  BufferPolicy
@@ -22,7 +22,7 @@ func newSubscriber[T any](conf SubscriberConfig) *subscriber[T] {
 		timer.Stop()
 	}
 	return &subscriber[T]{
-		topic:         conf.Topic,
+		// topic:         conf.Topic,
 		consumerGroup: conf.ConsumerGroup,
 		bufferSize:    conf.BufferSize,
 		bufferPolicy:  conf.BufferPolicy,

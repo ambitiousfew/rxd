@@ -116,6 +116,9 @@ func (d *daemon) Start(parent context.Context) error {
 			d.logger.Log(log.LevelNotice, "daemon received signal to stop", log.String("rxd", "signal-watcher"))
 		}
 
+		// if we received a signal to stop, cancel the context
+		dcancel()
+
 		// inform systemd that we are stopping/cleaning up
 		// TODO: Test if this notify should happen before or after cancel()
 		// since the watchdog notify continues to until the context is cancelled.
@@ -123,16 +126,21 @@ func (d *daemon) Start(parent context.Context) error {
 		if err != nil {
 			d.logger.Log(log.LevelError, "error sending 'stopping' notification", log.String("rxd", "systemd-notifier"))
 		}
-		// if we received a signal to stop, cancel the context
-		dcancel()
+
 	}()
 
 	// --- Service States Watcher ---
 	statesDoneC := make(chan struct{})
 	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
-	go func() {
-		statesC, unregister := d.icStates.Register(parent, internalServiceStates)
 
+	// register the states publish topic and channel with the intracom bus
+	publishStatesC := make(chan ServiceStates, 1)
+	statesTopic, err := d.icStates.Register(internalServiceStates, publishStatesC)
+	if err != nil {
+		return err
+	}
+
+	go func(statesC chan<- ServiceStates) {
 		states := make(ServiceStates, len(d.services))
 		for name := range d.services {
 			states[name] = StateExit
@@ -149,9 +157,9 @@ func (d *daemon) Start(parent context.Context) error {
 			// send the updated states to the intracom bus
 			statesC <- states.copy()
 		}
-		unregister()
+
 		close(statesDoneC)
-	}()
+	}(publishStatesC)
 
 	var dwg sync.WaitGroup
 	// launch all services in their own routine.
@@ -169,7 +177,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 		// each service is handled in its own routine.
 		go func(wg *sync.WaitGroup, ctx context.Context, svc daemonService, h ServiceHandler, stateC chan<- StateUpdate) {
-			sctx, scancel := newServiceContextWithCancel(ctx, svc.name, d.logC, d.icStates)
+			sctx, scancel := newServiceContextWithCancel(ctx, svc.name, d.logC, statesTopic)
 			// run the service according to the handler policy
 			h.Handle(sctx, svc.runner, stateC)
 			scancel()
@@ -236,12 +244,22 @@ func (d *daemon) Start(parent context.Context) error {
 	close(stateUpdateC)
 	// wait for logging routine to empty the log channel and writing to logger
 	<-logDoneC
+	d.logger.Log(log.LevelDebug, "log channel closed", log.String("rxd", d.name))
 	<-statesDoneC
+	close(publishStatesC)
+
+	d.logger.Log(log.LevelDebug, "states channel closed", log.String("rxd", d.name))
+	// err = d.icStates.Unregister(parent, internalServiceStates)
+	if err != nil {
+		d.logger.Log(log.LevelError, "error unregistering states topic", log.String("rxd", d.name))
+	}
 
 	err = d.icStates.Close()
 	if err != nil {
 		d.logger.Log(log.LevelError, "error closing states intracom", log.String("rxd", "intracom"))
 	}
+
+	d.logger.Log(log.LevelDebug, "intracom closed", log.String("rxd", "intracom"))
 	return nil
 }
 
