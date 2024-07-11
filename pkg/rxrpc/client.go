@@ -32,15 +32,6 @@ func NewClient(addr string) (*Client, error) {
 	return &Client{c: client}, nil
 }
 
-// func (c *Client) SendCommand(payload CommandPayload) (CommandResponse, error) {
-// 	var resp CommandResponse
-// 	err := c.c.Call("CommandHandler.Send", payload, &resp)
-// 	if err != nil {
-// 		return resp, err
-// 	}
-// 	return resp, nil
-// }
-
 func (c *Client) ChangeLogLevel(level log.Level) error {
 	var resp error
 	err := c.c.Call("CommandHandler.ChangeLogLevel", level, &resp)

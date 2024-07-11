@@ -28,7 +28,7 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 	ds := Service{
 		Name:    name,
 		Runner:  runner,
-		Handler: DefaultHandler{},
+		Handler: DefaultHandler,
 	}
 
 	for _, opt := range opts {

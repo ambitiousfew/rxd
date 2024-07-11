@@ -6,6 +6,7 @@ import (
 	"net/rpc"
 	"os"
 	"os/signal"
+	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -210,14 +211,14 @@ func (d *daemon) Start(parent context.Context) error {
 				Handler: mux,
 			}
 
-			go func() {
-				d.logger.Log(log.LevelInfo, "starting rpc server at "+addr, log.String("rxd", "rpc-server"))
-				if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			go func(s *http.Server) {
+				d.logger.Log(log.LevelInfo, "starting rpc server at "+s.Addr, log.String("rxd", "rpc-server"))
+				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 					d.logger.Log(log.LevelError, "error starting rpc server", log.String("rxd", "rpc-server"))
 					return
 				}
 				d.logger.Log(log.LevelInfo, "stopped running and exited successfully", log.String("rxd", "rpc-server"))
-			}()
+			}(server)
 		}
 	}
 
@@ -289,16 +290,24 @@ func (d *daemon) addService(service Service) error {
 		return ErrAddingServiceOnceStarted
 	}
 
-	if service.Runner == nil {
-		return ErrNilService
-	}
-
 	if service.Name == "" {
 		return ErrNoServiceName
 	}
 
 	if service.Handler == nil {
-		service.Handler = DefaultHandler{}
+		service.Handler = DefaultHandler
+	}
+
+	// NOTE: reflect is being used here only before startup.
+	// Since both value structs and pointer structs are allowed to meet an interface
+	// the compiler wont catch nil pointer struct with a value receiver.
+	// Instead of throwing a panic causing partial startup in Start() later
+	// we can pre-flight check the service handler once before hand.
+	// Runners can be caught via recover() in their own routines and passed to handler as an error.
+
+	err := checkNilStructPointer(reflect.ValueOf(service.Handler), reflect.TypeOf(service.Handler), "Handle")
+	if err != nil {
+		return err
 	}
 
 	// add the service to the daemon services
@@ -310,5 +319,15 @@ func (d *daemon) addService(service Service) error {
 	// add the handler to a similar map of service name to handlers
 	d.handlers[service.Name] = service.Handler
 
+	return nil
+}
+
+func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string) error {
+	if ival.Kind() == reflect.Ptr && ival.IsNil() {
+		handlerMethod, _ := itype.Elem().MethodByName(method)
+		if handlerMethod.Type.NumIn() > 0 && handlerMethod.Type.In(0).Kind() == reflect.Struct {
+			return ErrUninitialized{StructName: itype.String(), Method: method}
+		}
+	}
 	return nil
 }

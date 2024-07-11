@@ -1,6 +1,7 @@
 package rxd
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ambitiousfew/rxd/log"
@@ -11,16 +12,25 @@ type ServiceHandler interface {
 	Handle(ctx ServiceContext, runner ServiceRunner, stateUpdateC chan<- StateUpdate)
 }
 
+var DefaultHandler = RunContinuousHandler{}
+
 // DefaultHandler is a service handler that runs the service continuously
 // either until an OS signal or the daemon Start context is cancelled.
 // This is the default handler for a service unless specified otherwise by overriding with
 // the UsingHandler service option.
-type DefaultHandler struct{}
+type RunContinuousHandler struct{}
 
 // Handle runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
-func (h DefaultHandler) Handle(sctx ServiceContext, sr ServiceRunner, stateUpdateC chan<- StateUpdate) {
+func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, updateState chan<- StateUpdate) {
+	defer func() {
+		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
+		if r := recover(); r != nil {
+			sctx.Log(log.LevelError, fmt.Sprintf("recovered from a panic: %v", r))
+		}
+	}()
+
 	serviceName := sctx.Name()
 	// Set the default timeout to 0 to default resets on everything else except stop.
 	defaultTimeout := 0 * time.Nanosecond
@@ -28,12 +38,12 @@ func (h DefaultHandler) Handle(sctx ServiceContext, sr ServiceRunner, stateUpdat
 	timeout := time.NewTimer(defaultTimeout)
 	defer timeout.Stop()
 
-	// initial state
 	var state State = StateInit
 
 	var hasStopped bool
 	for state != StateExit {
-		stateUpdateC <- StateUpdate{State: state, Name: serviceName}
+		// signal the current state we are about to enter. to the daemon states watcher.
+		updateState <- StateUpdate{State: state, Name: serviceName}
 		select {
 		case <-sctx.Done():
 			state = StateExit
