@@ -1,6 +1,7 @@
 package log
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -89,6 +90,10 @@ func LevelFromString(level string) Level {
 type Field struct {
 	Key   string
 	Value string
+}
+
+func Any(key string, value any) Field {
+	return Field{Key: key, Value: fmt.Sprintf("%v", value)}
 }
 
 func Int(key string, value any) Field {

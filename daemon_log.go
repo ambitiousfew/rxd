@@ -6,6 +6,7 @@ type DaemonLog struct {
 	Name    string
 	Level   log.Level
 	Message string
+	Fields  []log.Field
 }
 
 func (l DaemonLog) String() string {

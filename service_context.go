@@ -18,7 +18,7 @@ type ServiceContext interface {
 	context.Context
 	ServiceWatcher
 	Name() string
-	Log(level log.Level, message string)
+	Log(level log.Level, message string, fields ...log.Field)
 	With(name string) ServiceContext
 }
 
@@ -55,11 +55,12 @@ func (sc serviceContext) With(name string) ServiceContext {
 	}
 }
 
-func (sc serviceContext) Log(level log.Level, message string) {
+func (sc serviceContext) Log(level log.Level, message string, fields ...log.Field) {
 	sc.logC <- DaemonLog{
+		Name:    sc.name,
 		Level:   level,
 		Message: message,
-		Name:    sc.name,
+		Fields:  fields,
 	}
 }
 
