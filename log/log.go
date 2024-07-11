@@ -96,6 +96,10 @@ func Any(key string, value any) Field {
 	return Field{Key: key, Value: fmt.Sprintf("%v", value)}
 }
 
+func Error(key string, err error) Field {
+	return Field{Key: key, Value: err.Error()}
+}
+
 func Int(key string, value any) Field {
 	switch t := value.(type) {
 	case int:

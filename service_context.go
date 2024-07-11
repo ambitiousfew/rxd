@@ -20,6 +20,8 @@ type ServiceContext interface {
 	Name() string
 	Log(level log.Level, message string, fields ...log.Field)
 	With(name string) ServiceContext
+	// WithCancel creates a new named child ServiceContext from the current context with a new cancel function.
+	WithCancel(name string) (ServiceContext, context.CancelFunc)
 }
 
 type serviceContext struct {
@@ -53,6 +55,10 @@ func (sc serviceContext) With(name string) ServiceContext {
 		// ic:      sc.ic,
 		icStates: sc.icStates,
 	}
+}
+
+func (sc serviceContext) WithCancel(name string) (ServiceContext, context.CancelFunc) {
+	return newServiceContextWithCancel(sc.Context, name, sc.logC, sc.icStates)
 }
 
 func (sc serviceContext) Log(level log.Level, message string, fields ...log.Field) {
