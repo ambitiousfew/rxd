@@ -136,6 +136,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// register the states publish topic and channel with the intracom bus
 	publishStatesC := make(chan ServiceStates, 1)
+
 	statesTopic, err := d.icStates.Register(internalServiceStates, publishStatesC)
 	if err != nil {
 		return err
@@ -247,7 +248,6 @@ func (d *daemon) Start(parent context.Context) error {
 	<-logDoneC
 	d.logger.Log(log.LevelDebug, "log channel closed", log.String("rxd", d.name))
 	<-statesDoneC
-	close(publishStatesC)
 
 	d.logger.Log(log.LevelDebug, "states channel closed", log.String("rxd", d.name))
 	// err = d.icStates.Unregister(parent, internalServiceStates)
@@ -259,6 +259,9 @@ func (d *daemon) Start(parent context.Context) error {
 	if err != nil {
 		d.logger.Log(log.LevelError, "error closing states intracom", log.String("rxd", "intracom"))
 	}
+
+	// close publishing channel last so subscribers dont try to publish to a closed channel.
+	close(publishStatesC)
 
 	d.logger.Log(log.LevelDebug, "intracom closed", log.String("rxd", "intracom"))
 	return nil

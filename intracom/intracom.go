@@ -78,7 +78,7 @@ func (i *intracom[T]) Close() error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	for name, topic := range i.topics {
-		err := topic.close()
+		err := topic.Close()
 		if err != nil {
 			return err
 		}

@@ -9,6 +9,7 @@ import (
 type Topic[T any] interface {
 	Subscribe(conf SubscriberConfig) (<-chan T, error)
 	Unsubscribe(consumer string) error
+	Close() error
 }
 
 type TopicConfig struct {
@@ -78,7 +79,7 @@ func (t *topic[T]) Unsubscribe(consumer string) error {
 	return nil
 }
 
-func (t *topic[T]) close() error {
+func (t *topic[T]) Close() error {
 	if t.closed.Swap(true) {
 		return errors.New("topic already closed")
 	}
