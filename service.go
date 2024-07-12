@@ -11,10 +11,10 @@ type ServiceLogger interface {
 }
 
 type ServiceRunner interface {
-	Init(ServiceContext) error
-	Idle(ServiceContext) error
-	Run(ServiceContext) error
-	Stop(ServiceContext) error
+	Init(ServiceContext) (State, error)
+	Idle(ServiceContext) (State, error)
+	Run(ServiceContext) (State, error)
+	Stop(ServiceContext) (State, error)
 }
 
 // Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.
@@ -40,7 +40,7 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 	ds := Service{
 		Name:    name,
 		Runner:  runner,
-		Handler: DefaultHandler,
+		Handler: DefaultHandler{},
 		TransitionTimeouts: StateTransitionTimeouts{
 			TransStopToInit: 5 * time.Second,
 		},

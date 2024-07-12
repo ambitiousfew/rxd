@@ -275,7 +275,7 @@ func (d *daemon) addService(service Service) error {
 	}
 
 	if service.Handler == nil {
-		service.Handler = DefaultHandler
+		service.Handler = DefaultHandler{}
 	}
 
 	// NOTE: reflect is being used here only before startup.

@@ -31,12 +31,12 @@ func NewAPIPollingService() *APIPollingService {
 		// We will check every 10s to see if we can establish a connection to the API when Idle retrying.
 		retryDuration: 10 * time.Second,
 		apiBase:       "http://localhost:8000",
-		maxPollCount:  10,
+		maxPollCount:  5,
 	}
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
+func (s *APIPollingService) Idle(ctx rxd.ServiceContext) (rxd.State, error) {
 	ctx.Log(log.LevelInfo, "entered idle state")
 
 	statesC, cancel := ctx.WatchAllServices(rxd.Entering, rxd.StateRun, ServiceHelloWorldAPI)
@@ -45,18 +45,18 @@ func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return rxd.StateExit, nil
 		case <-statesC:
 			ctx.Log(log.LevelInfo, "Hello World API has entered Run state")
 			// Hello World API should have entered a RunState, so we can move to our next state (Run) now.
-			return nil
+			return rxd.StateRun, nil
 		}
 	}
 }
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
+func (s *APIPollingService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
 	ctx.Log(log.LevelInfo, "entered run state")
 	timer := time.NewTimer(1 * time.Second)
 	defer timer.Stop()
@@ -73,15 +73,15 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return rxd.StateExit, nil
 		case <-statesC:
 			// Hello World API should have exited Run state, so we need to move out of run too.
-			return nil
+			return rxd.StateStop, nil
 
 		case <-timer.C:
 			if pollCount > s.maxPollCount {
-				ctx.Log(log.LevelDebug, "reached maximum poll count, stopping")
-				return nil
+				ctx.Log(log.LevelInfo, "reached maximum poll count, stopping")
+				return rxd.StateExit, nil
 			}
 
 			resp, err := s.client.Get(s.apiBase + "/api")
@@ -95,38 +95,38 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 			resp.Body.Close()
 
 			if err != nil {
-				return err
+				return rxd.StateStop, err
 				// we could return to new state: idle or stop or just continue
 			}
 
 			var respBody map[string]any
 			err = json.Unmarshal(respBytes, &respBody)
 			if err != nil {
-				return err
+				return rxd.StateStop, err
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
-			ctx.Log(log.LevelDebug, fmt.Sprintf("received response from the API: %v", respBody))
+			ctx.Log(log.LevelInfo, fmt.Sprintf("received response from the API: %v", respBody))
 			// Increment polling counter
 			pollCount++
 
 			// Retry every 10s after the first time.
-			timer.Reset(5 * time.Second)
+			timer.Reset(10 * time.Second)
 		}
 	}
 }
 
 // Stop handles anything you might need to do to clean up before ending your service.
-func (s *APIPollingService) Stop(ctx rxd.ServiceContext) error {
+func (s *APIPollingService) Stop(ctx rxd.ServiceContext) (rxd.State, error) {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
 	ctx.Log(log.LevelInfo, "stopping")
-	return nil
+	return rxd.StateExit, nil
 }
 
-func (s *APIPollingService) Init(ctx rxd.ServiceContext) error {
+func (s *APIPollingService) Init(ctx rxd.ServiceContext) (rxd.State, error) {
 	ctx.Log(log.LevelInfo, "initializing")
-	return nil
+	return rxd.StateIdle, nil
 }
 
 // Ensure we meet the interface or error.

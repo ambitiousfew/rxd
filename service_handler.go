@@ -12,18 +12,16 @@ type ServiceHandler interface {
 	Handle(ctx ServiceContext, dService DaemonService, stateUpdateC chan<- StateUpdate)
 }
 
-var DefaultHandler = RunContinuousHandler{}
-
-// DefaultHandler is a service handler that runs the service continuously
-// either until an OS signal or the daemon Start context is cancelled.
-// This is the default handler for a service unless specified otherwise by overriding with
-// the UsingHandler service option.
-type RunContinuousHandler struct{}
+// DefaultHandler is a service handler that does its best to run the service
+// moving the service to the next desired state returned from each lifecycle
+// The handle will override the state transition if the context is cancelled
+// and force the service to Exit.
+type DefaultHandler struct{}
 
 // Handle runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
-func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, updateState chan<- StateUpdate) {
+func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateState chan<- StateUpdate) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -39,18 +37,25 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, upda
 	var state State = StateInit
 
 	var hasStopped bool
+
 	for state != StateExit {
+		var err error
 		// signal the current state we are about to enter. to the daemon states watcher.
 		updateState <- StateUpdate{State: state, Name: ds.Name}
 
+		if hasStopped {
+			// not entering Exit after stop was true, reset hasStopped
+			hasStopped = false
+		}
+
 		select {
 		case <-sctx.Done():
+			// push to exit.
 			state = StateExit
 		case <-timeout.C:
 			switch state {
 			case StateInit:
-				state = StateIdle
-				err := ds.Runner.Init(sctx)
+				state, err = ds.Runner.Init(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateInit
@@ -61,8 +66,7 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, upda
 				hasStopped = false
 
 			case StateIdle:
-				state = StateRun
-				err := ds.Runner.Idle(sctx)
+				state, err = ds.Runner.Idle(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
@@ -71,25 +75,21 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, upda
 
 				}
 			case StateRun:
-				state = StateStop
-				err := ds.Runner.Run(sctx)
+				state, err = ds.Runner.Run(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 				// reset the transition timeout to the init state
 				timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransRunToStop, defaultTimeout))
+
 			case StateStop:
-				err := ds.Runner.Stop(sctx)
+				state, err = ds.Runner.Stop(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
-				// flip hasStopped to true since we just stopped the service.
-				// to cover the case where ctx can be cancelled and always want to
-				// ensure stop is called prior to StateExit to ensure cleanup.
-				hasStopped = true
 
-				// stop never leads to exit, always back to init for run continuous.
-				state = StateInit
+				// flip hasStopped to true to ensure we don't run stop again if Exit is next.
+				hasStopped = true
 
 				// reset using the stop to init timeout if it exists.
 				timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransStopToInit, defaultTimeout))
@@ -102,10 +102,13 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, upda
 	}
 
 	if !hasStopped {
-		err := ds.Runner.Stop(sctx)
+		// we are only wanting to ensure stop is run if it hasn't been run already then exit.
+		_, err := ds.Runner.Stop(sctx)
 		if err != nil {
 			sctx.Log(log.LevelError, err.Error())
 		}
 	}
 
+	// push final state to the daemon states watcher.
+	updateState <- StateUpdate{State: StateExit, Name: ds.Name}
 }

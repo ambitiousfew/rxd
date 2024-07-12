@@ -66,12 +66,14 @@ var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
 type MyHandler struct{}
 
 func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState chan<- rxd.StateUpdate) {
+
 	state := rxd.StateInit
 
 	timeout := time.NewTicker(1 * time.Second)
 	defer timeout.Stop()
 	// Set the default timeout to 0 to default resets on everything else except stop.
 	for state != rxd.StateExit {
+		var err error
 		updateState <- rxd.StateUpdate{State: state, Name: ds.Name}
 		select {
 		case <-sctx.Done():
@@ -81,28 +83,27 @@ func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateS
 
 		switch state {
 		case rxd.StateInit:
-			state = rxd.StateIdle
-			err := ds.Runner.Init(sctx)
+
+			state, err = ds.Runner.Init(sctx)
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateExit
 			}
 		case rxd.StateIdle:
-			state = rxd.StateRun
-			err := ds.Runner.Idle(sctx)
+
+			state, err = ds.Runner.Idle(sctx)
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateStop
 			}
 		case rxd.StateRun:
-			state = rxd.StateIdle
-			err := ds.Runner.Run(sctx)
+
+			state, err = ds.Runner.Run(sctx)
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 			}
 		case rxd.StateStop:
-			state = rxd.StateExit
-			if err := ds.Runner.Stop(sctx); err != nil {
+			if state, err = ds.Runner.Stop(sctx); err != nil {
 				sctx.Log(log.LevelError, err.Error())
 			}
 		}
@@ -126,7 +127,7 @@ func NewHelloWorldService() *HelloWorldAPIService {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
+func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
 	doneC := make(chan struct{})
 	go func() {
 		defer close(doneC)
@@ -154,19 +155,19 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
-		return errors.New("server shutdown: " + err.Error())
+		return rxd.StateStop, errors.New("server shutdown: " + err.Error())
 	}
 
 	<-doneC // wait for signal routine to finish...
-	return nil
+	return rxd.StateStop, nil
 }
 
-func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
+func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) (rxd.State, error) {
 	// handle initializing the primary focus of what the service will run.
 	// Stop will be responsible for cleaning up any resources that were created during Init.
 	if s.server != nil {
 		ctx.Log(log.LevelInfo, "server already initialized")
-		return errors.New("server already initialized")
+		return rxd.StateStop, errors.New("server already initialized")
 	}
 
 	ctx.Log(log.LevelInfo, "entering init")
@@ -180,16 +181,16 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 		Addr:    ":8000",
 		Handler: mux,
 	}
-	return nil
+	return rxd.StateIdle, nil
 }
 
-func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
+func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) (rxd.State, error) {
 	ctx.Log(log.LevelInfo, "entering idle")
-	return nil
+	return rxd.StateRun, nil
 }
 
-func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
+func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) (rxd.State, error) {
 	ctx.Log(log.LevelInfo, "entering stop")
 	s.server = nil
-	return nil
+	return rxd.StateExit, nil
 }
