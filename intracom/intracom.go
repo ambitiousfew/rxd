@@ -9,7 +9,7 @@ import (
 )
 
 type Intracom[T any] interface {
-	Register(topic string, ch <-chan T) (Topic[T], error)
+	Register(conf TopicConfig) (Topic[T], error)
 
 	Close() error
 }
@@ -18,12 +18,13 @@ type Option[T any] func(*intracom[T])
 
 // intracom is an in-memory pub/sub wrapper to enable communication between routines.
 type intracom[T any] struct {
-	name    string
+	name   string
+	topics map[string]*topic[T]
+	logger log.Logger
+
 	closed  atomic.Bool
-	mu      sync.RWMutex
-	topics  map[string]*topic[T]
-	logger  log.Logger
 	running atomic.Bool
+	mu      sync.RWMutex
 }
 
 // New creates a new instance of Intracom with the given name and logger and starts the broker routine.
@@ -55,7 +56,7 @@ func New[T any](name string, opts ...Option[T]) Intracom[T] {
 // Returns:
 // - publishC: the channel used to publish messages to the topic
 // - unregister: a function bound to this topic that can be used to unregister the topic
-func (i *intracom[T]) Register(topic string, ch <-chan T) (Topic[T], error) {
+func (i *intracom[T]) Register(conf TopicConfig) (Topic[T], error) {
 	if i.closed.Load() {
 		return nil, errors.New("cannot register topic, intracom is closed")
 	}
@@ -63,13 +64,14 @@ func (i *intracom[T]) Register(topic string, ch <-chan T) (Topic[T], error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	t, ok := i.topics[topic]
+	t, ok := i.topics[conf.Topic]
 	if ok {
-		return t, errors.New("topic " + topic + " already exists")
+		return t, errors.New("topic " + conf.Topic + " already exists")
 	}
 
+	ch := make(chan T, conf.Buffer)
 	t = newTopic[T](ch)
-	i.topics[topic] = t
+	i.topics[conf.Topic] = t
 
 	return t, nil
 }
@@ -85,7 +87,7 @@ func (i *intracom[T]) Close() error {
 	for name, topic := range i.topics {
 		err := topic.Close()
 		if err != nil {
-			return err
+			i.logger.Log(log.LevelError, "error closing topic", log.String("topic", name), log.Error("error", err))
 		}
 		delete(i.topics, name)
 	}

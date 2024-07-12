@@ -7,24 +7,28 @@ import (
 )
 
 type Topic[T any] interface {
+	Publisher() chan<- T
 	Subscribe(conf SubscriberConfig) (<-chan T, error)
 	Unsubscribe(consumer string) error
 	Close() error
 }
 
 type TopicConfig struct {
-	Topic       string
-	ErrIfExists bool
+	Topic       string // unique name for the topic
+	Buffer      int    // buffer size for the topic channel
+	ErrIfExists bool   // return error if topic already exists
 }
 
 type topic[T any] struct {
+	publishC    chan T
 	subscribers map[string]*subscriber[T]
 	closed      atomic.Bool
 	mu          sync.RWMutex
 }
 
-func newTopic[T any](publishC <-chan T) *topic[T] {
+func newTopic[T any](publishC chan T) *topic[T] {
 	t := &topic[T]{
+		publishC:    publishC,
 		subscribers: make(map[string]*subscriber[T]),
 		closed:      atomic.Bool{},
 		mu:          sync.RWMutex{},
@@ -33,6 +37,10 @@ func newTopic[T any](publishC <-chan T) *topic[T] {
 	// start a broadcaster for this topic
 	go t.broadcast(publishC)
 	return t
+}
+
+func (t *topic[T]) Publisher() chan<- T {
+	return t.publishC
 }
 
 func (t *topic[T]) Subscribe(conf SubscriberConfig) (<-chan T, error) {
@@ -85,10 +93,13 @@ func (t *topic[T]) Close() error {
 	}
 
 	t.mu.Lock()
+	// close all subscribers first
 	for name, sub := range t.subscribers {
 		sub.close()
 		delete(t.subscribers, name)
 	}
+	// now close the publish channel
+	close(t.publishC)
 	t.mu.Unlock()
 	return nil
 }

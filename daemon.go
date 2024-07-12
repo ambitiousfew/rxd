@@ -73,12 +73,13 @@ func (d *daemon) Start(parent context.Context) error {
 	dctx, dcancel := context.WithCancel(parent)
 	defer dcancel()
 
-	// TODO: To eventually support running rxd on multiple platforms, we need to
-	// abstract the notifier to be a part of the daemon configuration.
+	// --- Service Manager Notifier ---
+	// TODO:: Future work here will be to support multiple platform service managers
+	// such as windows service manager, systemd, etc.
+	//
+	// This will require manager selection to be selected dynamically at runtime.
 	// notifier := GetSystemNotifier(ctx) --- probably...
 	// For now, we are only supporting linux - systemd.
-	// NOTE: Since service manager selection is part of the build runtime.
-	// we will probably have to do this via mixture of global and init().
 	notifier, err := NewSystemdNotifier(os.Getenv("NOTIFY_SOCKET"), d.reportAliveSecs)
 	if err != nil {
 		return err
@@ -91,17 +92,9 @@ func (d *daemon) Start(parent context.Context) error {
 		return err
 	}
 
-	// --- Daemon Service(s) Log Handler ---
+	// --- Start the Daemon Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
-	logDoneC := make(chan struct{})
-	go func() {
-		// error handler routine
-		// closed after the wait group is done.
-		for entry := range d.logC {
-			d.logger.Log(entry.Level, entry.Message, log.String("service", entry.Name))
-		}
-		close(logDoneC)
-	}()
+	loggerDoneC := d.logWatcher(d.logC)
 
 	// --- Daemon Signal Watcher ---
 	// listens for signals to stop the daemon such as OS signals or context done.
@@ -130,39 +123,22 @@ func (d *daemon) Start(parent context.Context) error {
 
 	}()
 
-	// register the states publish topic and channel with the intracom bus
-	publishStatesC := make(chan ServiceStates, 1)
-
-	statesTopic, err := d.icStates.Register(internalServiceStates, publishStatesC)
+	statesTopic, err := d.icStates.Register(intracom.TopicConfig{
+		Topic:       internalServiceStates,
+		Buffer:      1,
+		ErrIfExists: true,
+	})
 	if err != nil {
 		return err
 	}
 
-	// --- Service States Watcher ---
-	statesDoneC := make(chan struct{})
 	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
+
+	// --- Service States Watcher ---
 	// states watcher routine needs to be closed once all services have exited.
-	go func(statesC chan<- ServiceStates) {
-		states := make(ServiceStates, len(d.services))
-		for name := range d.services {
-			states[name] = StateExit
-		}
+	statesDoneC := d.statesWatcher(statesTopic, stateUpdateC)
 
-		// states watcher routine should be closed after all services have exited.
-		for update := range stateUpdateC {
-			if current, ok := states[update.Name]; ok && current != update.State {
-				d.logger.Log(log.LevelDebug, "service state update", log.String("service", update.Name), log.String("state", update.State.String()))
-			}
-			// update the state of the service only if it changed.
-			states[update.Name] = update.State
-
-			// send the updated states to the intracom bus
-			statesC <- states.copy()
-		}
-
-		close(statesDoneC)
-	}(publishStatesC)
-
+	// --- Launch Daemon Service(s) ---
 	var dwg sync.WaitGroup
 	// launch all services in their own routine.
 	for _, service := range d.services {
@@ -227,8 +203,12 @@ func (d *daemon) Start(parent context.Context) error {
 	if err != nil {
 		d.logger.Log(log.LevelError, "error sending 'ready' notification", log.String("rxd", "systemd-notifier"))
 	}
-	// block, waiting for all services to exit their lifecycles.
+
+	// block until all services have exited their lifecycles
 	dwg.Wait()
+
+	// -- ALL SERVICES HAVE EXITED THEIR LIFECYCLES --
+	//         CLEANUP AND SHUTDOWN
 
 	// --- Clean up RPC if it was enabled and set ---
 	if server != nil {
@@ -239,8 +219,11 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 	}
 
-	d.logger.Log(log.LevelDebug, "cleaning up log and states channels", log.String("rxd", d.name))
+	// since all services have exited their lifecycles, we can close the states update channel.
 	close(stateUpdateC)
+	<-statesDoneC // wait for states watcher to finish
+	d.logger.Log(log.LevelDebug, "states channel completed", log.String("rxd", d.name))
+
 	err = statesTopic.Close()
 	if err != nil {
 		d.logger.Log(log.LevelError, "error closing states topic", log.String("rxd", "intracom"))
@@ -248,23 +231,9 @@ func (d *daemon) Start(parent context.Context) error {
 		d.logger.Log(log.LevelDebug, "states topic closed", log.String("rxd", "intracom"))
 	}
 
-	<-statesDoneC // wait for states watcher to finish
-	d.logger.Log(log.LevelDebug, "states channel completed", log.String("rxd", d.name))
-
-	close(d.logC) // close the log channel
-	<-logDoneC    // wait for log handler to finish
+	close(d.logC) // signal close the log channel
+	<-loggerDoneC // wait for log watcher to finish
 	d.logger.Log(log.LevelDebug, "log channel completed", log.String("rxd", d.name))
-
-	err = d.icStates.Close()
-	if err != nil {
-		d.logger.Log(log.LevelError, "error closing states intracom", log.String("rxd", "intracom"))
-	} else {
-		d.logger.Log(log.LevelDebug, "states intracom closed", log.String("rxd", "intracom"))
-
-	}
-
-	// close publishing channel last so subscribers dont try to publish to a closed channel.
-	close(publishStatesC)
 
 	d.logger.Log(log.LevelDebug, "intracom closed", log.String("rxd", "intracom"))
 	return nil
@@ -331,6 +300,49 @@ func (d *daemon) addService(service Service) error {
 	d.handlers[service.Name] = service.Handler
 
 	return nil
+}
+
+func (d *daemon) logWatcher(logC <-chan DaemonLog) <-chan struct{} {
+	doneC := make(chan struct{})
+
+	go func() {
+		for entry := range d.logC {
+			d.logger.Log(entry.Level, entry.Message, log.String("service", entry.Name))
+		}
+		close(doneC)
+	}()
+
+	return doneC
+}
+func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateUpdatesC <-chan StateUpdate) <-chan struct{} {
+	doneC := make(chan struct{})
+
+	go func() {
+		// retrieve the publisher channel for the states topic
+		statesC := statesTopic.Publisher()
+
+		states := make(ServiceStates, len(d.services))
+		for name := range d.services {
+			states[name] = StateExit
+		}
+
+		// states watcher routine should be closed after all services have exited.
+		for state := range stateUpdatesC {
+			if current, ok := states[state.Name]; ok && current != state.State {
+				d.logger.Log(log.LevelDebug, "service state update", log.String("service", state.Name), log.String("state", state.State.String()))
+			}
+			// update the state of the service only if it changed.
+			states[state.Name] = state.State
+
+			// send the updated states to the intracom bus
+			statesC <- states.copy()
+		}
+
+		// signal done after states watcher has finished.
+		close(doneC)
+	}()
+
+	return doneC
 }
 
 func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string) error {
