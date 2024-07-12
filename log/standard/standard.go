@@ -15,11 +15,12 @@ type standardLogger struct {
 	timefmt string
 	msgfmt  string
 	level   log.Level
-
-	stdout io.Writer
-	stderr io.Writer
-	outMu  sync.Mutex
-	errMu  sync.Mutex
+	fields  []log.Field
+	stdout  io.Writer
+	stderr  io.Writer
+	lvlMu   sync.RWMutex // mutex for level and fields
+	outMu   sync.RWMutex // mutex for stdout writer
+	errMu   sync.RWMutex // mutex for stderr writer
 }
 
 // NewDefaultLogger returns a new logger with default settings
@@ -52,10 +53,12 @@ func NewLogger(stdout, stderr io.Writer, opts ...StandardOption) log.Logger {
 		timefmt: time.RFC3339,
 		msgfmt:  "{time} [{level}] {message}",
 		level:   log.LevelInfo,
+		fields:  []log.Field{},
 		stdout:  stdout,
 		stderr:  stderr,
-		errMu:   sync.Mutex{},
-		outMu:   sync.Mutex{},
+		lvlMu:   sync.RWMutex{},
+		errMu:   sync.RWMutex{},
+		outMu:   sync.RWMutex{},
 	}
 
 	for _, opt := range opts {
@@ -70,19 +73,20 @@ func NewLogger(stdout, stderr io.Writer, opts ...StandardOption) log.Logger {
 // we need to ensure the writers are locked trying to make changes
 // to the log level.
 func (l *standardLogger) SetLevel(level log.Level) {
-	l.outMu.Lock()
-	l.errMu.Lock()
+	l.lvlMu.Lock()
 	l.level = level
-	l.outMu.Unlock()
-	l.errMu.Unlock()
+	l.lvlMu.Unlock()
 }
 
 // Log handles the logging of messages to the logger
 func (l *standardLogger) Log(level log.Level, msg string, fields ...log.Field) {
 	// if the logger level is less than level passed, we don't log
+	l.lvlMu.RLock()
 	if l.level < level {
+		l.lvlMu.RUnlock()
 		return
 	}
+	l.lvlMu.RUnlock()
 
 	// replace the main fields first.
 	message := strings.Replace(l.msgfmt, "{time}", time.Now().Format(l.timefmt), 1)
@@ -96,7 +100,9 @@ func (l *standardLogger) Log(level log.Level, msg string, fields ...log.Field) {
 		return
 	}
 
-	for _, field := range fields {
+	allFields := append(l.fields, fields...)
+
+	for _, field := range allFields {
 		b.WriteString(" " + field.Key + "=" + field.Value)
 	}
 

@@ -19,46 +19,65 @@ type ServiceContext interface {
 	ServiceWatcher
 	Name() string
 	Log(level log.Level, message string, fields ...log.Field)
-	With(name string) ServiceContext
-	// WithCancel creates a new named child ServiceContext from the current context with a new cancel function.
-	WithCancel(name string) (ServiceContext, context.CancelFunc)
+	// With returns a new ServiceContext with the given fields appended to the existing fields.
+	With(fields ...log.Field) ServiceContext
 }
 
 type serviceContext struct {
 	context.Context
-	name string
-	logC chan<- DaemonLog
+	name   string
+	fields []log.Field
+	logC   chan<- DaemonLog
 	// ic       intracom.Intracom[ServiceStates]
 	icStates intracom.Topic[ServiceStates]
+}
+
+// NewServiceContext returns a new child ServiceContext with the given name and fields.
+// The new child context will have the same log channel and internal communication as the parent.
+func ServiceContextWith(parent ServiceContext) ServiceContext {
+	return serviceContext{
+		Context: parent,
+		name:    parent.Name(),
+		fields:  parent.(serviceContext).fields,
+		logC:    parent.(serviceContext).logC,
+		// ic:      parent.(serviceContext).ic,
+		icStates: parent.(serviceContext).icStates,
+	}
+}
+
+// NewServiceContext returns a new child ServiceContext sharing the same fields and log channel as the parent.
+// The new child context will keep the same name as the parent.
+func ServiceContextWithCancel(parent ServiceContext) (ServiceContext, context.CancelFunc) {
+	logC := parent.(serviceContext).logC
+	icStates := parent.(serviceContext).icStates
+	return newServiceContextWithCancel(parent, parent.Name(), logC, icStates)
 }
 
 func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Topic[ServiceStates]) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 	return serviceContext{
-		Context: ctx,
-		name:    name,
-		logC:    logC,
-		// ic:      icStates,
+		Context:  ctx,
+		name:     name,
+		logC:     logC,
+		fields:   []log.Field{},
 		icStates: icStates,
 	}, cancel
 }
 
-func (sc serviceContext) Name() string {
-	return sc.name
-}
-
-func (sc serviceContext) With(name string) ServiceContext {
+// With returns a new child ServiceContext with the given fields appended to the existing fields.
+// The new child context will have the same name as the parent.
+func (sc serviceContext) With(fields ...log.Field) ServiceContext {
 	return serviceContext{
-		Context: sc.Context,
-		name:    sc.name + "_" + name,
-		logC:    sc.logC,
-		// ic:      sc.ic,
+		Context:  sc.Context,
+		name:     sc.name,
+		fields:   append(sc.fields, fields...),
+		logC:     sc.logC,
 		icStates: sc.icStates,
 	}
 }
 
-func (sc serviceContext) WithCancel(name string) (ServiceContext, context.CancelFunc) {
-	return newServiceContextWithCancel(sc.Context, name, sc.logC, sc.icStates)
+func (sc serviceContext) Name() string {
+	return sc.name
 }
 
 func (sc serviceContext) Log(level log.Level, message string, fields ...log.Field) {

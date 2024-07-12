@@ -12,14 +12,14 @@ import (
 )
 
 type journaldLogger struct {
-	level          log.Level
 	severityPrefix bool
-
-	stdout io.Writer
-	outMu  sync.Mutex
-
-	stderr io.Writer
-	errMu  sync.Mutex
+	fields         []log.Field
+	level          log.Level
+	stdout         io.Writer
+	stderr         io.Writer
+	lvlMu          sync.RWMutex // mutex for level and fields
+	outMu          sync.RWMutex // mutex for stdout writer
+	errMu          sync.RWMutex // mutex for stderr writer
 }
 
 // NewLogger creates a new instance of the journal logger that logs only what is necessary
@@ -29,10 +29,12 @@ func NewLogger(level log.Level, opts ...Option) log.Logger {
 	jlogger := &journaldLogger{
 		severityPrefix: false,
 		level:          level,
+		fields:         []log.Field{},
 		stdout:         os.Stdout,
 		stderr:         os.Stderr,
-		outMu:          sync.Mutex{},
-		errMu:          sync.Mutex{},
+		lvlMu:          sync.RWMutex{},
+		outMu:          sync.RWMutex{},
+		errMu:          sync.RWMutex{},
 	}
 
 	for _, opt := range opts {
@@ -42,15 +44,35 @@ func NewLogger(level log.Level, opts ...Option) log.Logger {
 	return jlogger
 }
 
+func (l *journaldLogger) With(fields ...log.Field) log.Logger {
+	extraFields := append(l.fields, fields...)
+
+	return &journaldLogger{
+		severityPrefix: l.severityPrefix,
+		level:          l.level,
+		fields:         extraFields,
+		stdout:         l.stdout,
+		stderr:         l.stderr,
+		lvlMu:          sync.RWMutex{},
+		outMu:          sync.RWMutex{},
+		errMu:          sync.RWMutex{},
+	}
+}
+
 func (l *journaldLogger) SetLevel(level log.Level) {
+	l.lvlMu.Lock()
 	l.level = level
+	l.lvlMu.Unlock()
 }
 
 func (l *journaldLogger) Log(level log.Level, msg string, fields ...log.Field) {
+	l.lvlMu.RLock()
 	// if the logger level is less than level passed, we don't log
 	if l.level < level {
+		l.lvlMu.RUnlock()
 		return
 	}
+	l.lvlMu.RUnlock()
 
 	var b strings.Builder
 	// if a log name is set, add it to the message before the level
@@ -61,7 +83,9 @@ func (l *journaldLogger) Log(level log.Level, msg string, fields ...log.Field) {
 	b.WriteString("[" + level.String() + "] ")
 	b.WriteString(msg)
 
-	for _, field := range fields {
+	allFields := append(l.fields, fields...)
+	// write all the logger fields to the message first
+	for _, field := range allFields {
 		b.WriteString(" " + field.Key + "=" + field.Value)
 	}
 

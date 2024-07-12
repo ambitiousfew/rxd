@@ -7,7 +7,7 @@ import (
 )
 
 type Logger interface {
-	Log(level Level, message string, extra ...Field)
+	Log(level Level, message string, fields ...Field)
 	SetLevel(level Level)
 }
 
