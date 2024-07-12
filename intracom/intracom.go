@@ -18,23 +18,28 @@ type Option[T any] func(*intracom[T])
 
 // intracom is an in-memory pub/sub wrapper to enable communication between routines.
 type intracom[T any] struct {
-	name   string
-	closed atomic.Bool
-	mu     sync.RWMutex
-	topics map[string]*topic[T]
-
+	name    string
+	closed  atomic.Bool
+	mu      sync.RWMutex
+	topics  map[string]*topic[T]
+	logger  log.Logger
 	running atomic.Bool
 }
 
 // New creates a new instance of Intracom with the given name and logger and starts the broker routine.
-func New[T any](name string, logger log.Logger, opts ...Option[T]) Intracom[T] {
-	ic := &intracom[T]{
-		name:   name,
-		topics: make(map[string]*topic[T]),
+func New[T any](name string, opts ...Option[T]) Intracom[T] {
 
+	ic := &intracom[T]{
+		name:    name,
+		topics:  make(map[string]*topic[T]),
+		logger:  noopLogger{},
 		closed:  atomic.Bool{},
 		running: atomic.Bool{},
 		mu:      sync.RWMutex{},
+	}
+
+	for _, opt := range opts {
+		opt(ic)
 	}
 
 	return ic

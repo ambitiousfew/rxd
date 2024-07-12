@@ -44,7 +44,7 @@ func NewDaemon(name string, log log.Logger, options ...DaemonOption) Daemon {
 		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services:        make(map[string]DaemonService),
 		handlers:        make(map[string]ServiceHandler),
-		icStates:        intracom.New[ServiceStates]("rxd-states", log),
+		icStates:        intracom.New[ServiceStates]("rxd-states"),
 		reportAliveSecs: 0,
 		logC:            make(chan DaemonLog, 100),
 		logger:          log,
