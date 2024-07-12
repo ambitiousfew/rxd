@@ -1,16 +1,20 @@
 package intracom
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/ambitiousfew/rxd/log"
 )
 
 type Intracom[T any] interface {
-	Register(conf TopicConfig) (Topic[T], error)
-
+	// CreateTopic creates a new topic with the given configuration. If the topic already exists, an error is returned.
+	CreateTopic(conf TopicConfig) (Topic[T], error)
+	// CreateSubscription subscribes (using max wait) to a topic and returns that topic back once that topic exists.
+	CreateSubscription(ctx context.Context, topic string, maxTimeout time.Duration, conf SubscriberConfig) (<-chan T, error)
 	Close() error
 }
 
@@ -46,34 +50,70 @@ func New[T any](name string, opts ...Option[T]) Intracom[T] {
 	return ic
 }
 
-// Register will register a topic with the Intracom instance.
-// It is safe to call this function multiple times for the same topic.
-// If the topic already exists, this function will return the existing publisher channel.
-//
-// Parameters:
-// - topic: name of the topic to register
-//
-// Returns:
-// - publishC: the channel used to publish messages to the topic
-// - unregister: a function bound to this topic that can be used to unregister the topic
-func (i *intracom[T]) Register(conf TopicConfig) (Topic[T], error) {
+// CreateTopic creates a new topic with the given configuration.
+// Topic names must be unique, if the topic already exists, an error is returned.
+func (i *intracom[T]) CreateTopic(conf TopicConfig) (Topic[T], error) {
 	if i.closed.Load() {
 		return nil, errors.New("cannot register topic, intracom is closed")
 	}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
-
-	t, ok := i.topics[conf.Topic]
+	t, ok := i.topics[conf.Name]
 	if ok {
-		return t, errors.New("topic " + conf.Topic + " already exists")
+		return t, errors.New("topic " + conf.Name + " already exists")
 	}
 
 	ch := make(chan T, conf.Buffer)
 	t = newTopic[T](ch)
-	i.topics[conf.Topic] = t
+	i.topics[conf.Name] = t
 
 	return t, nil
+}
+
+// CreateSubscription will (if set) wait a max timeout for a topic to exist and the proceed to subscribe to that topic.
+// If the topic does not exist within the maxWait duration, an error is returned.
+// If maxWait is 0, the function will wait indefinitely for the topic to exist.
+// If the intracom is closed, an error is returned.
+// If the context is canceled, a context error is returned.
+func (i *intracom[T]) CreateSubscription(ctx context.Context, topic string, maxWait time.Duration, conf SubscriberConfig) (<-chan T, error) {
+	if i.closed.Load() {
+		return nil, errors.New("cannot create subscription, intracom is closed")
+	}
+
+	var maxTimeout <-chan time.Time
+	if maxWait > 0 {
+		timer := time.NewTimer(maxWait)
+		defer timer.Stop()
+		maxTimeout = timer.C
+	}
+
+	topicCheckTimeout := time.NewTicker(100 * time.Millisecond)
+	defer topicCheckTimeout.Stop()
+
+	var exists bool
+	var t Topic[T]
+
+	for !exists {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-maxTimeout:
+			return nil, errors.New("subscription max timeout reached")
+		case <-topicCheckTimeout.C:
+			// ensure intracom is still open
+			if i.closed.Load() {
+				return nil, errors.New("cannot create subscription, intracom has been closed")
+			}
+			// check if the topic exists yet.
+			i.mu.RLock()
+			t, exists = i.topics[topic]
+			i.mu.RUnlock()
+		}
+	}
+
+	return t.Subscribe(conf)
+
 }
 
 func (i *intracom[T]) Close() error {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Topic[T any] interface {
@@ -13,8 +14,14 @@ type Topic[T any] interface {
 	Close() error
 }
 
+type Subscription struct {
+	Topic         string
+	ConsumerGroup string
+	// MaxWaitTimeout is the max time to wait before error due to a topic not existing.
+	MaxWaitTimeout time.Duration
+}
 type TopicConfig struct {
-	Topic       string // unique name for the topic
+	Name        string // unique name for the topic
 	Buffer      int    // buffer size for the topic channel
 	ErrIfExists bool   // return error if topic already exists
 }
@@ -51,13 +58,10 @@ func (t *topic[T]) Subscribe(conf SubscriberConfig) (<-chan T, error) {
 	t.mu.RLock()
 	sub, ok := t.subscribers[conf.ConsumerGroup]
 	if ok {
-		defer t.mu.RUnlock()
-		// subscriber already exists
+		t.mu.RUnlock()
 		if conf.ErrIfExists {
-			// return error if subscriber already exists
-			return nil, errors.New("consumer group '" + conf.ConsumerGroup + " already exists")
+			return nil, errors.New("consumer group '" + conf.ConsumerGroup + "' already exists")
 		}
-		// subscriber already exists so return the channel
 		return sub.ch, nil
 	}
 	t.mu.RUnlock()
