@@ -130,10 +130,6 @@ func (d *daemon) Start(parent context.Context) error {
 
 	}()
 
-	// --- Service States Watcher ---
-	statesDoneC := make(chan struct{})
-	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
-
 	// register the states publish topic and channel with the intracom bus
 	publishStatesC := make(chan ServiceStates, 1)
 
@@ -142,6 +138,10 @@ func (d *daemon) Start(parent context.Context) error {
 		return err
 	}
 
+	// --- Service States Watcher ---
+	statesDoneC := make(chan struct{})
+	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
+	// states watcher routine needs to be closed once all services have exited.
 	go func(statesC chan<- ServiceStates) {
 		states := make(ServiceStates, len(d.services))
 		for name := range d.services {
@@ -240,24 +240,27 @@ func (d *daemon) Start(parent context.Context) error {
 	}
 
 	d.logger.Log(log.LevelDebug, "cleaning up log and states channels", log.String("rxd", d.name))
-	// close the error channel to signal the error handler routine to exit
-	// close(d.errC)
-	close(d.logC)
 	close(stateUpdateC)
-	// wait for logging routine to empty the log channel and writing to logger
-	<-logDoneC
-	d.logger.Log(log.LevelDebug, "log channel closed", log.String("rxd", d.name))
-	<-statesDoneC
-
-	d.logger.Log(log.LevelDebug, "states channel closed", log.String("rxd", d.name))
-	// err = d.icStates.Unregister(parent, internalServiceStates)
+	err = statesTopic.Close()
 	if err != nil {
-		d.logger.Log(log.LevelError, "error unregistering states topic", log.String("rxd", d.name))
+		d.logger.Log(log.LevelError, "error closing states topic", log.String("rxd", "intracom"))
+	} else {
+		d.logger.Log(log.LevelDebug, "states topic closed", log.String("rxd", "intracom"))
 	}
+
+	<-statesDoneC // wait for states watcher to finish
+	d.logger.Log(log.LevelDebug, "states channel completed", log.String("rxd", d.name))
+
+	close(d.logC) // close the log channel
+	<-logDoneC    // wait for log handler to finish
+	d.logger.Log(log.LevelDebug, "log channel completed", log.String("rxd", d.name))
 
 	err = d.icStates.Close()
 	if err != nil {
 		d.logger.Log(log.LevelError, "error closing states intracom", log.String("rxd", "intracom"))
+	} else {
+		d.logger.Log(log.LevelDebug, "states intracom closed", log.String("rxd", "intracom"))
+
 	}
 
 	// close publishing channel last so subscribers dont try to publish to a closed channel.
