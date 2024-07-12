@@ -31,8 +31,6 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, upda
 		}
 	}()
 
-	serviceName := sctx.Name()
-
 	defaultTimeout := 10 * time.Nanosecond
 
 	timeout := time.NewTimer(ds.TransitionTimeouts.GetOrDefault(TransExitToInit, defaultTimeout))
@@ -43,7 +41,7 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, upda
 	var hasStopped bool
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
-		updateState <- StateUpdate{State: state, Name: serviceName}
+		updateState <- StateUpdate{State: state, Name: ds.Name}
 
 		select {
 		case <-sctx.Done():

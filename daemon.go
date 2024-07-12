@@ -154,10 +154,11 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 
 		// each service is handled in its own routine.
-		go func(wg *sync.WaitGroup, ctx context.Context, svc DaemonService, h ServiceHandler, stateC chan<- StateUpdate) {
-			sctx, scancel := newServiceContextWithCancel(ctx, svc.Name, d.logC, statesTopic)
+		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, h ServiceHandler, stateC chan<- StateUpdate) {
+			d.logger.Log(log.LevelDebug, "starting service", log.String("service", ds.Name))
+			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, statesTopic)
 			// run the service according to the handler policy
-			h.Handle(sctx, svc, stateC)
+			h.Handle(sctx, ds, stateC)
 			scancel()
 			wg.Done()
 
@@ -306,8 +307,8 @@ func (d *daemon) logWatcher(logC <-chan DaemonLog) <-chan struct{} {
 	doneC := make(chan struct{})
 
 	go func() {
-		for entry := range d.logC {
-			d.logger.Log(entry.Level, entry.Message, log.String("service", entry.Name))
+		for entry := range logC {
+			d.logger.Log(entry.Level, entry.Message, entry.Fields...)
 		}
 		close(doneC)
 	}()
@@ -329,7 +330,9 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 		// states watcher routine should be closed after all services have exited.
 		for state := range stateUpdatesC {
 			if current, ok := states[state.Name]; ok && current != state.State {
-				d.logger.Log(log.LevelDebug, "service state update", log.String("service", state.Name), log.String("state", state.State.String()))
+				// TODO: daemon internal logs like this should probably get their own logger like intracom.
+				// we dont really want these logs interleaved with the user service logs.
+				// d.logger.Log(log.LevelDebug, "service state update", log.String("service_name", state.Name), log.String("state", state.State.String()))
 			}
 			// update the state of the service only if it changed.
 			states[state.Name] = state.State

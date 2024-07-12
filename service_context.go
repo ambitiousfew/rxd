@@ -55,11 +55,15 @@ func ServiceContextWithCancel(parent ServiceContext) (ServiceContext, context.Ca
 
 func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Topic[ServiceStates]) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
+	fields := []log.Field{}
+	if name != "" {
+		fields = append(fields, log.String("service", name))
+	}
 	return serviceContext{
 		Context:  ctx,
 		name:     name,
 		logC:     logC,
-		fields:   []log.Field{},
+		fields:   fields,
 		icStates: icStates,
 	}, cancel
 }
@@ -70,7 +74,7 @@ func (sc serviceContext) With(fields ...log.Field) ServiceContext {
 	return serviceContext{
 		Context:  sc.Context,
 		name:     sc.name,
-		fields:   append(sc.fields, fields...),
+		fields:   append(fields, sc.fields...),
 		logC:     sc.logC,
 		icStates: sc.icStates,
 	}
@@ -85,7 +89,7 @@ func (sc serviceContext) Log(level log.Level, message string, fields ...log.Fiel
 		Name:    sc.name,
 		Level:   level,
 		Message: message,
-		Fields:  fields,
+		Fields:  append(fields, sc.fields...),
 	}
 }
 
@@ -123,13 +127,6 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		// sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
-		// 	Topic:         internalServiceStates,
-		// 	ConsumerGroup: consumer,
-		// 	BufferSize:    1,
-		// 	BufferPolicy:  intracom.DropOldest,
-		// })
-		// defer unsub()
 
 		for {
 			select {

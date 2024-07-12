@@ -65,17 +65,16 @@ var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
 // var *MyHandler must meet ServiceHandler interface or line below errors.
 type MyHandler struct{}
 
-func (h MyHandler) Handle(ctx rxd.ServiceContext, ds rxd.DaemonService, updateState chan<- rxd.StateUpdate) {
-	serviceName := ctx.Name()
+func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState chan<- rxd.StateUpdate) {
 	state := rxd.StateInit
 
 	timeout := time.NewTicker(1 * time.Second)
 	defer timeout.Stop()
 	// Set the default timeout to 0 to default resets on everything else except stop.
 	for state != rxd.StateExit {
-		updateState <- rxd.StateUpdate{State: state, Name: serviceName}
+		updateState <- rxd.StateUpdate{State: state, Name: ds.Name}
 		select {
-		case <-ctx.Done():
+		case <-sctx.Done():
 			state = rxd.StateExit
 		case <-timeout.C:
 		}
@@ -83,28 +82,28 @@ func (h MyHandler) Handle(ctx rxd.ServiceContext, ds rxd.DaemonService, updateSt
 		switch state {
 		case rxd.StateInit:
 			state = rxd.StateIdle
-			err := ds.Runner.Init(ctx)
+			err := ds.Runner.Init(sctx)
 			if err != nil {
-				ctx.Log(log.LevelError, err.Error())
+				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateExit
 			}
 		case rxd.StateIdle:
 			state = rxd.StateRun
-			err := ds.Runner.Idle(ctx)
+			err := ds.Runner.Idle(sctx)
 			if err != nil {
-				ctx.Log(log.LevelError, err.Error())
+				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateStop
 			}
 		case rxd.StateRun:
 			state = rxd.StateIdle
-			err := ds.Runner.Run(ctx)
+			err := ds.Runner.Run(sctx)
 			if err != nil {
-				ctx.Log(log.LevelError, err.Error())
+				sctx.Log(log.LevelError, err.Error())
 			}
 		case rxd.StateStop:
 			state = rxd.StateExit
-			if err := ds.Runner.Stop(ctx); err != nil {
-				ctx.Log(log.LevelError, err.Error())
+			if err := ds.Runner.Stop(sctx); err != nil {
+				sctx.Log(log.LevelError, err.Error())
 			}
 		}
 		timeout.Reset(1 * time.Second)
