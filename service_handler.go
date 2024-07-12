@@ -33,7 +33,7 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, upda
 
 	serviceName := sctx.Name()
 	// Set the default timeout to 0 to default resets on everything else except stop.
-	defaultTimeout := 0 * time.Nanosecond
+	defaultTimeout := 10 * time.Nanosecond
 
 	timeout := time.NewTimer(defaultTimeout)
 	defer timeout.Stop()
@@ -53,9 +53,9 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, upda
 				state = StateIdle
 				err := sr.Init(sctx)
 				if err != nil {
-					// errC <- err
 					sctx.Log(log.LevelError, err.Error())
-					state = StateExit // or Stop with timeout?
+					state = StateInit
+					timeout.Reset(10 * time.Second)
 				}
 				// reset the hasStopped flag since we just restarted the service.
 				hasStopped = false
