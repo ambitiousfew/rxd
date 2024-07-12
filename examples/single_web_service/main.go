@@ -65,7 +65,7 @@ var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
 // var *MyHandler must meet ServiceHandler interface or line below errors.
 type MyHandler struct{}
 
-func (h MyHandler) Handle(ctx rxd.ServiceContext, sr rxd.ServiceRunner, updateState chan<- rxd.StateUpdate) {
+func (h MyHandler) Handle(ctx rxd.ServiceContext, ds rxd.DaemonService, updateState chan<- rxd.StateUpdate) {
 	serviceName := ctx.Name()
 	state := rxd.StateInit
 
@@ -83,27 +83,27 @@ func (h MyHandler) Handle(ctx rxd.ServiceContext, sr rxd.ServiceRunner, updateSt
 		switch state {
 		case rxd.StateInit:
 			state = rxd.StateIdle
-			err := sr.Init(ctx)
+			err := ds.Runner.Init(ctx)
 			if err != nil {
 				ctx.Log(log.LevelError, err.Error())
 				state = rxd.StateExit
 			}
 		case rxd.StateIdle:
 			state = rxd.StateRun
-			err := sr.Idle(ctx)
+			err := ds.Runner.Idle(ctx)
 			if err != nil {
 				ctx.Log(log.LevelError, err.Error())
 				state = rxd.StateStop
 			}
 		case rxd.StateRun:
 			state = rxd.StateIdle
-			err := sr.Run(ctx)
+			err := ds.Runner.Run(ctx)
 			if err != nil {
 				ctx.Log(log.LevelError, err.Error())
 			}
 		case rxd.StateStop:
 			state = rxd.StateExit
-			if err := sr.Stop(ctx); err != nil {
+			if err := ds.Runner.Stop(ctx); err != nil {
 				ctx.Log(log.LevelError, err.Error())
 			}
 		}

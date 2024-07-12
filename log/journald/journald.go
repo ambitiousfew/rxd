@@ -67,12 +67,12 @@ func (l *journaldLogger) SetLevel(level log.Level) {
 
 func (l *journaldLogger) Log(level log.Level, msg string, fields ...log.Field) {
 	l.lvlMu.RLock()
+	ignore := l.level < level
+	l.lvlMu.RUnlock()
 	// if the logger level is less than level passed, we don't log
-	if l.level < level {
-		l.lvlMu.RUnlock()
+	if ignore {
 		return
 	}
-	l.lvlMu.RUnlock()
 
 	var b strings.Builder
 	// if a log name is set, add it to the message before the level

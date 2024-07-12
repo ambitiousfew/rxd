@@ -1,6 +1,8 @@
 package rxd
 
-import "strings"
+import (
+	"strings"
+)
 
 const (
 	StateExit State = iota

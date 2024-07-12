@@ -9,7 +9,7 @@ import (
 
 // ServiceHandler interface defines the methods that a service handler must implement
 type ServiceHandler interface {
-	Handle(ctx ServiceContext, runner ServiceRunner, stateUpdateC chan<- StateUpdate)
+	Handle(ctx ServiceContext, dService DaemonService, stateUpdateC chan<- StateUpdate)
 }
 
 var DefaultHandler = RunContinuousHandler{}
@@ -23,7 +23,7 @@ type RunContinuousHandler struct{}
 // Handle runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
-func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, updateState chan<- StateUpdate) {
+func (h RunContinuousHandler) Handle(sctx ServiceContext, ds DaemonService, updateState chan<- StateUpdate) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -32,10 +32,10 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, upda
 	}()
 
 	serviceName := sctx.Name()
-	// Set the default timeout to 0 to default resets on everything else except stop.
+
 	defaultTimeout := 10 * time.Nanosecond
 
-	timeout := time.NewTimer(defaultTimeout)
+	timeout := time.NewTimer(ds.TransitionTimeouts.GetOrDefault(TransExitToInit, defaultTimeout))
 	defer timeout.Stop()
 
 	var state State = StateInit
@@ -44,6 +44,7 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, upda
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
 		updateState <- StateUpdate{State: state, Name: serviceName}
+
 		select {
 		case <-sctx.Done():
 			state = StateExit
@@ -51,41 +52,49 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, upda
 			switch state {
 			case StateInit:
 				state = StateIdle
-				err := sr.Init(sctx)
+				err := ds.Runner.Init(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateInit
-					timeout.Reset(10 * time.Second)
+					// reset the transition timeout to the init state
+					timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransInitToIdle, defaultTimeout))
 				}
 				// reset the hasStopped flag since we just restarted the service.
 				hasStopped = false
 
 			case StateIdle:
 				state = StateRun
-				err := sr.Idle(sctx)
+				err := ds.Runner.Idle(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
+					// reset the transition timeout to the init state
+					timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransIdleToRun, defaultTimeout))
+
 				}
 			case StateRun:
 				state = StateStop
-				err := sr.Run(sctx)
+				err := ds.Runner.Run(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
+				// reset the transition timeout to the init state
+				timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransRunToStop, defaultTimeout))
 			case StateStop:
-				state = StateInit
-				err := sr.Stop(sctx)
+				err := ds.Runner.Stop(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
-
-				// TODO: Add a timeout to the stop state to prevent
-				// the service from cycling too quickly between retries.
+				// flip hasStopped to true since we just stopped the service.
+				// to cover the case where ctx can be cancelled and always want to
+				// ensure stop is called prior to StateExit to ensure cleanup.
 				hasStopped = true
 
-				// TODO: This would be configurable via the service options
-				timeout.Reset(3 * time.Second)
+				// stop never leads to exit, always back to init for run continuous.
+				state = StateInit
+
+				// reset using the stop to init timeout if it exists.
+				timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransStopToInit, defaultTimeout))
 				continue // skip the default timeout reset
 			}
 
@@ -95,7 +104,7 @@ func (h RunContinuousHandler) Handle(sctx ServiceContext, sr ServiceRunner, upda
 	}
 
 	if !hasStopped {
-		err := sr.Stop(sctx)
+		err := ds.Runner.Stop(sctx)
 		if err != nil {
 			sctx.Log(log.LevelError, err.Error())
 		}
