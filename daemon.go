@@ -225,15 +225,15 @@ func (d *daemon) Start(parent context.Context) error {
 	<-statesDoneC // wait for states watcher to finish
 	d.logger.Log(log.LevelDebug, "states channel completed", log.String("rxd", d.name))
 
-	err = statesTopic.Close()
+	// TODO: these logs should not be interleaved with the user service logs.
+	err = d.icStates.Close()
 	if err != nil {
-		d.logger.Log(log.LevelError, "error closing states topic", log.String("rxd", "intracom"))
-	} else {
-		d.logger.Log(log.LevelDebug, "states topic closed", log.String("rxd", "intracom"))
+		d.logger.Log(log.LevelError, "error closing intracom", log.String("rxd", "intracom"))
 	}
 
 	close(d.logC) // signal close the log channel
 	<-loggerDoneC // wait for log watcher to finish
+
 	d.logger.Log(log.LevelDebug, "log channel completed", log.String("rxd", d.name))
 
 	d.logger.Log(log.LevelDebug, "intracom closed", log.String("rxd", "intracom"))
