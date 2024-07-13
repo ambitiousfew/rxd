@@ -20,7 +20,8 @@ type ServiceContext interface {
 	Name() string
 	Log(level log.Level, message string, fields ...log.Field)
 	// With returns a new ServiceContext with the given fields appended to the existing fields.
-	With(fields ...log.Field) ServiceContext
+	WithFields(fields ...log.Field) ServiceContext
+	WithParent(ctx context.Context) ServiceContext
 }
 
 type serviceContext struct {
@@ -32,45 +33,41 @@ type serviceContext struct {
 	icStates intracom.Topic[ServiceStates]
 }
 
-// NewServiceContext returns a new child ServiceContext with the given name and fields.
-// The new child context will have the same log channel and internal communication as the parent.
-func ServiceContextWith(parent ServiceContext) ServiceContext {
-	return serviceContext{
-		Context: parent,
-		name:    parent.Name(),
-		fields:  parent.(serviceContext).fields,
-		logC:    parent.(serviceContext).logC,
-		// ic:      parent.(serviceContext).ic,
-		icStates: parent.(serviceContext).icStates,
-	}
-}
-
-// NewServiceContext returns a new child ServiceContext sharing the same fields and log channel as the parent.
-// The new child context will keep the same name as the parent.
-func ServiceContextWithCancel(parent ServiceContext) (ServiceContext, context.CancelFunc) {
-	logC := parent.(serviceContext).logC
-	icStates := parent.(serviceContext).icStates
-	return newServiceContextWithCancel(parent, parent.Name(), logC, icStates)
-}
-
+// newServiceWithCancel produces a new cancellable ServiceContext with the given name and fields.
 func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Topic[ServiceStates]) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
+
 	fields := []log.Field{}
 	if name != "" {
 		fields = append(fields, log.String("service", name))
 	}
+
 	return serviceContext{
 		Context:  ctx,
 		name:     name,
+		fields:   append(fields, fields...),
 		logC:     logC,
-		fields:   fields,
 		icStates: icStates,
 	}, cancel
 }
 
+// WithParent returns a new child ServiceContext with the given parent context.
+// The new child context will have the same name and fields as the original parent that created it.
+// However if the original parent context is cancelled, the child context will not be cancelled.
+// The new child will only be cancelled if the new parent context is cancelled.
+func (sc serviceContext) WithParent(parent context.Context) ServiceContext {
+	return serviceContext{
+		Context:  parent,
+		name:     sc.name,
+		fields:   sc.fields,
+		logC:     sc.logC,
+		icStates: sc.icStates,
+	}
+}
+
 // With returns a new child ServiceContext with the given fields appended to the existing fields.
 // The new child context will have the same name as the parent.
-func (sc serviceContext) With(fields ...log.Field) ServiceContext {
+func (sc serviceContext) WithFields(fields ...log.Field) ServiceContext {
 	return serviceContext{
 		Context:  sc.Context,
 		name:     sc.name,
