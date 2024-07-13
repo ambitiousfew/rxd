@@ -21,7 +21,7 @@ type ServiceContext interface {
 	Log(level log.Level, message string, fields ...log.Field)
 	// With returns a new ServiceContext with the given fields appended to the existing fields.
 	WithFields(fields ...log.Field) ServiceContext
-	WithParent(ctx context.Context) ServiceContext
+	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
 }
 
 type serviceContext struct {
@@ -51,18 +51,19 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 	}, cancel
 }
 
-// WithParent returns a new child ServiceContext with the given parent context.
+// WithParent returns a new cancellable child ServiceContext with the given parent context.
 // The new child context will have the same name and fields as the original parent that created it.
 // However if the original parent context is cancelled, the child context will not be cancelled.
 // The new child will only be cancelled if the new parent context is cancelled.
-func (sc serviceContext) WithParent(parent context.Context) ServiceContext {
+func (sc serviceContext) WithParent(parent context.Context) (ServiceContext, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
 	return serviceContext{
-		Context:  parent,
+		Context:  ctx,
 		name:     sc.name,
 		fields:   sc.fields,
 		logC:     sc.logC,
 		icStates: sc.icStates,
-	}
+	}, cancel
 }
 
 // With returns a new child ServiceContext with the given fields appended to the existing fields.
