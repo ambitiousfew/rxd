@@ -10,7 +10,7 @@ import (
 type Topic[T any] interface {
 	Publisher() chan<- T
 	Subscribe(conf SubscriberConfig) (<-chan T, error)
-	Unsubscribe(consumer string) error
+	Unsubscribe(consumer string, ch <-chan T) error
 	Close() error
 }
 
@@ -74,7 +74,7 @@ func (t *topic[T]) Subscribe(conf SubscriberConfig) (<-chan T, error) {
 	return sub.ch, nil
 }
 
-func (t *topic[T]) Unsubscribe(consumer string) error {
+func (t *topic[T]) Unsubscribe(consumer string, ch <-chan T) error {
 	if t.closed.Load() {
 		return errors.New("cannot unsubscribe, topic already closed")
 	}
@@ -84,6 +84,10 @@ func (t *topic[T]) Unsubscribe(consumer string) error {
 	sub, ok := t.subscribers[consumer]
 	if !ok {
 		return errors.New("consumer group '" + consumer + "' does not exist")
+	}
+
+	if sub.ch != ch {
+		return errors.New("consumer group '" + consumer + "' does not match the channel provided")
 	}
 
 	sub.close()

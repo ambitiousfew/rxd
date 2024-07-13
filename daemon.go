@@ -149,13 +149,13 @@ func (d *daemon) Start(parent context.Context) error {
 			// TODO: Should we be doing pre-flight checks?
 			// is it better to log the error and still try to start the daemon with the services that dont error
 			// or is it better to fail fast and exit the daemon with an error?
-			d.logger.Log(log.LevelError, "error getting handler for service", log.String("service", service.Name))
+			d.logger.Log(log.LevelError, "error getting handler for service", log.String("service_name", service.Name))
 			continue
 		}
 
 		// each service is handled in its own routine.
 		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, h ServiceHandler, stateC chan<- StateUpdate) {
-			d.logger.Log(log.LevelDebug, "starting service", log.String("service", ds.Name))
+			d.logger.Log(log.LevelDebug, "starting service", log.String("service_name", ds.Name))
 			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, statesTopic)
 			// run the service according to the handler policy
 			h.Handle(sctx, ds, stateC)

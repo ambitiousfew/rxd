@@ -13,8 +13,12 @@ import (
 type Intracom[T any] interface {
 	// CreateTopic creates a new topic with the given configuration. If the topic already exists, an error is returned.
 	CreateTopic(conf TopicConfig) (Topic[T], error)
+	// RemoveTopic removes a topic from the intracom. If the topic does not exist, an error is returned.
+	RemoveTopic(topic Topic[T]) error
 	// CreateSubscription subscribes (using max wait) to a topic and returns that topic back once that topic exists.
 	CreateSubscription(ctx context.Context, topic string, maxTimeout time.Duration, conf SubscriberConfig) (<-chan T, error)
+	// RemoveSubscription removes a subscription from a topic consumer name and channel are required to remove the subscription.
+	RemoveSubscription(topic string, consumer string, ch <-chan T) error
 	Close() error
 }
 
@@ -71,6 +75,27 @@ func (i *intracom[T]) CreateTopic(conf TopicConfig) (Topic[T], error) {
 	return t, nil
 }
 
+func (i *intracom[T]) RemoveTopic(topic Topic[T]) error {
+	if i.closed.Load() {
+		return errors.New("cannot remove topic, intracom is closed")
+	}
+
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	for name, t := range i.topics {
+		if t == topic {
+			err := t.Close()
+			if err != nil {
+				i.logger.Log(log.LevelError, "error closing topic", log.String("topic", name), log.Error("error", err))
+			}
+			delete(i.topics, name)
+			return nil
+		}
+	}
+
+	return errors.New("topic not found")
+}
+
 // CreateSubscription will (if set) wait a max timeout for a topic to exist and the proceed to subscribe to that topic.
 // If the topic does not exist within the maxWait duration, an error is returned.
 // If maxWait is 0, the function will wait indefinitely for the topic to exist.
@@ -114,6 +139,28 @@ func (i *intracom[T]) CreateSubscription(ctx context.Context, topic string, maxW
 
 	return t.Subscribe(conf)
 
+}
+
+// RemoveSubscription removes a subscription from a topic consumer name and consumer channel are required to remove the subscription.
+// Normally whoever created the subscription should also be in-charge of removing it.
+func (i *intracom[T]) RemoveSubscription(topic string, consumer string, ch <-chan T) error {
+	if i.closed.Load() {
+		return errors.New("cannot remove subscription, intracom is closed")
+	}
+
+	i.mu.RLock()
+	t, ok := i.topics[topic]
+	i.mu.RUnlock()
+	if !ok {
+		return errors.New("topic " + topic + " does not exist")
+	}
+
+	err := t.Unsubscribe(consumer, ch)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (i *intracom[T]) Close() error {

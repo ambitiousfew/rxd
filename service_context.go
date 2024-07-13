@@ -45,7 +45,7 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 	return serviceContext{
 		Context:  ctx,
 		name:     name,
-		fields:   append(fields, fields...),
+		fields:   fields,
 		logC:     logC,
 		icStates: icStates,
 	}, cancel
