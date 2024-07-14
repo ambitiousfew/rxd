@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+type LogHandler interface {
+	Handle(level Level, message string, fields []Field)
+}
+
 type Logger interface {
 	Log(level Level, message string, fields ...Field)
 	SetLevel(level Level)

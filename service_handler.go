@@ -12,11 +12,30 @@ type ServiceHandler interface {
 	Handle(ctx ServiceContext, dService DaemonService, stateUpdateC chan<- StateUpdate)
 }
 
+type HandlerStateTimeouts map[State]time.Duration
+
 // DefaultHandler is a service handler that does its best to run the service
 // moving the service to the next desired state returned from each lifecycle
 // The handle will override the state transition if the context is cancelled
 // and force the service to Exit.
-type DefaultHandler struct{}
+type DefaultHandler struct {
+	StartupDelay  time.Duration
+	StateTimeouts HandlerStateTimeouts
+}
+
+func NewDefaultHandler(opts ...HandlerOption) DefaultHandler {
+	timeouts := make(HandlerStateTimeouts)
+	h := DefaultHandler{
+		StartupDelay:  10 * time.Nanosecond,
+		StateTimeouts: timeouts,
+	}
+
+	for _, opt := range opts {
+		opt(&h)
+	}
+
+	return h
+}
 
 // Handle runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
@@ -29,9 +48,10 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 		}
 	}()
 
+	// default timeout for state all transitions if not set and excluding StartDelay which applies to first time Init.
 	defaultTimeout := 10 * time.Nanosecond
 
-	timeout := time.NewTimer(ds.TransitionTimeouts.GetOrDefault(TransExitToInit, defaultTimeout))
+	timeout := time.NewTimer(h.StartupDelay)
 	defer timeout.Stop()
 
 	var state State = StateInit
@@ -50,8 +70,8 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 
 		select {
 		case <-sctx.Done():
-			// push to exit.
 			state = StateExit
+			continue
 		case <-timeout.C:
 			switch state {
 			case StateInit:
@@ -60,7 +80,6 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 					sctx.Log(log.LevelError, err.Error())
 					state = StateInit
 					// reset the transition timeout to the init state
-					timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransInitToIdle, defaultTimeout))
 				}
 				// reset the hasStopped flag since we just restarted the service.
 				hasStopped = false
@@ -70,17 +89,12 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
-					// reset the transition timeout to the init state
-					timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransIdleToRun, defaultTimeout))
-
 				}
 			case StateRun:
 				state, err = ds.Runner.Run(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
-				// reset the transition timeout to the init state
-				timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransRunToStop, defaultTimeout))
 
 			case StateStop:
 				state, err = ds.Runner.Stop(sctx)
@@ -90,19 +104,20 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 
 				// flip hasStopped to true to ensure we don't run stop again if Exit is next.
 				hasStopped = true
-
-				// reset using the stop to init timeout if it exists.
-				timeout.Reset(ds.TransitionTimeouts.GetOrDefault(TransStopToInit, defaultTimeout))
 				continue // skip the default timeout reset
 			}
 
-			// fallback to the default timeout duration if we make it here.
-			timeout.Reset(defaultTimeout)
+			// reset the timeout to the next desired state, if transition timeout not set use default.
+			if transitionTimeout, ok := h.StateTimeouts[state]; ok {
+				timeout.Reset(transitionTimeout)
+			} else {
+				timeout.Reset(defaultTimeout)
+			}
 		}
 	}
 
+	// ensure stop is always run before exit, if it hasn't been run already.
 	if !hasStopped {
-		// we are only wanting to ensure stop is run if it hasn't been run already then exit.
 		_, err := ds.Runner.Stop(sctx)
 		if err != nil {
 			sctx.Log(log.LevelError, err.Error())

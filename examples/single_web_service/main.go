@@ -9,7 +9,7 @@ import (
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/log/standard"
+	"github.com/ambitiousfew/rxd/log/journald"
 )
 
 const DaemonName = "single-service"
@@ -18,36 +18,31 @@ const DaemonName = "single-service"
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	// A logger is required. You can use the default logger or pass your own that meets log.ger interface.
-	// logger := rxd.NewDefaultLogger(log.LevelDebug)
-	logger := standard.NewDefaultLogger(log.LevelDebug)
-	// logger := journald.New(log.LevelDebug)
+
+	handler := journald.NewHandler()
+	logger := log.NewLogger(log.LevelInfo, handler)
+
+	// Create a new "instance" of our type that meets the interface for a ServiceRunner.
+	helloWorld := NewHelloWorldService() // Service runner
+
+	var handler2 MyHandler // using custom defined handler
+	// Give the service a name, the service runner, and any options you want to pass to the service.
+	apiSvc := rxd.NewService("helloworld-api", helloWorld, rxd.WithHandler(handler2))
 
 	// daemon options
 	dopts := []rxd.DaemonOption{}
 	// Create a new daemon instance with a name and options
 	daemon := rxd.NewDaemon(DaemonName, logger, dopts...)
 
-	// We create an instance of our service
-	helloWorld := NewHelloWorldService()
-
-	// NOTE:
-	// 1. Dont have to protect against VALUE structs with pointer receivers because the compiler will catch it.
-	//
-
-	// var handler1 *MyHandler // is a pointer type, will run when receiver is a pointer
-	var handler2 MyHandler // is a pointer type, will not run when receiver uses a dereferenced value.
-	// handler3 := MyHandler{} // not a pointer
-	apiSvc := rxd.NewService("helloworld-api", helloWorld, rxd.WithHandler(handler2))
-
+	// Add the service to the daemon
 	err := daemon.AddService(apiSvc)
 	if err != nil {
 		logger.Log(log.LevelError, err.Error())
 		os.Exit(1)
 	}
 
-	// Blocks main thread, runs added services in their own goroutines
+	// Start the daemon, this will block until the daemon is stopped via ctx cancel or OS signal.
 	err = daemon.Start(ctx)
 	if err != nil {
 		logger.Log(log.LevelError, err.Error())

@@ -1,8 +1,18 @@
 package rxd
 
-import "os"
+import (
+	"os"
+
+	"github.com/ambitiousfew/rxd/log"
+)
 
 type DaemonOption func(*daemon)
+
+func WithLogger(logger log.Logger) DaemonOption {
+	return func(d *daemon) {
+		d.logger = logger
+	}
+}
 
 // WithReportAlive sets the interval in seconds for when the daemon should report that it is still alive
 // to the service manager. If the value is set to 0, the daemon will not interact with the service manager.

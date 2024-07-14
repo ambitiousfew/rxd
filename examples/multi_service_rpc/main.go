@@ -7,7 +7,6 @@ import (
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/log/standard"
 )
 
 // Service Names
@@ -40,7 +39,8 @@ func main() {
 	}
 
 	// 1st run
-	logger := standard.NewDefaultLogger(log.LevelDebug)
+	handler := log.NewHandler(log.WithWriter(os.Stdout))
+	logger := log.NewLogger(log.LevelInfo, handler)
 
 	// 2nd run
 	// logger := journald.NewLogger(log.LevelDebug)

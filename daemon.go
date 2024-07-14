@@ -270,12 +270,8 @@ func (d *daemon) addService(service Service) error {
 		return ErrNoServiceName
 	}
 
-	if service.TransitionTimeouts == nil {
-		service.TransitionTimeouts = make(StateTransitionTimeouts)
-	}
-
 	if service.Handler == nil {
-		service.Handler = DefaultHandler{}
+		service.Handler = NewDefaultHandler()
 	}
 
 	// NOTE: reflect is being used here only before startup.
@@ -292,9 +288,8 @@ func (d *daemon) addService(service Service) error {
 
 	// add the service to the daemon services
 	d.services[service.Name] = DaemonService{
-		Name:               service.Name,
-		Runner:             service.Runner,
-		TransitionTimeouts: service.TransitionTimeouts,
+		Name:   service.Name,
+		Runner: service.Runner,
 	}
 
 	// add the handler to a similar map of service name to handlers

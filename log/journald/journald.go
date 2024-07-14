@@ -11,101 +11,67 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-type journaldLogger struct {
+type journaldHandler struct {
 	severityPrefix bool
-	fields         []log.Field
-	level          log.Level
-	stdout         io.Writer
-	stderr         io.Writer
 	lvlMu          sync.RWMutex // mutex for level and fields
+	stdout         io.Writer
 	outMu          sync.RWMutex // mutex for stdout writer
+	stderr         io.Writer
 	errMu          sync.RWMutex // mutex for stderr writer
 }
 
-// NewLogger creates a new instance of the journal logger that logs only what is necessary
-// to journal and allows for the journal to handle opening the stdout and stderr streams and tagging
-// timestamps and program name.
-func NewLogger(level log.Level, opts ...Option) log.Logger {
-	jlogger := &journaldLogger{
+func NewHandler(opts ...Option) log.LogHandler {
+	h := &journaldHandler{
 		severityPrefix: false,
-		level:          level,
-		fields:         []log.Field{},
-		stdout:         os.Stdout,
-		stderr:         os.Stderr,
 		lvlMu:          sync.RWMutex{},
+		stdout:         os.Stdout,
 		outMu:          sync.RWMutex{},
+		stderr:         os.Stderr,
 		errMu:          sync.RWMutex{},
 	}
 
 	for _, opt := range opts {
-		opt(jlogger)
+		opt(h)
 	}
 
-	return jlogger
+	return h
 }
 
-func (l *journaldLogger) With(fields ...log.Field) log.Logger {
-	extraFields := append(l.fields, fields...)
-
-	return &journaldLogger{
-		severityPrefix: l.severityPrefix,
-		level:          l.level,
-		fields:         extraFields,
-		stdout:         l.stdout,
-		stderr:         l.stderr,
-		lvlMu:          sync.RWMutex{},
-		outMu:          sync.RWMutex{},
-		errMu:          sync.RWMutex{},
-	}
-}
-
-func (l *journaldLogger) SetLevel(level log.Level) {
-	l.lvlMu.Lock()
-	l.level = level
-	l.lvlMu.Unlock()
-}
-
-func (l *journaldLogger) Log(level log.Level, msg string, fields ...log.Field) {
-	l.lvlMu.RLock()
-	ignore := l.level < level
-	l.lvlMu.RUnlock()
-	// if the logger level is less than level passed, we don't log
-	if ignore {
-		return
-	}
-
+func (h *journaldHandler) Handle(level log.Level, message string, fields []log.Field) {
 	var b strings.Builder
 	// if a log name is set, add it to the message before the level
-	if l.severityPrefix {
+	if h.severityPrefix {
 		// NOTE: this is to support the severity prefix when using the journald driver within a docker container.
 		b.WriteString("<" + strconv.Itoa(int(level)) + ">")
 	}
 	b.WriteString("[" + level.String() + "] ")
-	b.WriteString(msg)
+	b.WriteString(message)
 
-	allFields := append(l.fields, fields...)
+	// allFields := append(h.fields, fields...)
 	// write all the logger fields to the message first
-	for _, field := range allFields {
+	for _, field := range fields {
 		b.WriteString(" " + field.Key + "=" + field.Value)
 	}
 
-	message := b.String()
-	switch level {
-	case log.LevelError:
-		l.logErr(message)
+	out := b.String()
+	switch level < log.LevelWarning {
+	case true:
+		// logs to stderr for error and lower (higher severity)
+		h.logErr(out)
 	default:
-		l.logOut(message)
+		// logs to stdout for warning and above (lower severity)
+		h.logOut(out)
 	}
 }
 
-func (l *journaldLogger) logOut(message string) {
-	l.outMu.Lock()
-	fmt.Fprintf(l.stdout, "%s\n", message)
-	l.outMu.Unlock()
+func (h *journaldHandler) logOut(message string) {
+	h.outMu.Lock()
+	fmt.Fprintf(h.stdout, "%s\n", message)
+	h.outMu.Unlock()
 }
 
-func (l *journaldLogger) logErr(message string) {
-	l.errMu.Lock()
-	fmt.Fprintf(l.stderr, "%s\n", message)
-	l.errMu.Unlock()
+func (h *journaldHandler) logErr(message string) {
+	h.errMu.Lock()
+	fmt.Fprintf(h.stderr, "%s\n", message)
+	h.errMu.Unlock()
 }
