@@ -1,106 +1,57 @@
 package rxd
 
-// func TestDaemonAddService(t *testing.T) {
-// 	serviceName := "valid-service"
+import (
+	"context"
+	"testing"
+	"time"
 
-// 	vs := &validDaemonService{}
+	"github.com/ambitiousfew/rxd/log"
+)
 
-// 	opts := []ServiceOption{
-// 		// UsingRunPolicy(RunOncePolicy),
-// 	}
-// 	validSvc := NewService(serviceName, vs, opts...)
+func TestDaemon_StartAService(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
 
-// 	dIface := NewDaemon("test-daemon")
+	d := NewDaemon("test-daemon", noopLogger{})
 
-// 	d, ok := dIface.(*daemon)
-// 	if !ok {
-// 		t.Errorf("could not cast Daemon interface to daemon struct")
-// 	}
+	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
 
-// 	if len(d.services) != 0 {
-// 		t.Errorf("daemon should have no services added yet")
-// 	}
+	err := d.AddServices(s1)
+	if err != nil {
+		t.Fatalf("error adding services: %s", err)
+	}
 
-// 	err := d.AddService(validSvc)
-// 	if err != nil {
-// 		t.Errorf("error adding service: %s", err)
-// 	}
+	err = d.Start(ctx)
+	if err != nil {
+		t.Fatalf("error starting daemon: %s", err)
+	}
 
-// 	if len(d.services) != 1 {
-// 		t.Errorf("daemon should have one service added")
-// 	}
+}
 
-// 	_, found := d.services[serviceName]
-// 	if !found {
-// 		t.Errorf("could not find the service '%s' in the daemon services map", serviceName)
-// 	}
-// }
+func TestDaemon_AddService(t *testing.T) {
+	d := NewDaemon("test-daemon", noopLogger{})
 
-// func TestDaemonStartWithNoServices(t *testing.T) {
-// 	dIface := NewDaemon("test-daemon")
+	s := NewService("test-service", newMockService(100*time.Millisecond))
 
-// 	d, ok := dIface.(*daemon)
-// 	if !ok {
-// 		t.Errorf("could not cast Daemon interface to daemon struct")
-// 	}
+	err := d.AddService(s)
+	if err != nil {
+		t.Fatalf("error adding service: %s", err)
+	}
+}
 
-// 	if len(d.services) != 0 {
-// 		t.Errorf("daemon should not yet have any services")
-// 	}
+func TestDaemon_AddServices(t *testing.T) {
+	d := NewDaemon("test-daemon", noopLogger{})
 
-// 	ctx, cancel := context.WithCancel(context.Background())
-// 	defer cancel()
+	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
+	s2 := NewService("test-service-2", newMockService(100*time.Millisecond))
 
-// 	err := d.Start(ctx)
-// 	if err == nil {
-// 		t.Errorf("daemon should not start without any services")
-// 	}
+	err := d.AddServices(s1, s2)
+	if err != nil {
+		t.Fatalf("error adding services: %s", err)
+	}
+}
 
-// }
+type noopLogger struct{}
 
-// func TestDaemonStartSingleService(t *testing.T) {
-// 	serviceName := "valid-service"
-
-// 	vs := &validService{}
-
-// 	opts := []ServiceOption{
-// 		// UsingRunPolicy(RunOncePolicy),
-// 	}
-
-// 	validSvc := NewService(serviceName, vs, opts...)
-
-// 	d := NewDaemon("test-daemon")
-
-// 	ctx, cancel := context.WithCancel(context.Background())
-// 	defer cancel()
-
-// 	err := d.AddService(validSvc)
-// 	if err != nil {
-// 		t.Errorf("error adding service: %s", err)
-// 	}
-
-// 	// valid service has no blocking code so it will run all lifecycle stages and exit.
-// 	err = d.Start(ctx)
-// 	if err != nil {
-// 		t.Errorf("expected: nil, got: %s", err)
-// 	}
-
-// }
-
-// type validDaemonService struct{}
-
-// func (s *validDaemonService) Init(ctx context.Context) error {
-// 	return nil
-// }
-
-// func (s *validDaemonService) Idle(ctx context.Context) error {
-// 	return nil
-// }
-
-// func (s *validDaemonService) Run(ctx context.Context) error {
-// 	return nil
-// }
-
-// func (s *validDaemonService) Stop(ctx context.Context) error {
-// 	return nil
-// }
+func (n noopLogger) Log(level log.Level, message string, fields ...log.Field) {}
+func (n noopLogger) SetLevel(level log.Level)                                 {}

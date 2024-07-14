@@ -8,6 +8,7 @@ import (
 )
 
 type Topic[T any] interface {
+	Name() string
 	Publisher() chan<- T
 	Subscribe(conf SubscriberConfig) (<-chan T, error)
 	Unsubscribe(consumer string, ch <-chan T) error
@@ -27,14 +28,16 @@ type TopicConfig struct {
 }
 
 type topic[T any] struct {
+	name        string
 	publishC    chan T
 	subscribers map[string]*subscriber[T]
 	closed      atomic.Bool
 	mu          sync.RWMutex
 }
 
-func newTopic[T any](publishC chan T) *topic[T] {
+func newTopic[T any](name string, publishC chan T) Topic[T] {
 	t := &topic[T]{
+		name:        name,
 		publishC:    publishC,
 		subscribers: make(map[string]*subscriber[T]),
 		closed:      atomic.Bool{},
@@ -46,6 +49,10 @@ func newTopic[T any](publishC chan T) *topic[T] {
 	return t
 }
 
+func (t *topic[T]) Name() string {
+	return t.name
+}
+
 func (t *topic[T]) Publisher() chan<- T {
 	return t.publishC
 }
@@ -55,22 +62,19 @@ func (t *topic[T]) Subscribe(conf SubscriberConfig) (<-chan T, error) {
 		return nil, errors.New("cannot subscribe, topic already closed")
 	}
 
-	t.mu.RLock()
-	sub, ok := t.subscribers[conf.ConsumerGroup]
-	if ok {
-		t.mu.RUnlock()
-		if conf.ErrIfExists {
-			return nil, errors.New("consumer group '" + conf.ConsumerGroup + "' already exists")
-		}
+	sub, exists := t.get(conf.ConsumerGroup)
+	if !exists {
+		t.mu.Lock()
+		sub = newSubscriber[T](conf)
+		t.subscribers[conf.ConsumerGroup] = sub
+		t.mu.Unlock()
 		return sub.ch, nil
 	}
-	t.mu.RUnlock()
 
-	// subscriber did not exist so create a new one.
-	sub = newSubscriber[T](conf)
-	t.mu.Lock()
-	t.subscribers[conf.ConsumerGroup] = sub
-	t.mu.Unlock()
+	if conf.ErrIfExists {
+		return sub.ch, errors.New("consumer group '" + conf.ConsumerGroup + "' already exists")
+	}
+
 	return sub.ch, nil
 }
 
@@ -79,10 +83,8 @@ func (t *topic[T]) Unsubscribe(consumer string, ch <-chan T) error {
 		return errors.New("cannot unsubscribe, topic already closed")
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	sub, ok := t.subscribers[consumer]
-	if !ok {
+	sub, exists := t.get(consumer)
+	if !exists {
 		return errors.New("consumer group '" + consumer + "' does not exist")
 	}
 
@@ -90,9 +92,19 @@ func (t *topic[T]) Unsubscribe(consumer string, ch <-chan T) error {
 		return errors.New("consumer group '" + consumer + "' does not match the channel provided")
 	}
 
+	t.mu.Lock()
 	sub.close()
 	delete(t.subscribers, consumer)
+	t.mu.Unlock()
+
 	return nil
+}
+
+func (t *topic[T]) get(consumer string) (*subscriber[T], bool) {
+	t.mu.RLock()
+	sub, ok := t.subscribers[consumer]
+	t.mu.RUnlock()
+	return sub, ok
 }
 
 func (t *topic[T]) Close() error {
@@ -101,14 +113,14 @@ func (t *topic[T]) Close() error {
 	}
 
 	t.mu.Lock()
-	// close all subscribers first
 	for name, sub := range t.subscribers {
 		sub.close()
 		delete(t.subscribers, name)
 	}
+	t.mu.Unlock()
+
 	// now close the publish channel
 	close(t.publishC)
-	t.mu.Unlock()
 	return nil
 }
 

@@ -14,7 +14,7 @@ type Intracom[T any] interface {
 	// CreateTopic creates a new topic with the given configuration. If the topic already exists, an error is returned.
 	CreateTopic(conf TopicConfig) (Topic[T], error)
 	// RemoveTopic removes a topic from the intracom. If the topic does not exist, an error is returned.
-	RemoveTopic(topic Topic[T]) error
+	RemoveTopic(name string) error
 	// CreateSubscription subscribes (using max wait) to a topic and returns that topic back once that topic exists.
 	CreateSubscription(ctx context.Context, topic string, maxTimeout time.Duration, conf SubscriberConfig) (<-chan T, error)
 	// RemoveSubscription removes a subscription from a topic consumer name and channel are required to remove the subscription.
@@ -27,7 +27,7 @@ type Option[T any] func(*intracom[T])
 // intracom is an in-memory pub/sub wrapper to enable communication between routines.
 type intracom[T any] struct {
 	name   string
-	topics map[string]*topic[T]
+	topics map[string]Topic[T]
 	logger log.Logger
 
 	closed  atomic.Bool
@@ -40,7 +40,7 @@ func New[T any](name string, opts ...Option[T]) Intracom[T] {
 
 	ic := &intracom[T]{
 		name:    name,
-		topics:  make(map[string]*topic[T]),
+		topics:  make(map[string]Topic[T]),
 		logger:  noopLogger{},
 		closed:  atomic.Bool{},
 		running: atomic.Bool{},
@@ -69,28 +69,28 @@ func (i *intracom[T]) CreateTopic(conf TopicConfig) (Topic[T], error) {
 	}
 
 	ch := make(chan T, conf.Buffer)
-	t = newTopic[T](ch)
+	t = newTopic[T](conf.Name, ch)
 	i.topics[conf.Name] = t
 
 	return t, nil
 }
 
-func (i *intracom[T]) RemoveTopic(topic Topic[T]) error {
+func (i *intracom[T]) RemoveTopic(name string) error {
 	if i.closed.Load() {
 		return errors.New("cannot remove topic, intracom is closed")
 	}
 
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	for name, t := range i.topics {
-		if t == topic {
-			err := t.Close()
-			if err != nil {
-				i.logger.Log(log.LevelError, "error closing topic", log.String("topic", name), log.Error("error", err))
-			}
-			delete(i.topics, name)
-			return nil
+	t, found := i.topics[name]
+	if found {
+		err := t.Close()
+		if err != nil {
+			i.logger.Log(log.LevelError, "error closing topic", log.String("topic", name), log.Error("error", err))
+			return err
 		}
+		delete(i.topics, name)
+		return nil
 	}
 
 	return errors.New("topic not found")

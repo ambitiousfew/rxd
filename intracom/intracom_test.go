@@ -1,69 +1,263 @@
 package intracom
 
-// var debugLogger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-// 	Level: slog.LevelDebug,
-// }))
+import (
+	"context"
+	"testing"
+	"time"
+)
 
-// func TestSubscribe(t *testing.T) {
-// 	logger := log.New(log.Writer(os.Stdout), log.Level(log.DebugLevel))
-// 	ic := New[bool]("test-intracom", WithLogger(logger))
+var (
+	ic Intracom[string]
+)
 
-// 	err := ic.Start()
-// 	if err != nil {
-// 		t.Errorf("intracom start error should be nilt: want nil, got %v", err)
-// 	}
-// 	defer ic.Close()
+func TestMain(m *testing.M) {
+	// setup
+	ic = New[string]("test-intracom")
+	m.Run()
 
-// 	topic := "test-topic"
-// 	group := "test-subscriber"
+	err := ic.Close()
+	if err != nil {
+		panic(err)
+	}
+}
 
-// 	conf := &SubscriberConfig{
-// 		Topic:         topic,
-// 		ConsumerGroup: group,
-// 		BufferSize:    1,
-// 		BufferPolicy:  DropNone,
-// 	}
+func TestIntracom_CreateTopicWhileClosed(t *testing.T) {
+	testIC := New[bool]("test-intracom")
+	err := testIC.Close()
+	if err != nil {
+		t.Fatalf("error closing intracom: %v", err)
+	}
 
-// 	_, unsubscribe := ic.Subscribe(conf)
-// 	defer unsubscribe()
-// 	want := true
+	_, err = testIC.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
 
-// 	// ensure the topic was initialized.
-// 	_, got := ic.get(topic, group)
-// 	if !got {
-// 		t.Errorf("subscriber does not exist: want %v, got %v", want, got)
-// 	}
-// }
+	if err == nil {
+		t.Fatalf("error creating topic while closed should not be nil")
+	}
 
-// func TestUnsubscribe(t *testing.T) {
-// 	ic := New[bool]("test-intracom")
+}
 
-// 	err := ic.Start()
-// 	if err != nil {
-// 		t.Errorf("intracom start error should be nilt: want nil, got %v", err)
-// 	}
+func TestIntracom_RemoveTopicWhileClosed(t *testing.T) {
+	testIC := New[bool]("test-intracom")
 
-// 	defer ic.Close()
+	testTopic, err := testIC.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
 
-// 	topic := "test-topic"
-// 	group := "test-subscriber"
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
 
-// 	conf := &SubscriberConfig{
-// 		Topic:         topic,
-// 		ConsumerGroup: group,
-// 		BufferSize:    1,
-// 		BufferPolicy:  DropNone,
-// 	}
+	err = testIC.Close()
+	if err != nil {
+		t.Fatalf("error closing intracom: %v", err)
+	}
 
-// 	_, unsubscribe := ic.Subscribe(conf)
-// 	defer unsubscribe()
+	err = testIC.RemoveTopic(t.Name())
+	if err == nil {
+		t.Fatalf("error removing topic while closed should not be nil")
+	}
 
-// 	want := true
-// 	_, got := ic.get(topic, group) // true if exists
-// 	if want != got {
-// 		t.Errorf("subscriber does not exist: want %v, got %v", want, got)
-// 	}
-// }
+	if testTopic.Close() == nil {
+		t.Fatalf("error closing topic while closed should not be nil")
+	}
+
+}
+
+func TestIntracom_CreateTopicUnique(t *testing.T) {
+
+	testTopic, err := ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
+
+	if testTopic.Publisher() == nil {
+		t.Fatalf("topic publisher should not be nil")
+	}
+}
+
+func TestIntracom_CreateTopicDuplicate(t *testing.T) {
+
+	_, err := ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
+
+	_, err = ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+
+	if err == nil {
+		t.Fatalf("error creating duplicate topic should not be nil")
+	}
+
+}
+
+func TestIntracom_RemoveTopic(t *testing.T) {
+
+	testTopic, err := ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
+
+	err = ic.RemoveTopic(t.Name())
+	if err != nil {
+		t.Fatalf("error removing topic: %v", err)
+	}
+
+	if testTopic.Close() == nil {
+		t.Fatalf("error closing topic should not be nil")
+	}
+}
+
+func TestIntracom_RemoveNonExistentTopic(t *testing.T) {
+
+	testTopic, err := ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
+
+	err = ic.RemoveTopic("doesnt-exist")
+	if err == nil {
+		t.Fatalf("error removing non-existent topic should not be nil")
+	}
+
+	if testTopic.Close() != nil {
+		t.Fatalf("error closing topic should be nil")
+	}
+
+}
+
+func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	testTopic, err := ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
+
+	if testTopic.Publisher() == nil {
+		t.Fatalf("topic publisher should not be nil")
+	}
+
+	sub, err := ic.CreateSubscription(ctx, t.Name(), 0, SubscriberConfig{
+		ConsumerGroup: t.Name(),
+		BufferSize:    1,
+		BufferPolicy:  DropNone,
+	})
+
+	if err != nil {
+		t.Fatalf("error creating subscription: %v", err)
+	}
+
+	if sub == nil {
+		t.Fatalf("subscription channel should not be nil")
+	}
+
+}
+
+func TestIntracom_CreateSubscriptionWithNoTopic(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	sub, err := ic.CreateSubscription(ctx, t.Name(), 0, SubscriberConfig{
+		ConsumerGroup: t.Name(),
+		BufferSize:    1,
+		BufferPolicy:  DropNone,
+	})
+
+	if err == nil {
+		t.Fatalf("error creating subscription should not be nil")
+	}
+
+	if sub != nil {
+		t.Fatalf("subscription channel should be nil")
+	}
+}
+
+func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	topic, err := ic.CreateTopic(TopicConfig{
+		Name:        t.Name(),
+		Buffer:      1,
+		ErrIfExists: true,
+	})
+
+	if err != nil {
+		t.Fatalf("error creating topic: %v", err)
+	}
+
+	if topic.Publisher() == nil {
+		t.Fatalf("topic publisher should not be nil")
+	}
+
+	sub, err := ic.CreateSubscription(ctx, t.Name(), 0, SubscriberConfig{
+		ConsumerGroup: t.Name(),
+		BufferSize:    1,
+		BufferPolicy:  DropNone,
+	})
+
+	if err != nil {
+		t.Fatalf("error creating subscription: %v", err)
+	}
+
+	if sub == nil {
+		t.Fatalf("subscription channel should not be nil")
+	}
+
+	err = ic.RemoveSubscription(t.Name(), t.Name(), sub)
+	if err != nil {
+		t.Fatalf("error removing subscription: %v", err)
+	}
+
+}
+
+func TestIntracom_Close(t *testing.T) {
+	testIC := New[bool]("test-intracom")
+
+	err := testIC.Close()
+	if err != nil {
+		t.Fatalf("error closing intracom: %v", err)
+	}
+
+	err = testIC.Close()
+	if err == nil {
+		t.Fatalf("error closing intracom should not be nil")
+	}
+
+}
 
 // func TestMultipleUnSubscribes(t *testing.T) {
 // 	ic := New[bool]("test-intracom")
