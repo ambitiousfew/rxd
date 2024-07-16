@@ -85,8 +85,6 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 					state = StateInit
 					// reset the transition timeout to the init state
 				}
-				// reset the hasStopped flag since we just restarted the service.
-				hasStopped = false
 
 			case StateIdle:
 				state, err = ds.Runner.Idle(sctx)
@@ -108,7 +106,6 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 
 				// flip hasStopped to true to ensure we don't run stop again if Exit is next.
 				hasStopped = true
-				continue // skip the default timeout reset
 			}
 
 			// reset the timeout to the next desired state, if transition timeout not set use default.
