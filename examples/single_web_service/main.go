@@ -26,9 +26,9 @@ func main() {
 	// Create a new "instance" of our type that meets the interface for a ServiceRunner.
 	helloWorld := NewHelloWorldService() // Service runner
 
-	var handler2 MyHandler // using custom defined handler
+	var manager2 MyManager // using custom defined handler
 	// Give the service a name, the service runner, and any options you want to pass to the service.
-	apiSvc := rxd.NewService("helloworld-api", helloWorld, rxd.WithHandler(handler2))
+	apiSvc := rxd.NewService("helloworld-api", helloWorld, rxd.WithManager(manager2))
 
 	// daemon options
 	dopts := []rxd.DaemonOption{}
@@ -57,10 +57,10 @@ func main() {
 // HelloWorldAPIService must meet Service interface or line below errors.
 var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
 
-// var *MyHandler must meet ServiceHandler interface or line below errors.
-type MyHandler struct{}
+// var *MyManager must meet ServiceManager interface or line below errors.
+type MyManager struct{}
 
-func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState func(string, rxd.State)) {
+func (m MyManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState func(string, rxd.State)) {
 
 	state := rxd.StateInit
 
@@ -68,7 +68,7 @@ func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateS
 	defer timeout.Stop()
 	// Set the default timeout to 0 to default resets on everything else except stop.
 	for state != rxd.StateExit {
-		var err error
+
 		updateState(ds.Name, state)
 
 		select {
@@ -77,31 +77,36 @@ func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateS
 		case <-timeout.C:
 		}
 
+		var err error
 		switch state {
 		case rxd.StateInit:
-
-			state, err = ds.Runner.Init(sctx)
+			err = ds.Runner.Init(sctx)
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateExit
 			}
 		case rxd.StateIdle:
-
-			state, err = ds.Runner.Idle(sctx)
+			err = ds.Runner.Idle(sctx)
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateStop
+			} else {
+				state = rxd.StateRun
 			}
 		case rxd.StateRun:
-
-			state, err = ds.Runner.Run(sctx)
+			err = ds.Runner.Run(sctx)
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 			}
+			state = rxd.StateStop
 		case rxd.StateStop:
-			if state, err = ds.Runner.Stop(sctx); err != nil {
+			if err = ds.Runner.Stop(sctx); err != nil {
 				sctx.Log(log.LevelError, err.Error())
+				state = rxd.StateExit
+			} else {
+				state = rxd.StateInit
 			}
+
 		}
 		timeout.Reset(1 * time.Second)
 	}
@@ -123,7 +128,7 @@ func NewHelloWorldService() *HelloWorldAPIService {
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 	doneC := make(chan struct{})
 	go func() {
 		defer close(doneC)
@@ -151,19 +156,19 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
 	// ListenAndServe will block forever serving requests/responses
 	err := s.server.ListenAndServe()
 	if err != nil && err != http.ErrServerClosed {
-		return rxd.StateStop, errors.New("server shutdown: " + err.Error())
+		return errors.New("server shutdown: " + err.Error())
 	}
 
 	<-doneC // wait for signal routine to finish...
-	return rxd.StateStop, nil
+	return nil
 }
 
-func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 	// handle initializing the primary focus of what the service will run.
 	// Stop will be responsible for cleaning up any resources that were created during Init.
 	if s.server != nil {
 		ctx.Log(log.LevelInfo, "server already initialized")
-		return rxd.StateStop, errors.New("server already initialized")
+		return errors.New("server already initialized")
 	}
 
 	ctx.Log(log.LevelInfo, "entering init")
@@ -177,16 +182,16 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) (rxd.State, error) {
 		Addr:    ":8000",
 		Handler: mux,
 	}
-	return rxd.StateIdle, nil
+	return nil
 }
 
-func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "entering idle")
-	return rxd.StateRun, nil
+	return nil
 }
 
-func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "entering stop")
 	s.server = nil
-	return rxd.StateExit, nil
+	return nil
 }

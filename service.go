@@ -1,14 +1,19 @@
 package rxd
 
-import (
-	"time"
-)
+import "time"
+
+// type ServiceRunner interface {
+// 	Init(ServiceContext) (State, error)
+// 	Idle(ServiceContext) (State, error)
+// 	Run(ServiceContext) (State, error)
+// 	Stop(ServiceContext) (State, error)
+// }
 
 type ServiceRunner interface {
-	Init(ServiceContext) (State, error)
-	Idle(ServiceContext) (State, error)
-	Run(ServiceContext) (State, error)
-	Stop(ServiceContext) (State, error)
+	Init(ServiceContext) error
+	Idle(ServiceContext) error
+	Run(ServiceContext) error
+	Stop(ServiceContext) error
 }
 
 // Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.
@@ -17,7 +22,7 @@ type ServiceRunner interface {
 type Service struct {
 	Name    string
 	Runner  ServiceRunner
-	Handler ServiceHandler
+	Manager ServiceManager
 }
 
 // DaemonService is a struct that contains the Name of the service, the ServiceRunner
@@ -32,10 +37,14 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 	ds := Service{
 		Name:   name,
 		Runner: runner,
-		Handler: DefaultHandler{
-			StartupDelay: 10 * time.Nanosecond, // applies to first time init.
-			StateTimeouts: HandlerStateTimeouts{
-				StateInit: 5 * time.Second, // applies to all re-inits after the first time.
+		Manager: RunContinuousManager{
+			// the first time we init the service we will short delay by 10 nanoseconds.
+			StartupDelay: 10 * time.Nanosecond,
+			// default state timeouts for all other states if not set specifically in state timeouts.
+			DefaultDelay: 10 * time.Nanosecond,
+			StateTimeouts: ManagerStateTimeouts{
+				// re-inits from stop to init will delay by 5 seconds.
+				StateInit: 5 * time.Second,
 			},
 		},
 	}

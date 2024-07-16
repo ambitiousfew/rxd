@@ -23,7 +23,7 @@ func NewHelloWorldService() *HelloWorldAPIService {
 }
 
 // Idle can be used for some pre-run checks or used to have run fallback to an idle retry state.
-func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "entered idle state")
 	// if all is well here, move to the RunState or retry back to Init if something went wrong.
 	timer := time.NewTimer(5 * time.Second)
@@ -33,17 +33,17 @@ func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) (rxd.State, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return rxd.StateExit, nil
+			return nil
 		case <-timer.C:
 			// Intentional 20s delay so polling service can react to failed attempts to this API.
-			return rxd.StateRun, nil
+			return nil
 		}
 	}
 }
 
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
-func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "entered run state")
 	doneC := make(chan struct{})
 	go func() {
@@ -69,7 +69,7 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
 
 	if err != nil && err != http.ErrServerClosed {
 		// Stop running, move back to an Idle retry state
-		return rxd.StateStop, err
+		return err
 	}
 
 	<-doneC
@@ -77,10 +77,10 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) (rxd.State, error) {
 
 	// If we reached this point, we stopped the server without erroring, we are likely trying to stop our daemon.
 	// Lets stop this service properly
-	return rxd.StateStop, nil
+	return nil
 }
 
-func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "initializing")
 
 	mux := http.NewServeMux()
@@ -94,16 +94,16 @@ func (s *HelloWorldAPIService) Init(ctx rxd.ServiceContext) (rxd.State, error) {
 		Handler: mux,
 	}
 
-	return rxd.StateIdle, nil
+	return nil
 }
 
 // Stop handles anything you might need to do to clean up before ending your service.
-func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) (rxd.State, error) {
+func (s *HelloWorldAPIService) Stop(ctx rxd.ServiceContext) error {
 	// We must return a NewResponse, we use NoopState because it exits with no operation.
 	// using StopState would try to recall Stop again.
 	ctx.Log(log.LevelInfo, "stopping")
 	s.server = nil
-	return rxd.StateExit, nil
+	return nil
 }
 
 // Ensure we meet the interface or error.

@@ -27,7 +27,7 @@ type daemon struct {
 	name            string                           // name of the daemon will be used in logging
 	signals         []os.Signal                      // OS signals you want your daemon to listen for
 	services        map[string]DaemonService         // map of service name to struct carrying the service runner and name.
-	handlers        map[string]ServiceHandler        // map of service name to service handler that will run the service runner methods.
+	managers        map[string]ServiceManager        // map of service name to service handler that will run the service runner methods.
 	icStates        intracom.Intracom[ServiceStates] // intracom comms bus for states
 	reportAliveSecs uint64                           // system service manager alive report timeout in seconds aka watchdog timeout
 	logC            chan DaemonLog                   // log channel for the daemon to log service logs to
@@ -43,7 +43,7 @@ func NewDaemon(name string, log log.Logger, options ...DaemonOption) Daemon {
 		name:            name,
 		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services:        make(map[string]DaemonService),
-		handlers:        make(map[string]ServiceHandler),
+		managers:        make(map[string]ServiceManager),
 		icStates:        intracom.New[ServiceStates]("rxd-states"),
 		reportAliveSecs: 0,
 		logC:            make(chan DaemonLog, 100),
@@ -144,7 +144,7 @@ func (d *daemon) Start(parent context.Context) error {
 	for _, service := range d.services {
 		dwg.Add(1)
 
-		handler := d.handlers[service.Name]
+		handler := d.managers[service.Name]
 		if err != nil && handler == nil {
 			// TODO: Should we be doing pre-flight checks?
 			// is it better to log the error and still try to start the daemon with the services that dont error
@@ -154,11 +154,11 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 
 		// each service is handled in its own routine.
-		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, h ServiceHandler, stateC chan<- StateUpdate) {
+		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
 			d.logger.Log(log.LevelDebug, "starting service", log.String("service_name", ds.Name))
 			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, statesTopic)
 			// run the service according to the handler policy
-			h.Handle(sctx, ds, func(service string, state State) {
+			manager.Manage(sctx, ds, func(service string, state State) {
 				stateC <- StateUpdate{Name: service, State: state}
 			})
 			scancel()
@@ -272,8 +272,8 @@ func (d *daemon) addService(service Service) error {
 		return ErrNoServiceName
 	}
 
-	if service.Handler == nil {
-		service.Handler = NewDefaultHandler()
+	if service.Manager == nil {
+		service.Manager = NewDefaultManager()
 	}
 
 	// NOTE: reflect is being used here only before startup.
@@ -283,7 +283,7 @@ func (d *daemon) addService(service Service) error {
 	// we can pre-flight check the service handler once before hand.
 	// Runners can be caught via recover() in their own routines and passed to handler as an error.
 
-	err := checkNilStructPointer(reflect.ValueOf(service.Handler), reflect.TypeOf(service.Handler), "Handle")
+	err := checkNilStructPointer(reflect.ValueOf(service.Manager), reflect.TypeOf(service.Manager), "Handle")
 	if err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func (d *daemon) addService(service Service) error {
 	}
 
 	// add the handler to a similar map of service name to handlers
-	d.handlers[service.Name] = service.Handler
+	d.managers[service.Name] = service.Manager
 
 	return nil
 }

@@ -6,9 +6,9 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-type mockServiceHandler struct{}
+type mockServiceManager struct{}
 
-func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, updateState func(string, State)) {
+func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, updateState func(string, State)) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -20,7 +20,6 @@ func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, update
 	var hasStopped bool
 
 	for state != StateExit {
-		var err error
 		// signal the current state we are about to enter. to the daemon states watcher.
 		updateState(ds.Name, state)
 
@@ -36,7 +35,7 @@ func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, update
 		default:
 			switch state {
 			case StateInit:
-				state, err = ds.Runner.Init(sctx)
+				err := ds.Runner.Init(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateInit
@@ -45,18 +44,18 @@ func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, update
 				hasStopped = false
 
 			case StateIdle:
-				state, err = ds.Runner.Idle(sctx)
+				err := ds.Runner.Idle(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
 				}
 			case StateRun:
-				state, err = ds.Runner.Run(sctx)
+				err := ds.Runner.Run(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 			case StateStop:
-				state, err = ds.Runner.Stop(sctx)
+				err := ds.Runner.Stop(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
@@ -71,7 +70,7 @@ func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, update
 
 	if !hasStopped {
 		// we are only wanting to ensure stop is run if it hasn't been run already then exit.
-		_, err := ds.Runner.Stop(sctx)
+		err := ds.Runner.Stop(sctx)
 		if err != nil {
 			sctx.Log(log.LevelError, err.Error())
 		}

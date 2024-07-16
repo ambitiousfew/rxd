@@ -19,8 +19,8 @@ func TestNewService(t *testing.T) {
 		t.Errorf("Expected service.Runner to be %v, got %v", mockService, service.Runner)
 	}
 
-	if _, ok := service.Handler.(DefaultHandler); !ok {
-		t.Errorf("Expected service.Handler to be DefaultHandler{}, got %v", service.Handler)
+	if _, ok := service.Manager.(RunContinuousManager); !ok {
+		t.Errorf("Expected service.Handler to be DefaultHandler{}, got %v", service.Manager)
 	}
 }
 
@@ -28,8 +28,8 @@ func TestNewServiceWithHandler(t *testing.T) {
 	name := "test-mock-service"
 
 	mockService := newMockService(100 * time.Millisecond)
-	mockHandler := mockServiceHandler{}
-	service := NewService(name, mockService, WithHandler(mockHandler))
+	mockManager := mockServiceManager{}
+	service := NewService(name, mockService, WithManager(mockManager))
 
 	if service.Name != name {
 		t.Errorf("Expected service.Name to be %s, got %s", name, service.Name)
@@ -39,8 +39,8 @@ func TestNewServiceWithHandler(t *testing.T) {
 		t.Errorf("Expected service.Runner to be %v, got %v", mockService, service.Runner)
 	}
 
-	if _, ok := service.Handler.(mockServiceHandler); !ok {
-		t.Errorf("Expected service.Handler to be a mockServiceHandler{}, got %v", service.Handler)
+	if _, ok := service.Manager.(mockServiceManager); !ok {
+		t.Errorf("Expected service.Handler to be a mockServiceHandler{}, got %v", service.Manager)
 	}
 
 }
@@ -55,50 +55,50 @@ func newMockService(stateTimeout time.Duration) *mockService {
 	}
 }
 
-func (m *mockService) Init(sctx ServiceContext) (State, error) {
+func (m *mockService) Init(sctx ServiceContext) error {
 	ticker := time.NewTicker(m.TransitionTimeout)
 	defer ticker.Stop()
 
 	select {
 	case <-sctx.Done():
-		return StateExit, nil
+		return nil
 	case <-ticker.C:
-		return StateIdle, nil
+		return nil
 	}
 }
 
-func (m *mockService) Idle(sctx ServiceContext) (State, error) {
+func (m *mockService) Idle(sctx ServiceContext) error {
 	ticker := time.NewTicker(m.TransitionTimeout)
 	defer ticker.Stop()
 
 	select {
 	case <-sctx.Done():
-		return StateExit, nil
+		return nil
 	case <-ticker.C:
-		return StateRun, nil
+		return nil
 	}
 }
 
-func (m *mockService) Run(sctx ServiceContext) (State, error) {
+func (m *mockService) Run(sctx ServiceContext) error {
 	ticker := time.NewTicker(m.TransitionTimeout)
 	defer ticker.Stop()
 
 	select {
 	case <-sctx.Done():
-		return StateExit, nil
+		return nil
 	case <-ticker.C:
-		return StateStop, nil
+		return nil
 	}
 }
 
-func (m *mockService) Stop(sctx ServiceContext) (State, error) {
+func (m *mockService) Stop(sctx ServiceContext) error {
 	ticker := time.NewTicker(m.TransitionTimeout)
 	defer ticker.Stop()
 
 	select {
 	case <-sctx.Done():
-		return StateExit, nil
+		return nil
 	case <-ticker.C:
-		return StateInit, nil
+		return nil
 	}
 }
