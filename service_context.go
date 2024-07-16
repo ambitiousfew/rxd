@@ -112,7 +112,7 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 	watchCtx, cancel := context.WithCancel(sc)
 
 	go func(ctx context.Context) {
-		defer cancel()
+		defer close(ch)
 		// subscribe to the internal states on behalf of the service context given.
 		consumer := internalStatesConsumer(action, target, sc.name)
 		sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
@@ -178,7 +178,7 @@ func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, se
 	watchCtx, cancel := context.WithCancel(sc)
 
 	go func(ctx context.Context) {
-		defer cancel()
+		defer close(ch)
 
 		// subscribe to the internal states on behalf of the service context given.
 		consumer := internalStatesConsumer(action, target, sc.name)
@@ -192,14 +192,6 @@ func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, se
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		// sub, unsub := sc.ic.Subscribe(ctx, intracom.SubscriberConfig{
-		// 	Topic:         internalServiceStates,
-		// 	ConsumerGroup: consumer,
-		// 	BufferSize:    1,
-		// 	BufferPolicy:  intracom.DropOldest,
-		// })
-
-		// defer unsub()
 
 		for {
 			select {
@@ -248,7 +240,7 @@ func (sc serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSta
 	watchCtx, cancel := context.WithCancel(sc)
 
 	go func(ctx context.Context) {
-		defer cancel()
+		defer close(ch)
 
 		consumer := internalAllStatesConsumer(sc.name)
 		sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
