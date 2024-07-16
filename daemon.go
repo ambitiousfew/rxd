@@ -158,7 +158,9 @@ func (d *daemon) Start(parent context.Context) error {
 			d.logger.Log(log.LevelDebug, "starting service", log.String("service_name", ds.Name))
 			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, statesTopic)
 			// run the service according to the handler policy
-			h.Handle(sctx, ds, stateC)
+			h.Handle(sctx, ds, func(service string, state State) {
+				stateC <- StateUpdate{Name: service, State: state}
+			})
 			scancel()
 			wg.Done()
 

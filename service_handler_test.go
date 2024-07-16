@@ -8,7 +8,7 @@ import (
 
 type mockServiceHandler struct{}
 
-func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, updateState chan<- StateUpdate) {
+func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, updateState func(string, State)) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -22,7 +22,7 @@ func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, update
 	for state != StateExit {
 		var err error
 		// signal the current state we are about to enter. to the daemon states watcher.
-		updateState <- StateUpdate{State: state, Name: ds.Name}
+		updateState(ds.Name, state)
 
 		if hasStopped {
 			// not entering Exit after stop was true, reset hasStopped
@@ -76,7 +76,6 @@ func (h mockServiceHandler) Handle(sctx ServiceContext, ds DaemonService, update
 			sctx.Log(log.LevelError, err.Error())
 		}
 	}
-
 	// push final state to the daemon states watcher.
-	updateState <- StateUpdate{State: StateExit, Name: ds.Name}
+	updateState(ds.Name, StateExit)
 }

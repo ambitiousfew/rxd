@@ -46,7 +46,7 @@ func main() {
 	}
 
 	// Create a new RPC client
-	client, err := rxrpc.NewClientWithPath("192.168.0.210:1337", "/rpc")
+	client, err := rxrpc.NewClientWithPath("localhost:1337", "/rpc")
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)

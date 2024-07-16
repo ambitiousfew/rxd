@@ -1,6 +1,9 @@
 package intracom
 
-import "time"
+import (
+	"sync/atomic"
+	"time"
+)
 
 type subscriber[T any] struct {
 	// topic         string
@@ -12,7 +15,7 @@ type subscriber[T any] struct {
 
 	ch     chan T
 	stopC  chan struct{}
-	closed bool
+	closed atomic.Bool
 }
 
 func newSubscriber[T any](conf SubscriberConfig) *subscriber[T] {
@@ -30,6 +33,7 @@ func newSubscriber[T any](conf SubscriberConfig) *subscriber[T] {
 		timer:         timer,
 		ch:            make(chan T, conf.BufferSize),
 		stopC:         make(chan struct{}),
+		closed:        atomic.Bool{},
 	}
 }
 
@@ -37,6 +41,10 @@ func newSubscriber[T any](conf SubscriberConfig) *subscriber[T] {
 // if the channel is full, the buffer policy will come into effect on
 // how to handle the message.
 func (s *subscriber[T]) send(message T) {
+	if s.closed.Load() {
+		return
+	}
+
 	switch s.bufferPolicy {
 	case DropNone:
 		select {
@@ -102,7 +110,7 @@ func (s *subscriber[T]) send(message T) {
 }
 
 func (s *subscriber[T]) close() {
-	if s.closed {
+	if s.closed.Swap(true) {
 		return
 	}
 

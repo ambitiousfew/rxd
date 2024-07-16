@@ -60,7 +60,7 @@ var _ rxd.ServiceRunner = (*HelloWorldAPIService)(nil)
 // var *MyHandler must meet ServiceHandler interface or line below errors.
 type MyHandler struct{}
 
-func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState chan<- rxd.StateUpdate) {
+func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState func(string, rxd.State)) {
 
 	state := rxd.StateInit
 
@@ -69,7 +69,8 @@ func (h MyHandler) Handle(sctx rxd.ServiceContext, ds rxd.DaemonService, updateS
 	// Set the default timeout to 0 to default resets on everything else except stop.
 	for state != rxd.StateExit {
 		var err error
-		updateState <- rxd.StateUpdate{State: state, Name: ds.Name}
+		updateState(ds.Name, state)
+
 		select {
 		case <-sctx.Done():
 			state = rxd.StateExit

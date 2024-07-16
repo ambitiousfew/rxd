@@ -9,7 +9,7 @@ import (
 
 // ServiceHandler interface defines the methods that a service handler must implement
 type ServiceHandler interface {
-	Handle(ctx ServiceContext, dService DaemonService, stateUpdateC chan<- StateUpdate)
+	Handle(ctx ServiceContext, dService DaemonService, updateState func(service string, state State))
 }
 
 type HandlerStateTimeouts map[State]time.Duration
@@ -37,10 +37,14 @@ func NewDefaultHandler(opts ...HandlerOption) DefaultHandler {
 	return h
 }
 
+func (h DefaultHandler) UpdateState(updateState chan<- StateUpdate, state State, name string) {
+	updateState <- StateUpdate{State: state, Name: name}
+}
+
 // Handle runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
-func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateState chan<- StateUpdate) {
+func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateState func(string, State)) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -61,7 +65,7 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 	for state != StateExit {
 		var err error
 		// signal the current state we are about to enter. to the daemon states watcher.
-		updateState <- StateUpdate{State: state, Name: ds.Name}
+		updateState(ds.Name, state)
 
 		if hasStopped {
 			// not entering Exit after stop was true, reset hasStopped
@@ -125,5 +129,5 @@ func (h DefaultHandler) Handle(sctx ServiceContext, ds DaemonService, updateStat
 	}
 
 	// push final state to the daemon states watcher.
-	updateState <- StateUpdate{State: StateExit, Name: ds.Name}
+	updateState(ds.Name, StateExit)
 }
