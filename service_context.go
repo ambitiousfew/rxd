@@ -8,6 +8,10 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
+type ServiceLogger interface {
+	Log(level log.Level, message string, extra ...log.Field)
+}
+
 type ServiceWatcher interface {
 	WatchAllStates(ServiceFilter) (<-chan ServiceStates, context.CancelFunc)
 	WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc)
@@ -17,16 +21,18 @@ type ServiceWatcher interface {
 type ServiceContext interface {
 	context.Context
 	ServiceWatcher
+	ServiceLogger
 	Name() string
-	Log(level log.Level, message string, fields ...log.Field)
 	// With returns a new ServiceContext with the given fields appended to the existing fields.
 	WithFields(fields ...log.Field) ServiceContext
 	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
+	WithName(name string) (ServiceContext, context.CancelFunc)
 }
 
 type serviceContext struct {
 	context.Context
-	name   string
+	name   string // is the name of the service, can be used for logging/debugging or subscribing.
+	fqcn   string // useful for child contexts to have a unique name without having to modify service name when subscribing.
 	fields []log.Field
 	logC   chan<- DaemonLog
 	// ic       intracom.Intracom[ServiceStates]
@@ -45,6 +51,7 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 	return serviceContext{
 		Context:  ctx,
 		name:     name,
+		fqcn:     name,
 		fields:   fields,
 		logC:     logC,
 		icStates: icStates,
@@ -76,6 +83,18 @@ func (sc serviceContext) WithFields(fields ...log.Field) ServiceContext {
 		logC:     sc.logC,
 		icStates: sc.icStates,
 	}
+}
+
+func (sc serviceContext) WithName(name string) (ServiceContext, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(sc.Context)
+	return serviceContext{
+		Context:  ctx,
+		name:     sc.name, // we keep the original service name
+		fqcn:     sc.fqcn + "_" + name,
+		fields:   sc.fields,
+		logC:     sc.logC,
+		icStates: sc.icStates,
+	}, cancel
 }
 
 func (sc serviceContext) Name() string {
@@ -113,8 +132,8 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 
 	go func(ctx context.Context) {
 		defer close(ch)
-		// subscribe to the internal states on behalf of the service context given.
-		consumer := internalStatesConsumer(action, target, sc.name)
+		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
+		consumer := internalStatesConsumer(action, target, sc.fqcn)
 		sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
@@ -181,8 +200,8 @@ func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, se
 	go func(ctx context.Context) {
 		defer close(ch)
 
-		// subscribe to the internal states on behalf of the service context given.
-		consumer := internalStatesConsumer(action, target, sc.name)
+		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
+		consumer := internalStatesConsumer(action, target, sc.fqcn)
 		sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
@@ -243,8 +262,8 @@ func (sc serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSta
 
 	go func(ctx context.Context) {
 		defer close(ch)
-
-		consumer := internalAllStatesConsumer(sc.name)
+		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
+		consumer := internalAllStatesConsumer(sc.fqcn)
 		sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,

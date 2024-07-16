@@ -2,13 +2,7 @@ package rxd
 
 import (
 	"time"
-
-	"github.com/ambitiousfew/rxd/log"
 )
-
-type ServiceLogger interface {
-	Log(level log.Level, message string, extra ...log.Field)
-}
 
 type ServiceRunner interface {
 	Init(ServiceContext) (State, error)
