@@ -84,6 +84,8 @@ func (m MyManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateS
 			if err != nil {
 				sctx.Log(log.LevelError, err.Error())
 				state = rxd.StateExit
+			} else {
+				state = rxd.StateIdle
 			}
 		case rxd.StateIdle:
 			err = ds.Runner.Idle(sctx)
@@ -110,6 +112,8 @@ func (m MyManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateS
 		}
 		timeout.Reset(1 * time.Second)
 	}
+
+	updateState(ds.Name, rxd.StateExit)
 }
 
 // HelloWorldAPIService create a struct for your service which requires a config field along with any other state
@@ -160,6 +164,7 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 	}
 
 	<-doneC // wait for signal routine to finish...
+	ctx.Log(log.LevelInfo, "server stopped")
 	return nil
 }
 

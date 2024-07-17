@@ -24,27 +24,29 @@ type Daemon interface {
 }
 
 type daemon struct {
-	name            string                           // name of the daemon will be used in logging
-	signals         []os.Signal                      // OS signals you want your daemon to listen for
-	services        map[string]DaemonService         // map of service name to struct carrying the service runner and name.
-	managers        map[string]ServiceManager        // map of service name to service handler that will run the service runner methods.
-	icStates        intracom.Intracom[ServiceStates] // intracom comms bus for states
-	reportAliveSecs uint64                           // system service manager alive report timeout in seconds aka watchdog timeout
-	logC            chan DaemonLog                   // log channel for the daemon to log service logs to
-	logger          log.Logger                       // logger for the daemon
-	started         atomic.Bool                      // flag to indicate if the daemon has been started
-	rpcEnabled      bool                             // flag to indicate if the daemon has rpc enabled
-	rpcConfig       RPCConfig                        // rpc configuration for the daemon
+	name     string                    // name of the daemon will be used in logging
+	signals  []os.Signal               // OS signals you want your daemon to listen for
+	services map[string]DaemonService  // map of service name to struct carrying the service runner and name.
+	managers map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
+	// icStates        intracom.Intracom[ServiceStates] // intracom comms bus for states
+	ic              *intracom.Intracom
+	reportAliveSecs uint64         // system service manager alive report timeout in seconds aka watchdog timeout
+	logC            chan DaemonLog // log channel for the daemon to log service logs to
+	logger          log.Logger     // logger for the daemon
+	started         atomic.Bool    // flag to indicate if the daemon has been started
+	rpcEnabled      bool           // flag to indicate if the daemon has rpc enabled
+	rpcConfig       RPCConfig      // rpc configuration for the daemon
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
 func NewDaemon(name string, log log.Logger, options ...DaemonOption) Daemon {
 	d := &daemon{
-		name:            name,
-		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-		services:        make(map[string]DaemonService),
-		managers:        make(map[string]ServiceManager),
-		icStates:        intracom.New[ServiceStates]("rxd-states"),
+		name:     name,
+		signals:  []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		services: make(map[string]DaemonService),
+		managers: make(map[string]ServiceManager),
+		// icStates:        intracom.New[ServiceStates]("rxd-states"),
+		ic:              intracom.New("rxd-intracom"),
 		reportAliveSecs: 0,
 		logC:            make(chan DaemonLog, 100),
 		logger:          log,
@@ -123,11 +125,17 @@ func (d *daemon) Start(parent context.Context) error {
 
 	}()
 
-	statesTopic, err := d.icStates.CreateTopic(intracom.TopicConfig{
+	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{
 		Name:        internalServiceStates,
 		Buffer:      1,
 		ErrIfExists: true,
 	})
+
+	// statesTopic, err := d.icStates.CreateTopic(intracom.TopicConfig{
+	// 	Name:        internalServiceStates,
+	// 	Buffer:      1,
+	// 	ErrIfExists: true,
+	// })
 	if err != nil {
 		return err
 	}
@@ -144,27 +152,27 @@ func (d *daemon) Start(parent context.Context) error {
 	for _, service := range d.services {
 		dwg.Add(1)
 
-		handler := d.managers[service.Name]
-		if err != nil && handler == nil {
+		manager := d.managers[service.Name]
+		if err != nil && manager == nil {
 			// TODO: Should we be doing pre-flight checks?
 			// is it better to log the error and still try to start the daemon with the services that dont error
 			// or is it better to fail fast and exit the daemon with an error?
-			d.logger.Log(log.LevelError, "error getting handler for service", log.String("service_name", service.Name))
+			d.logger.Log(log.LevelError, "error getting manager for service", log.String("service_name", service.Name))
 			continue
 		}
 
 		// each service is handled in its own routine.
 		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
 			d.logger.Log(log.LevelDebug, "starting service", log.String("service_name", ds.Name))
-			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, statesTopic)
-			// run the service according to the handler policy
+			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, d.ic)
+			// run the service according to the manager policy
 			manager.Manage(sctx, ds, func(service string, state State) {
 				stateC <- StateUpdate{Name: service, State: state}
 			})
 			scancel()
 			wg.Done()
 
-		}(&dwg, dctx, service, handler, stateUpdateC)
+		}(&dwg, dctx, service, manager, stateUpdateC)
 	}
 
 	// --- Daemon RPC Server ---
@@ -228,7 +236,8 @@ func (d *daemon) Start(parent context.Context) error {
 	d.logger.Log(log.LevelDebug, "states channel completed", log.String("rxd", d.name))
 
 	// TODO: these logs should not be interleaved with the user service logs.
-	err = d.icStates.Close()
+	err = intracom.Close(d.ic)
+	// err = d.icStates.Close()
 	if err != nil {
 		d.logger.Log(log.LevelError, "error closing intracom", log.String("rxd", "intracom"))
 	}

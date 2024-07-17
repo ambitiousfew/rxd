@@ -7,28 +7,28 @@ import (
 )
 
 var (
-	ic Intracom[string]
+	testIC *Intracom
 )
 
 func TestMain(m *testing.M) {
 	// setup
-	ic = New[string]("test-intracom")
+	testIC = New("test-intracom")
 	m.Run()
 
-	err := ic.Close()
+	err := Close(testIC)
 	if err != nil {
 		panic(err)
 	}
 }
 
 func TestIntracom_CreateTopicWhileClosed(t *testing.T) {
-	testIC := New[bool]("test-intracom")
-	err := testIC.Close()
+	ic := New("test-intracom")
+	err := Close(ic)
 	if err != nil {
 		t.Fatalf("error closing intracom: %v", err)
 	}
 
-	_, err = testIC.CreateTopic(TopicConfig{
+	_, err = CreateTopic[string](ic, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -41,9 +41,10 @@ func TestIntracom_CreateTopicWhileClosed(t *testing.T) {
 }
 
 func TestIntracom_RemoveTopicWhileClosed(t *testing.T) {
-	testIC := New[bool]("test-intracom")
+	// create an intracom registry
+	ic := New("test-intracom")
 
-	testTopic, err := testIC.CreateTopic(TopicConfig{
+	_, err := CreateTopic[string](ic, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -53,17 +54,18 @@ func TestIntracom_RemoveTopicWhileClosed(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	err = testIC.Close()
+	// close early
+	err = Close(ic)
 	if err != nil {
 		t.Fatalf("error closing intracom: %v", err)
 	}
 
-	err = testIC.RemoveTopic(t.Name())
+	err = RemoveTopic[string](ic, t.Name())
 	if err == nil {
 		t.Fatalf("error removing topic while closed should not be nil")
 	}
 
-	if testTopic.Close() == nil {
+	if Close(ic) == nil {
 		t.Fatalf("error closing topic while closed should not be nil")
 	}
 
@@ -71,7 +73,7 @@ func TestIntracom_RemoveTopicWhileClosed(t *testing.T) {
 
 func TestIntracom_CreateTopicUnique(t *testing.T) {
 
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -88,7 +90,7 @@ func TestIntracom_CreateTopicUnique(t *testing.T) {
 
 func TestIntracom_CreateTopicDuplicate(t *testing.T) {
 
-	_, err := ic.CreateTopic(TopicConfig{
+	_, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -97,7 +99,7 @@ func TestIntracom_CreateTopicDuplicate(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	_, err = ic.CreateTopic(TopicConfig{
+	_, err = CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -111,7 +113,7 @@ func TestIntracom_CreateTopicDuplicate(t *testing.T) {
 
 func TestIntracom_RemoveTopic(t *testing.T) {
 
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -120,7 +122,7 @@ func TestIntracom_RemoveTopic(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	err = ic.RemoveTopic(t.Name())
+	err = RemoveTopic[string](testIC, t.Name())
 	if err != nil {
 		t.Fatalf("error removing topic: %v", err)
 	}
@@ -132,7 +134,7 @@ func TestIntracom_RemoveTopic(t *testing.T) {
 
 func TestIntracom_RemoveNonExistentTopic(t *testing.T) {
 
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -141,7 +143,7 @@ func TestIntracom_RemoveNonExistentTopic(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	err = ic.RemoveTopic("doesnt-exist")
+	err = RemoveTopic[string](testIC, "doesnt-exist")
 	if err == nil {
 		t.Fatalf("error removing non-existent topic should not be nil")
 	}
@@ -156,7 +158,7 @@ func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -170,7 +172,7 @@ func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := ic.CreateSubscription(ctx, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, testIC, t.Name(), 0, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		BufferPolicy:  DropNone,
@@ -190,7 +192,7 @@ func TestIntracom_CreateSubscriptionWithNoTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	sub, err := ic.CreateSubscription(ctx, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, testIC, t.Name(), 0, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		BufferPolicy:  DropNone,
@@ -209,7 +211,7 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	topic, err := ic.CreateTopic(TopicConfig{
+	topic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -223,7 +225,7 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := ic.CreateSubscription(ctx, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, testIC, t.Name(), 0, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		BufferPolicy:  DropNone,
@@ -237,7 +239,7 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 		t.Fatalf("subscription channel should not be nil")
 	}
 
-	err = ic.RemoveSubscription(t.Name(), t.Name(), sub)
+	err = RemoveSubscription(testIC, t.Name(), t.Name(), sub)
 	if err != nil {
 		t.Fatalf("error removing subscription: %v", err)
 	}
@@ -245,14 +247,14 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 }
 
 func TestIntracom_Close(t *testing.T) {
-	testIC := New[bool]("test-intracom")
+	ic := New("test-intracom")
 
-	err := testIC.Close()
+	err := Close(ic)
 	if err != nil {
 		t.Fatalf("error closing intracom: %v", err)
 	}
 
-	err = testIC.Close()
+	err = Close(ic)
 	if err == nil {
 		t.Fatalf("error closing intracom should not be nil")
 	}

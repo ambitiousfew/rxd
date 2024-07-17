@@ -5,7 +5,7 @@ import (
 )
 
 func TestIntracom_TopicSubscribe(t *testing.T) {
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -30,7 +30,7 @@ func TestIntracom_TopicSubscribe(t *testing.T) {
 }
 
 func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -63,7 +63,7 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 }
 
 func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
-	testTopic, err := ic.CreateTopic(TopicConfig{
+	testTopic, err := CreateTopic[string](testIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
