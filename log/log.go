@@ -16,10 +16,9 @@ type Logger interface {
 }
 
 const (
-	levelUnknown Level = iota - 1 // -1
 	// LevelEmergency (0) Rarely used by user applications but import for critical services
 	// examples include: when the system is unusable, system-wide outaged, situations that require immediate attention and human intervention
-	LevelEmergency // 0
+	LevelEmergency = iota // 0
 	// LevelAlert (1) less commonly used but used in applications where immediate attention is required
 	// examples include: security applications (breach detected), loss of connectivity, or failure of a key component thats leads to downtime.
 	LevelAlert
@@ -43,7 +42,7 @@ const (
 	LevelDebug
 )
 
-type Level int8
+type Level uint8
 
 func (l Level) String() string {
 	switch l {
@@ -64,7 +63,7 @@ func (l Level) String() string {
 	case LevelDebug:
 		return "DEBUG"
 	default:
-		return "UNKNOWN"
+		return "INFO"
 	}
 }
 
@@ -87,7 +86,7 @@ func LevelFromString(level string) Level {
 	case "DEBUG":
 		return LevelDebug
 	default:
-		return levelUnknown
+		return LevelInfo
 	}
 }
 
@@ -108,10 +107,22 @@ func Int(key string, value any) Field {
 	switch t := value.(type) {
 	case int:
 		return Field{Key: key, Value: strconv.Itoa(t)}
-	case int64:
-		return Field{Key: key, Value: strconv.FormatInt(t, 10)}
 	case uint:
 		return Field{Key: key, Value: strconv.FormatUint(uint64(t), 10)}
+	case int8:
+		return Field{Key: key, Value: strconv.Itoa(int(t))}
+	case uint8:
+		return Field{Key: key, Value: strconv.FormatUint(uint64(t), 10)}
+	case int16:
+		return Field{Key: key, Value: strconv.Itoa(int(t))}
+	case uint16:
+		return Field{Key: key, Value: strconv.FormatUint(uint64(t), 10)}
+	case int32:
+		return Field{Key: key, Value: strconv.Itoa(int(t))}
+	case uint32:
+		return Field{Key: key, Value: strconv.FormatUint(uint64(t), 10)}
+	case int64:
+		return Field{Key: key, Value: strconv.FormatInt(t, 10)}
 	case uint64:
 		return Field{Key: key, Value: strconv.FormatUint(t, 10)}
 	default:

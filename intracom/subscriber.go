@@ -114,11 +114,13 @@ func (s *subscriber[T]) close() {
 		return
 	}
 
+	//signal to stop
+	close(s.stopC)
+
 	// if timer is not nil, stop it
 	if s.timer != nil {
 		s.timer.Stop()
 	}
 
-	close(s.stopC)
 	close(s.ch)
 }
