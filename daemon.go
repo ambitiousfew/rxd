@@ -148,8 +148,8 @@ func (d *daemon) Start(parent context.Context) error {
 	for _, service := range d.services {
 		dwg.Add(1)
 
-		manager := d.managers[service.Name]
-		if err != nil && manager == nil {
+		manager, ok := d.managers[service.Name]
+		if !ok {
 			// TODO: Should we be doing pre-flight checks?
 			// is it better to log the error and still try to start the daemon with the services that dont error
 			// or is it better to fail fast and exit the daemon with an error?
@@ -288,7 +288,7 @@ func (d *daemon) addService(service Service) error {
 	// we can pre-flight check the service handler once before hand.
 	// Runners can be caught via recover() in their own routines and passed to handler as an error.
 
-	err := checkNilStructPointer(reflect.ValueOf(service.Manager), reflect.TypeOf(service.Manager), "Handle")
+	err := checkNilStructPointer(reflect.ValueOf(service.Manager), reflect.TypeOf(service.Manager), "Manage")
 	if err != nil {
 		return err
 	}
