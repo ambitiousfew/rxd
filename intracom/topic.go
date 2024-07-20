@@ -137,8 +137,8 @@ func (t *topic[T]) broadcast(publishC <-chan T) {
 	for msg := range publishC {
 		var wg sync.WaitGroup
 		t.mu.RLock()
+		wg.Add(len(t.subscribers))
 		for _, sub := range t.subscribers {
-			wg.Add(1)
 			go func() {
 				sub.send(msg)
 				wg.Done()

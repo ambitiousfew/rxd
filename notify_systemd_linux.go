@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/ambitiousfew/rxd/log"
@@ -14,6 +15,7 @@ import (
 type systemdNotifier struct {
 	watchdog uint64
 	conn     *net.UnixConn
+	mu       *sync.RWMutex
 }
 
 func NewSystemdNotifier(socketName string, durationSecs uint64) (SystemNotifier, error) {
@@ -35,10 +37,11 @@ func NewSystemdNotifier(socketName string, durationSecs uint64) (SystemNotifier,
 	return &systemdNotifier{
 		conn:     unixConn,
 		watchdog: durationSecs,
+		mu:       &sync.RWMutex{},
 	}, nil
 }
 
-func (n *systemdNotifier) Notify(state NotifyState) error {
+func (n systemdNotifier) Notify(state NotifyState) error {
 	if n.watchdog == 0 {
 		// do nothing if watchdog is not set
 		return nil
@@ -58,11 +61,13 @@ func (n *systemdNotifier) Notify(state NotifyState) error {
 		return errors.New("'" + string(state) + "' unsupported state for systemd notifier")
 	}
 
+	n.mu.Lock()
 	_, err := n.conn.Write(payload)
+	n.mu.Unlock()
 	return err
 }
 
-func (n *systemdNotifier) Start(ctx context.Context, logC chan<- DaemonLog) error {
+func (n systemdNotifier) Start(ctx context.Context, logC chan<- DaemonLog) error {
 	if n.watchdog == 0 {
 		// do nothing if watchdog is not set
 		return nil

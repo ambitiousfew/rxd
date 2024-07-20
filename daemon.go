@@ -118,7 +118,7 @@ func (d *daemon) Start(parent context.Context) error {
 		// inform systemd that we are stopping/cleaning up
 		// TODO: Test if this notify should happen before or after cancel()
 		// since the watchdog notify continues to until the context is cancelled.
-		err = notifier.Notify(NotifyStateStopping)
+		err := notifier.Notify(NotifyStateStopping)
 		if err != nil {
 			d.logger.Log(log.LevelError, "error sending 'stopping' notification", log.String("rxd", "systemd-notifier"))
 		}
