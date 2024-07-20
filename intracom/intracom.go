@@ -57,7 +57,8 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	topicAny, ok := ic.topics[conf.Name]
 	ic.mu.RUnlock()
 	if !ok {
-		ch := make(chan T, conf.Buffer)
+		// ch := make(chan T, conf.Buffer)
+		ch := make(chan T)
 		topic := newTopic[T](conf.Name, conf.SubscriberAwareCount, ch)
 
 		ic.mu.Lock()
@@ -135,6 +136,8 @@ func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, 
 	}
 
 	var exists bool
+
+	var topicAny any
 	var t Topic[T]
 
 	for !exists {
@@ -149,21 +152,19 @@ func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, 
 			if ic.closed.Load() {
 				return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrIntracomClosed}
 			}
-			// ensure intracom is still open
 
-			ic.mu.RLock()
-			topicAny, found := ic.topics[topic]
-			ic.mu.RUnlock()
 			// check if the topic exists yet.
-			if found {
-				t, exists = topicAny.(Topic[T])
-				if !exists {
-					return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrInvalidTopicType}
-				}
-			}
-			// check again in 100ms if the topic wasnt yet found.
-			retryTimeout.Reset(50 * time.Millisecond)
+			ic.mu.RLock()
+			topicAny, exists = ic.topics[topic]
+			ic.mu.RUnlock()
+			// check again in 10ms if the topic wasnt yet found.
+			retryTimeout.Reset(10 * time.Millisecond)
 		}
+	}
+
+	t, exists = topicAny.(Topic[T])
+	if !exists {
+		return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrInvalidTopicType}
 	}
 
 	return t.Subscribe(ctx, conf)

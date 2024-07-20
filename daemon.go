@@ -127,8 +127,8 @@ func (d *daemon) Start(parent context.Context) error {
 	}()
 
 	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{
-		Name:        internalServiceStates,
-		Buffer:      1,
+		Name: internalServiceStates,
+		// Buffer:      1,
 		ErrIfExists: true,
 	})
 

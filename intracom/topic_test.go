@@ -11,8 +11,8 @@ func TestIntracom_TopicSubscribe(t *testing.T) {
 	defer cancel()
 
 	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
-		Name:        t.Name(),
-		Buffer:      1,
+		Name: t.Name(),
+		// Buffer:      1,
 		ErrIfExists: true,
 	})
 
@@ -41,8 +41,8 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 	defer cancel()
 
 	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
-		Name:        t.Name(),
-		Buffer:      1,
+		Name: t.Name(),
+		// Buffer:      1,
 		ErrIfExists: true,
 	})
 
@@ -82,8 +82,8 @@ func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
 	defer cancel()
 
 	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
-		Name:        t.Name(),
-		Buffer:      1,
+		Name: t.Name(),
+		// Buffer:      1,
 		ErrIfExists: true,
 	})
 

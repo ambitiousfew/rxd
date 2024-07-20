@@ -18,7 +18,6 @@ func main() {
 	someTopic := "pubsub-topic" // unique topic name
 	topic, err := intracom.CreateTopic[int](ic, intracom.TopicConfig{
 		Name:                 someTopic,
-		Buffer:               1,
 		ErrIfExists:          true,
 		SubscriberAwareCount: 1,
 	})
