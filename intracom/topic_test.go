@@ -1,11 +1,16 @@
 package intracom
 
 import (
+	"context"
 	"testing"
+	"time"
 )
 
 func TestIntracom_TopicSubscribe(t *testing.T) {
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -15,9 +20,11 @@ func TestIntracom_TopicSubscribe(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	sub, err := testTopic.Subscribe(SubscriberConfig{
+	sub, err := testTopic.Subscribe(ctx, SubscriberConfig{
 		ConsumerGroup: t.Name(),
+		BufferSize:    1,
 		ErrIfExists:   true,
+		BufferPolicy:  DropNone,
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -30,7 +37,10 @@ func TestIntracom_TopicSubscribe(t *testing.T) {
 }
 
 func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -40,17 +50,21 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	sub1, err := testTopic.Subscribe(SubscriberConfig{
+	sub1, err := testTopic.Subscribe(ctx, SubscriberConfig{
 		ConsumerGroup: t.Name() + "_1",
 		ErrIfExists:   true,
+		BufferSize:    1,
+		BufferPolicy:  DropNone,
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
 	}
 
-	sub2, err := testTopic.Subscribe(SubscriberConfig{
+	sub2, err := testTopic.Subscribe(ctx, SubscriberConfig{
 		ConsumerGroup: t.Name() + "_2",
 		ErrIfExists:   true,
+		BufferSize:    1,
+		BufferPolicy:  DropNone,
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -63,7 +77,11 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 }
 
 func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -73,7 +91,7 @@ func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	sub1, err := testTopic.Subscribe(SubscriberConfig{
+	sub1, err := testTopic.Subscribe(ctx, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		ErrIfExists:   true,
 	})
@@ -82,9 +100,11 @@ func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
 		t.Fatalf("error subscribing to topic: %v", err)
 	}
 
-	sub2, err := testTopic.Subscribe(SubscriberConfig{
+	sub2, err := testTopic.Subscribe(ctx, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		ErrIfExists:   true,
+		BufferSize:    1,
+		BufferPolicy:  DropNone,
 	})
 
 	if err == nil {

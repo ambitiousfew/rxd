@@ -17,16 +17,17 @@ func main() {
 
 	someTopic := "pubsub-topic" // unique topic name
 	topic, err := intracom.CreateTopic[int](ic, intracom.TopicConfig{
-		Name:        someTopic,
-		Buffer:      1,
-		ErrIfExists: true,
+		Name:                 someTopic,
+		Buffer:               1,
+		ErrIfExists:          true,
+		SubscriberAwareCount: 1,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// create a subscriber
-	sub, err := topic.Subscribe(intracom.SubscriberConfig{
+	sub, err := topic.Subscribe(parent, intracom.SubscriberConfig{
 		ConsumerGroup: "group1",
 		BufferSize:    10,
 		BufferPolicy:  intracom.DropNone,
@@ -38,7 +39,7 @@ func main() {
 	}
 
 	go func(ctx context.Context, topic intracom.Topic[int]) {
-		publishC := topic.Publisher()
+		publishC := topic.PublishChannel()
 
 		for i := 0; i < 100; i++ {
 			select {

@@ -1,6 +1,10 @@
 package rxd
 
-import "context"
+import (
+	"context"
+
+	"github.com/ambitiousfew/rxd/log"
+)
 
 // TODO: This is a basic implementation for interacting with a service manager.
 // Actual interactions with a service manager are a little more involved.
@@ -18,7 +22,7 @@ import "context"
 // for the future. Currently its a big lift and current needs are only for linux.
 
 type SystemNotifier interface {
-	Start(ctx context.Context, errC chan<- DaemonLog) error
+	Start(ctx context.Context, logger log.Logger) error
 	Notify(state NotifyState) error
 }
 

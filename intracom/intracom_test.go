@@ -2,22 +2,120 @@ package intracom
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
 
 var (
-	testIC *Intracom
+	sharedIC *Intracom
 )
 
 func TestMain(m *testing.M) {
 	// setup
-	testIC = New("test-intracom")
+	sharedIC = New("test-intracom")
 	m.Run()
 
-	err := Close(testIC)
+	err := Close(sharedIC)
 	if err != nil {
 		panic(err)
+	}
+}
+
+func TestIntracom_SinglePublisherSingleSubscriber(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	ic := New("test-intracom")
+	topicName := t.Name()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		// attempt to subscribe to a topic that may not exist yet waiting up to maxWait
+		defer wg.Done()
+		maxWait := 500 * time.Millisecond
+		// create a subscription, waiting for topic to exist using maxWait
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxWait, SubscriberConfig{
+			ConsumerGroup: t.Name(), // unique consumer group name
+			ErrIfExists:   true,     // error if consumer group already exists
+			BufferSize:    1,        // subscriber channel buffer size
+			BufferPolicy:  DropNone, // policy for handling buffer overflow
+		})
+
+		if err != nil {
+			t.Errorf("error creating the subscription: %s", err)
+			return
+		}
+		defer RemoveSubscription(ic, topicName, t.Name(), sub)
+
+		if sub == nil {
+			t.Errorf("subscription channel should not be nil")
+		}
+
+		var total int
+
+		open := true
+		for open {
+			select {
+			case _, open = <-sub:
+				if !open {
+					// prevent incrementing counter on closed channel
+					return
+				}
+
+				total++
+			case <-ctx.Done():
+				t.Errorf("timeout waiting for message")
+				open = false
+			}
+		}
+
+		if total != 10 {
+			t.Errorf("expected 10 messages, got %d", total)
+		}
+	}()
+
+	go func() {
+		// launch a publisher
+		defer wg.Done()
+		// slight delay so create subscription has to wait
+		testTopic, err := CreateTopic[int](ic, TopicConfig{
+			Name:                 topicName,
+			Buffer:               1,
+			ErrIfExists:          true,
+			SubscriberAwareCount: 1, // dont publish until you see a subscriber.
+		})
+
+		if err != nil {
+			t.Errorf("error creating topic: %v", err)
+			return
+		}
+
+		pubC := testTopic.PublishChannel()
+
+		publishing := true
+		for count := 0; publishing && count < 10; count++ {
+			select {
+			case <-ctx.Done():
+				t.Errorf("publisher timed out waiting for subscriber")
+				publishing = false
+			case pubC <- count:
+			}
+		}
+
+		err = testTopic.Close()
+		if err != nil {
+			t.Errorf("error closing topic: %v", err)
+		}
+	}()
+
+	wg.Wait()
+
+	err := Close(ic)
+	if err != nil {
+		t.Fatalf("error closing intracom: %v", err)
 	}
 }
 
@@ -73,7 +171,7 @@ func TestIntracom_RemoveTopicWhileClosed(t *testing.T) {
 
 func TestIntracom_CreateTopicUnique(t *testing.T) {
 
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -83,14 +181,14 @@ func TestIntracom_CreateTopicUnique(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	if testTopic.Publisher() == nil {
+	if testTopic.PublishChannel() == nil {
 		t.Fatalf("topic publisher should not be nil")
 	}
 }
 
 func TestIntracom_CreateTopicDuplicate(t *testing.T) {
 
-	_, err := CreateTopic[string](testIC, TopicConfig{
+	_, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -99,7 +197,7 @@ func TestIntracom_CreateTopicDuplicate(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	_, err = CreateTopic[string](testIC, TopicConfig{
+	_, err = CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -113,7 +211,7 @@ func TestIntracom_CreateTopicDuplicate(t *testing.T) {
 
 func TestIntracom_RemoveTopic(t *testing.T) {
 
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -122,7 +220,7 @@ func TestIntracom_RemoveTopic(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	err = RemoveTopic[string](testIC, t.Name())
+	err = RemoveTopic[string](sharedIC, t.Name())
 	if err != nil {
 		t.Fatalf("error removing topic: %v", err)
 	}
@@ -134,7 +232,7 @@ func TestIntracom_RemoveTopic(t *testing.T) {
 
 func TestIntracom_RemoveNonExistentTopic(t *testing.T) {
 
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -143,7 +241,7 @@ func TestIntracom_RemoveNonExistentTopic(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	err = RemoveTopic[string](testIC, "doesnt-exist")
+	err = RemoveTopic[string](sharedIC, "doesnt-exist")
 	if err == nil {
 		t.Fatalf("error removing non-existent topic should not be nil")
 	}
@@ -158,7 +256,7 @@ func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	testTopic, err := CreateTopic[string](testIC, TopicConfig{
+	testTopic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -168,11 +266,11 @@ func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	if testTopic.Publisher() == nil {
+	if testTopic.PublishChannel() == nil {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := CreateSubscription[string](ctx, testIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		BufferPolicy:  DropNone,
@@ -192,7 +290,7 @@ func TestIntracom_CreateSubscriptionWithNoTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	sub, err := CreateSubscription[string](ctx, testIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		BufferPolicy:  DropNone,
@@ -211,7 +309,7 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	topic, err := CreateTopic[string](testIC, TopicConfig{
+	topic, err := CreateTopic[string](sharedIC, TopicConfig{
 		Name:        t.Name(),
 		Buffer:      1,
 		ErrIfExists: true,
@@ -221,11 +319,11 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	if topic.Publisher() == nil {
+	if topic.PublishChannel() == nil {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := CreateSubscription[string](ctx, testIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		BufferPolicy:  DropNone,
@@ -239,7 +337,7 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 		t.Fatalf("subscription channel should not be nil")
 	}
 
-	err = RemoveSubscription(testIC, t.Name(), t.Name(), sub)
+	err = RemoveSubscription(sharedIC, t.Name(), t.Name(), sub)
 	if err != nil {
 		t.Fatalf("error removing subscription: %v", err)
 	}

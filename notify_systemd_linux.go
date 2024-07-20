@@ -67,7 +67,7 @@ func (n systemdNotifier) Notify(state NotifyState) error {
 	return err
 }
 
-func (n systemdNotifier) Start(ctx context.Context, logC chan<- DaemonLog) error {
+func (n systemdNotifier) Start(ctx context.Context, logger log.Logger) error {
 	if n.watchdog == 0 {
 		// do nothing if watchdog is not set
 		return nil
@@ -83,12 +83,7 @@ func (n systemdNotifier) Start(ctx context.Context, logC chan<- DaemonLog) error
 			case <-ticker.C:
 				err := n.Notify(NotifyStateAlive)
 				if err != nil {
-					// TODO: log error via channel??
-					logC <- DaemonLog{
-						Level:   log.LevelError,
-						Message: err.Error(),
-						Name:    "internal:systemd-notifier",
-					}
+					logger.Log(log.LevelError, "internal:systemd-notifier", log.Error("error", err))
 				}
 			}
 		}

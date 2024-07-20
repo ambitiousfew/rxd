@@ -8,9 +8,15 @@ import (
 
 type DaemonOption func(*daemon)
 
+func WithInternalLogger(logger log.Logger) DaemonOption {
+	return func(d *daemon) {
+		d.internalLogger = logger
+	}
+}
+
 func WithLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
-		d.logger = logger
+		d.serviceLogger = logger
 	}
 }
 

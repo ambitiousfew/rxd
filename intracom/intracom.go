@@ -2,7 +2,6 @@ package intracom
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,12 +11,14 @@ import (
 
 type Option func(*Intracom)
 
-// intracom struct acts as a registry for all topic channels.
+// Intracom acts as a registry for all topic channels.
+// The Intracom struct is thread-safe and can be used concurrently.
+// Use the pure generic functions below to operate against the Intracom struct:
+// CreateTopic, CreateSubscription, RemoveSubscription, Close
 type Intracom struct {
 	name   string
 	topics map[string]any
 	mu     sync.RWMutex
-
 	logger log.Logger
 	closed atomic.Bool
 }
@@ -28,6 +29,7 @@ func New(name string, opts ...Option) *Intracom {
 	ic := &Intracom{
 		name:   name,
 		topics: make(map[string]any),
+
 		logger: noopLogger{},
 		closed: atomic.Bool{},
 		mu:     sync.RWMutex{},
@@ -44,11 +46,11 @@ func New(name string, opts ...Option) *Intracom {
 // Topic names must be unique, if the topic already exists, an error is returned.
 func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	if ic == nil {
-		return nil, errors.New("cannot create topic '" + conf.Name + "', intracom is nil")
+		return nil, ErrTopic{Topic: conf.Name, Action: ActionCreatingTopic, Err: ErrInvalidIntracomNil}
 	}
 
 	if ic.closed.Load() {
-		return nil, errors.New("cannot create topic '" + conf.Name + "', intracom is closed")
+		return nil, ErrTopic{Topic: conf.Name, Action: ActionCreatingTopic, Err: ErrIntracomClosed}
 	}
 
 	ic.mu.RLock()
@@ -56,7 +58,7 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	ic.mu.RUnlock()
 	if !ok {
 		ch := make(chan T, conf.Buffer)
-		topic := newTopic[T](conf.Name, ch)
+		topic := newTopic[T](conf.Name, conf.SubscriberAwareCount, ch)
 
 		ic.mu.Lock()
 		ic.topics[conf.Name] = topic
@@ -66,11 +68,11 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 
 	topic, ok := topicAny.(Topic[T])
 	if !ok {
-		return nil, errors.New("topic already exists with a different type")
+		return nil, ErrTopic{Topic: conf.Name, Action: ActionCreatingTopic, Err: ErrInvalidTopicType}
 	}
 
 	if conf.ErrIfExists {
-		return topic, errors.New("topic " + conf.Name + " already exists")
+		return nil, ErrTopic{Topic: conf.Name, Action: ActionCreatingTopic, Err: ErrTopicAlreadyExists}
 	}
 
 	return topic, nil
@@ -78,23 +80,23 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 
 func RemoveTopic[T any](ic *Intracom, name string) error {
 	if ic == nil {
-		return errors.New("cannot remove topic '" + name + "', intracom is nil")
+		return ErrTopic{Topic: name, Action: ActionRemovingTopic, Err: ErrInvalidIntracomNil}
 	}
 	ic.mu.RLock()
 	topicAny, ok := ic.topics[name]
 	ic.mu.RUnlock()
 	if !ok {
-		return errors.New("topic " + name + " does not exist")
+		return ErrTopic{Topic: name, Action: ActionRemovingTopic, Err: ErrTopicDoesNotExist}
 	}
 
 	topic, ok := topicAny.(Topic[T])
 	if !ok {
-		return errors.New("topic exists but with a different type")
+		return ErrTopic{Topic: name, Action: ActionRemovingTopic, Err: ErrInvalidTopicType}
 	}
 
 	err := topic.Close()
 	if err != nil {
-		return err
+		return ErrTopic{Topic: name, Action: ActionRemovingTopic, Err: err}
 	}
 
 	ic.mu.Lock()
@@ -110,21 +112,17 @@ func RemoveTopic[T any](ic *Intracom, name string) error {
 // If the context is canceled, a context error is returned.
 func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, maxWait time.Duration, conf SubscriberConfig) (<-chan T, error) {
 	if ic == nil {
-		return nil, errors.New("cannot create subscription '" + topic + "<-" + conf.ConsumerGroup + "', intracom is nil")
+		// return nil, ErrCreatingSubscription{Topic: topic, Err: ErrInvalidIntracomNil}
+		return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrInvalidIntracomNil}
 	}
 
-	ic.mu.RLock()
-	topicAny, found := ic.topics[topic]
-	ic.mu.RUnlock()
-
-	if found {
-		// if the topic exists we can subscribe to it immediately.
-		t, ok := topicAny.(Topic[T])
-		if !ok {
-			return nil, errors.New("cannot subscribe to a topic with a different type")
-		}
-		return t.Subscribe(conf)
+	if ic.closed.Load() {
+		// return nil, ErrCreatingSubscription{Topic: topic, Err: ErrIntracomClosed}
+		return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrIntracomClosed}
 	}
+
+	retryTimeout := time.NewTimer(1 * time.Nanosecond)
+	defer retryTimeout.Stop()
 
 	// if the topic doesn't yet exist we want to wait/poll for it to be created for maxWait duration.
 	// if maxWait is 0, we wait indefinitely or until context is cancelled.
@@ -136,45 +134,46 @@ func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, 
 		maxTimeout = timer.C
 	}
 
-	topicCheckTimeout := time.NewTicker(100 * time.Millisecond)
-	defer topicCheckTimeout.Stop()
-
 	var exists bool
 	var t Topic[T]
 
 	for !exists {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			// the caller has canceled the context, exit with error.
+			return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ctx.Err()}
 		case <-maxTimeout:
-			return nil, errors.New("subscription max timeout reached")
-		case <-topicCheckTimeout.C:
-			// ensure intracom is still open
+			// exceeded the callers set max timeout, exit with error.
+			return nil, ErrMaxTimeoutReached
+		case <-retryTimeout.C:
 			if ic.closed.Load() {
-				return nil, errors.New("cannot create subscription, intracom has been closed")
+				return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrIntracomClosed}
 			}
+			// ensure intracom is still open
 
 			ic.mu.RLock()
-			topicAny, found = ic.topics[topic]
+			topicAny, found := ic.topics[topic]
 			ic.mu.RUnlock()
 			// check if the topic exists yet.
 			if found {
 				t, exists = topicAny.(Topic[T])
 				if !exists {
-					return nil, errors.New("cannot subscribe to a topic with a different type")
+					return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrInvalidTopicType}
 				}
 			}
+			// check again in 100ms if the topic wasnt yet found.
+			retryTimeout.Reset(50 * time.Millisecond)
 		}
 	}
 
-	return t.Subscribe(conf)
+	return t.Subscribe(ctx, conf)
 }
 
 // RemoveSubscription removes a subscription from a topic consumer name and consumer channel are required to remove the subscription.
 // Normally whoever created the subscription should also be in-charge of removing it.
 func RemoveSubscription[T any](ic *Intracom, topic string, consumer string, ch <-chan T) error {
 	if ic == nil {
-		return errors.New("cannot remove subscription '" + topic + "<-" + consumer + "', intracom is nil")
+		return ErrSubscribe{Action: ActionRemovingSubscription, Topic: topic, Consumer: consumer, Err: ErrInvalidIntracomNil}
 	}
 
 	ic.mu.RLock()
@@ -182,12 +181,12 @@ func RemoveSubscription[T any](ic *Intracom, topic string, consumer string, ch <
 	ic.mu.RUnlock()
 
 	if !exists {
-		return errors.New("topic " + topic + " does not exist")
+		return ErrSubscribe{Action: ActionRemovingSubscription, Topic: topic, Consumer: consumer, Err: ErrTopicNotFound}
 	}
 
 	t, ok := topicAny.(Topic[T])
 	if !ok {
-		return errors.New("cannot unsubscribe from a topic with a different type")
+		return ErrSubscribe{Action: ActionRemovingSubscription, Topic: topic, Consumer: consumer, Err: ErrInvalidTopicType}
 	}
 
 	return t.Unsubscribe(consumer, ch)
@@ -196,11 +195,11 @@ func RemoveSubscription[T any](ic *Intracom, topic string, consumer string, ch <
 // Close interacts with the Intracom registry and closes all topics.
 func Close(ic *Intracom) error {
 	if ic == nil {
-		return errors.New("cannot close a nil intracom")
+		return ErrIntracom{Action: ActionClosingTopic, Err: ErrInvalidIntracomNil}
 	}
 
 	if ic.closed.Swap(true) {
-		return errors.New("intracom is already closed")
+		return ErrIntracom{Action: ActionClosingTopic, Err: ErrIntracomClosed}
 	}
 
 	ic.mu.Lock()
