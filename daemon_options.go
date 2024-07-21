@@ -2,17 +2,12 @@ package rxd
 
 import (
 	"os"
+	"sync"
 
 	"github.com/ambitiousfew/rxd/log"
 )
 
 type DaemonOption func(*daemon)
-
-func WithInternalLogger(logger log.Logger) DaemonOption {
-	return func(d *daemon) {
-		d.internalLogger = logger
-	}
-}
 
 func WithLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
@@ -33,6 +28,27 @@ func WithReportAlive(timeoutSecs uint64) DaemonOption {
 func WithSignals(signals ...os.Signal) DaemonOption {
 	return func(d *daemon) {
 		d.signals = signals
+	}
+}
+
+func WithInternalLogger(logger log.Logger) DaemonOption {
+	return func(d *daemon) {
+		d.internalLogger = logger
+	}
+}
+
+// WithInternalLogging enables the internal logger with the given log level.
+// The internal logger writes to "rxd.log" in the current working directory.
+func WithInternalLogging(level log.Level) DaemonOption {
+	return func(d *daemon) {
+		d.internalLogger = log.NewLogger(level, &daemonLogHandler{
+			filepath: "rxd.log",
+			enabled:  true,
+			total:    0,                // total bytes written to the log file
+			limit:    10 * 1024 * 1024, // 10MB
+			file:     nil,
+			mu:       sync.RWMutex{},
+		})
 	}
 }
 

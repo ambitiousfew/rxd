@@ -2,6 +2,7 @@ package rxd
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/rpc"
 	"os"
@@ -50,8 +51,15 @@ func NewDaemon(name string, logger log.Logger, options ...DaemonOption) Daemon {
 		logC:            make(chan DaemonLog, 100),
 		serviceLogger:   logger,
 		// by default the internal daemon logger is disabled.
-		internalLogger: log.NewLogger(log.LevelDebug, noopLogHandler{}),
-		started:        atomic.Bool{},
+		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
+			filepath: "rxd.log",        // relative to the executable, if enabled
+			enabled:  false,            // disabled by default
+			total:    0,                // total bytes written to the log file
+			limit:    10 * 1024 * 1024, // 10MB (if enabled)
+			file:     nil,
+			mu:       sync.RWMutex{},
+		}),
+		started: atomic.Bool{},
 	}
 
 	for _, option := range options {
@@ -72,6 +80,8 @@ func (d *daemon) Start(parent context.Context) error {
 		return ErrNoServices
 	}
 
+	nameField := log.String("rxd", d.name)
+
 	// daemon child context from parent
 	dctx, dcancel := context.WithCancel(parent)
 	defer dcancel()
@@ -85,13 +95,16 @@ func (d *daemon) Start(parent context.Context) error {
 	// For now, we are only supporting linux - systemd.
 	notifier, err := NewSystemdNotifier(os.Getenv("NOTIFY_SOCKET"), d.reportAliveSecs)
 	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error creating systemd notifier", log.Error("error", err), nameField)
 		return err
 	}
 
+	d.internalLogger.Log(log.LevelDebug, "starting system notifier", nameField)
 	// Start the notifier, this will start the watchdog portion.
 	// so we can notify systemd that we have not hung.
 	err = notifier.Start(dctx, d.internalLogger)
 	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error starting system notifier", log.Error("error", err), nameField)
 		return err
 	}
 
@@ -108,9 +121,9 @@ func (d *daemon) Start(parent context.Context) error {
 
 		select {
 		case <-dctx.Done():
-			d.internalLogger.Log(log.LevelNotice, "daemon context done", log.String("rxd", "signal-watcher"))
-		case <-signalC:
-			d.internalLogger.Log(log.LevelNotice, "daemon received signal to stop", log.String("rxd", "signal-watcher"))
+			d.internalLogger.Log(log.LevelDebug, "signal watcher received context done from parent context", nameField)
+		case sig := <-signalC:
+			d.internalLogger.Log(log.LevelNotice, "signal watcher received an os signal", log.String("signal", sig.String()), nameField)
 		}
 
 		// if we received a signal to stop, cancel the context
@@ -121,11 +134,12 @@ func (d *daemon) Start(parent context.Context) error {
 		// since the watchdog notify continues to until the context is cancelled.
 		err := notifier.Notify(NotifyStateStopping)
 		if err != nil {
-			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", log.String("rxd", "systemd-notifier"))
+			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", nameField)
 		}
 
 	}()
 
+	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates), nameField)
 	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{
 		Name: internalServiceStates,
 		// Buffer:      1,
@@ -133,6 +147,7 @@ func (d *daemon) Start(parent context.Context) error {
 	})
 
 	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err), nameField)
 		return err
 	}
 
@@ -140,8 +155,10 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// --- Service States Watcher ---
 	// states watcher routine needs to be closed once all services have exited.
+	d.internalLogger.Log(log.LevelInfo, "starting service states watcher", nameField)
 	statesDoneC := d.statesWatcher(statesTopic, stateUpdateC)
 
+	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services", nameField)
 	// --- Launch Daemon Service(s) ---
 	var dwg sync.WaitGroup
 	// launch all services in their own routine.
@@ -153,13 +170,13 @@ func (d *daemon) Start(parent context.Context) error {
 			// TODO: Should we be doing pre-flight checks?
 			// is it better to log the error and still try to start the daemon with the services that dont error
 			// or is it better to fail fast and exit the daemon with an error?
-			d.internalLogger.Log(log.LevelError, "error getting manager for service", log.String("service_name", service.Name))
+			d.internalLogger.Log(log.LevelError, "error getting manager for service", log.String("service_name", service.Name), nameField)
 			continue
 		}
 
 		// each service is handled in its own routine.
 		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
-			d.internalLogger.Log(log.LevelDebug, "starting service", log.String("service_name", ds.Name))
+			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
 			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, d.ic)
 			// run the service according to the manager policy
 			manager.Manage(sctx, ds, func(service string, state State) {
@@ -167,7 +184,7 @@ func (d *daemon) Start(parent context.Context) error {
 			})
 			scancel()
 			wg.Done()
-
+			d.internalLogger.Log(log.LevelInfo, "service has stopped", log.String("service_name", ds.Name), nameField)
 		}(&dwg, dctx, service, manager, stateUpdateC)
 	}
 
@@ -185,7 +202,7 @@ func (d *daemon) Start(parent context.Context) error {
 		err := rpcServer.Register(cmdHandler)
 		if err != nil {
 			// couldnt register the rpc handler, log the error and continue without rpc
-			d.internalLogger.Log(log.LevelError, "error registering rpc handler", log.String("rxd", "rpc-server"))
+			d.internalLogger.Log(log.LevelError, "error registering rpc handler", nameField)
 		} else {
 			// rpc handlers registered successfully, try to start the rpc server
 			addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
@@ -196,19 +213,19 @@ func (d *daemon) Start(parent context.Context) error {
 			}
 
 			go func(s *http.Server) {
-				d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr, log.String("rxd", "rpc-server"))
+				d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr, nameField)
 				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					d.internalLogger.Log(log.LevelError, "error starting rpc server", log.String("rxd", "rpc-server"))
+					d.internalLogger.Log(log.LevelError, "error starting rpc server", nameField)
 					return
 				}
-				d.internalLogger.Log(log.LevelInfo, "stopped running and exited successfully", log.String("rxd", "rpc-server"))
+				d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully", nameField)
 			}(server)
 		}
 	}
 
 	err = notifier.Notify(NotifyStateReady)
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.String("rxd", "systemd-notifier"))
+		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.Error("error", err), nameField)
 	}
 
 	// block until all services have exited their lifecycles
@@ -229,21 +246,26 @@ func (d *daemon) Start(parent context.Context) error {
 	// since all services have exited their lifecycles, we can close the states update channel.
 	close(stateUpdateC)
 	<-statesDoneC // wait for states watcher to finish
-	d.internalLogger.Log(log.LevelDebug, "states channel completed", log.String("rxd", d.name))
+	d.internalLogger.Log(log.LevelDebug, "states channel completed", nameField)
 
 	// TODO: these logs should not be interleaved with the user service logs.
 	err = intracom.Close(d.ic)
 	// err = d.icStates.Close()
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error closing intracom", log.String("rxd", "intracom"))
+		d.internalLogger.Log(log.LevelError, "error closing intracom", log.Error("error", err), nameField)
+	} else {
+		d.internalLogger.Log(log.LevelDebug, "intracom closed", nameField)
 	}
 
 	close(d.logC) // signal close the log channel
 	<-loggerDoneC // wait for log watcher to finish
 
-	d.internalLogger.Log(log.LevelDebug, "log channel completed", log.String("rxd", d.name))
+	d.internalLogger.Log(log.LevelDebug, "service log watcher closed", nameField)
 
-	d.internalLogger.Log(log.LevelDebug, "intracom closed", log.String("rxd", "intracom"))
+	// if the internal logger is an io.Closer, close it.
+	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
+		internalLogger.Close()
+	}
 	return nil
 }
 
