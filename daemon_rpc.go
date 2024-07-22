@@ -48,11 +48,13 @@ func NewRPCHandler(cfg RPCConfig) (*RPCServer, error) {
 }
 
 type CommandHandler struct {
-	logger log.Logger // daemon logger
+	sLogger log.Logger // service logger
+	iLogger log.Logger // internal logger
 }
 
 func (h CommandHandler) ChangeLogLevel(level log.Level, resp *error) error {
-	h.logger.SetLevel(level)
+	h.sLogger.SetLevel(level)
+	h.iLogger.SetLevel(level)
 	return nil
 }
 

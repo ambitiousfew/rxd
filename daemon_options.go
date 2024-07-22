@@ -9,7 +9,7 @@ import (
 
 type DaemonOption func(*daemon)
 
-func WithLogger(logger log.Logger) DaemonOption {
+func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.serviceLogger = logger
 	}
@@ -31,18 +31,19 @@ func WithSignals(signals ...os.Signal) DaemonOption {
 	}
 }
 
+// WithInternalLogger sets a custom logger for the daemon to use for internal logging.
+// by default, the daemon will use a noop logger since this logger is used for rxd internals.
 func WithInternalLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.internalLogger = logger
 	}
 }
 
-// WithInternalLogging enables the internal logger with the given log level.
-// The internal logger writes to "rxd.log" in the current working directory.
-func WithInternalLogging(level log.Level) DaemonOption {
+// WithInternalLogging enables the internal logger to write to the filepath using the provided log level.
+func WithInternalLogging(filepath string, level log.Level) DaemonOption {
 	return func(d *daemon) {
 		d.internalLogger = log.NewLogger(level, &daemonLogHandler{
-			filepath: "rxd.log",
+			filepath: filepath,
 			enabled:  true,
 			total:    0,                // total bytes written to the log file
 			limit:    10 * 1024 * 1024, // 10MB
@@ -52,6 +53,10 @@ func WithInternalLogging(level log.Level) DaemonOption {
 	}
 }
 
+// WithRPC enables an RPC server to run alongside the daemon.
+// The RPC server will be available at the provided address and port.
+// Currently the RPC server only supports a single method to change log level.
+// An RPC client is provided in the pkg/rxrpc package for external use.
 func WithRPC(cfg RPCConfig) DaemonOption {
 	return func(d *daemon) {
 		d.rpcEnabled = true

@@ -196,7 +196,8 @@ func (d *daemon) Start(parent context.Context) error {
 		rpcServer := rpc.NewServer()
 
 		cmdHandler := CommandHandler{
-			logger: d.internalLogger,
+			sLogger: d.serviceLogger,
+			iLogger: d.internalLogger,
 		}
 
 		err := rpcServer.Register(cmdHandler)

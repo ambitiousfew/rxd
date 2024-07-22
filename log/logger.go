@@ -1,6 +1,8 @@
 package log
 
-import "sync"
+import (
+	"sync"
+)
 
 type logger struct {
 	handler LogHandler

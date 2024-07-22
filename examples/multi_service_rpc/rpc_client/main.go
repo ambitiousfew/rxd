@@ -8,13 +8,13 @@ import (
 	"os"
 
 	rxlog "github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/pkg/rxrpc"
+	"github.com/ambitiousfew/rxd/pkg/rpc"
 )
 
-func processCommand(command string) rxrpc.Command {
+func processCommand(command string) rpc.Command {
 	switch command {
 	case "setlevel":
-		return rxrpc.SetLevel
+		return rpc.SetLevel
 	// case "stop":
 	// 	return rpc.Stop
 	// case "start":
@@ -22,16 +22,14 @@ func processCommand(command string) rxrpc.Command {
 	// case "list":
 	// 	return rpc.List
 	default:
-		return rxrpc.Unknown
+		return rpc.Unknown
 	}
 }
 
 func main() {
-	// should never take more than 10 seconds to run this client.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// should never take more than a few seconds to run this client.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
-	_ = ctx
 
 	if len(os.Args) < 2 {
 		log.Println("usage: rpc_client setlevel <command>")
@@ -40,20 +38,20 @@ func main() {
 
 	cmd := processCommand(os.Args[1])
 
-	if cmd == rxrpc.Unknown {
+	if cmd == rpc.Unknown {
 		log.Println("unknown command:", os.Args[1])
 		os.Exit(1)
 	}
 
 	// Create a new RPC client
-	client, err := rxrpc.NewClientWithPath("localhost:1337", "/rpc")
+	client, err := rpc.NewClientWithPath("localhost:1337", "/rpc")
 	if err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
 
 	switch cmd {
-	case rxrpc.SetLevel:
+	case rpc.SetLevel:
 		if len(os.Args) < 3 {
 			log.Println("usage: rpc_client loglevel <level>")
 			os.Exit(1)
@@ -67,7 +65,7 @@ func main() {
 		}
 
 		// Call the ChangeLogLevel method on the RPC server, pass level and pass response
-		err = client.ChangeLogLevel(rxlog.Level(level))
+		err = client.ChangeLogLevel(ctx, rxlog.Level(level))
 		if err != nil {
 			log.Println(err)
 			os.Exit(1)
@@ -77,25 +75,5 @@ func main() {
 		return
 	}
 
-	// // Call the Echo method on the RPC server, pass payload and pass response
-	// resp, err := client.SendCommand(payload)
-	// if err != nil {
-	// 	log.Println(err)
-	// 	os.Exit(1)
-	// }
-
-	// log.Println("command '"+resp.Command.String()+"' succeeded:", resp.Success)
-
-	// if payload.Command == rpc.List {
-	// 	log.Println("List of services:", string(resp.Body))
-	// }
-
-	// // Close the client
-	// err = client.Close()
-	// if err != nil {
-	// 	log.Println(err)
-	// 	os.Exit(1)
-	// }
-
-	// log.Println("client has exited successfully.")
+	log.Println("client has exited successfully.")
 }
