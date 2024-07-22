@@ -1,43 +1,57 @@
 package rxd
 
-const (
-	// InitState is in the ServiceResponse to inform manager to move us to the Init state (Initial Default).
-	InitState State = iota
-	// IdleState is in the ServiceResponse to inform manager to move us to the Idle state
-	IdleState
-	// RunState is in the ServiceResponse to inform manager to move us to the Run state
-	RunState
-	// StopState is in the ServiceResponse to inform manager to move us to the Stop state
-	StopState
-	// ExitState is in the ServiceResponse to inform manager to act as the final response type for Stop.
-	ExitState
-)
+import "time"
 
-// State is used to determine the "next state" the service should enter
-// when the current state has completed/errored returned. State should
-// reflect different states that the interface can enter.
-type State int
+// type ServiceRunner interface {
+// 	Init(ServiceContext) (State, error)
+// 	Idle(ServiceContext) (State, error)
+// 	Run(ServiceContext) (State, error)
+// 	Stop(ServiceContext) (State, error)
+// }
 
-func (s State) String() string {
-	switch s {
-	case InitState:
-		return "init"
-	case IdleState:
-		return "idle"
-	case RunState:
-		return "run"
-	case StopState:
-		return "stop"
-	case ExitState:
-		return "exit"
-	default:
-		return "unknown"
-	}
+type ServiceRunner interface {
+	Init(ServiceContext) error
+	Idle(ServiceContext) error
+	Run(ServiceContext) error
+	Stop(ServiceContext) error
 }
 
-type Service interface {
-	Init(*ServiceContext) ServiceResponse
-	Idle(*ServiceContext) ServiceResponse
-	Run(*ServiceContext) ServiceResponse
-	Stop(*ServiceContext) ServiceResponse
+// Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.
+// This struct is what the caller uses to add a new service to the daemon.
+// The daemon performs checks and translates this struct into a Service struct before starting it.
+type Service struct {
+	Name    string
+	Runner  ServiceRunner
+	Manager ServiceManager
+}
+
+// DaemonService is a struct that contains the Name of the service, the ServiceRunner
+// this struct is what is passed into a Handler for the  handler to decide how to
+// interact with the service using the ServiceRunner.
+type DaemonService struct {
+	Name   string
+	Runner ServiceRunner
+}
+
+func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {
+	ds := Service{
+		Name:   name,
+		Runner: runner,
+		Manager: RunContinuousManager{
+			// the first time we init the service we will short delay by 10 nanoseconds.
+			StartupDelay: 10 * time.Nanosecond,
+			// default state timeouts for all other states if not set specifically in state timeouts.
+			DefaultDelay: 10 * time.Nanosecond,
+			StateTimeouts: ManagerStateTimeouts{
+				// re-inits from stop to init will delay by 5 seconds.
+				StateInit: 5 * time.Second,
+			},
+		},
+	}
+
+	for _, opt := range opts {
+		opt(&ds)
+	}
+
+	return ds
 }

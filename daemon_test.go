@@ -2,86 +2,56 @@ package rxd
 
 import (
 	"context"
-	"os"
-	"syscall"
 	"testing"
+	"time"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
-func TestDaemonAddService(t *testing.T) {
-	serviceName := "valid-service"
-
-	vs := &validService{}
-	vsOpts := NewServiceOpts() // use defaults
-	validSvc := NewService(serviceName, vs, vsOpts)
-
-	d := NewDaemon(DaemonConfig{
-		Name:    "test-daemon",
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
-
-	if d.total != 0 {
-		t.Errorf("daemon should not yet have any services")
-	}
-
-	err := d.AddService(validSvc)
-	if err != nil {
-		t.Errorf("error adding service: %s", err)
-	}
-
-	if d.total != 1 {
-		t.Errorf("daemon AddService did not correctly add new service")
-	}
-
-	_, found := d.services.Load(serviceName)
-	if !found {
-		t.Errorf("could not find the service '%s' in the daemon services map", serviceName)
-	}
-}
-
-func TestDaemonStartWithNoServices(t *testing.T) {
-	d := NewDaemon(DaemonConfig{
-		Name:    "test-daemon",
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
-
-	if d.total != 0 {
-		t.Errorf("daemon should not yet have any services")
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
+func TestDaemon_StartAService(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	err := d.Start(ctx)
-	if err == nil {
-		t.Errorf("daemon should not start without any services")
-	}
+	d := NewDaemon("test-daemon", noopLogger{})
 
-}
+	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
 
-func TestDaemonStartSingleService(t *testing.T) {
-	serviceName := "valid-service"
-
-	vs := &validService{}
-	vsOpts := NewServiceOpts()
-	validSvc := NewService(serviceName, vs, vsOpts)
-
-	d := NewDaemon(DaemonConfig{
-		Name:    "test-daemon",
-		Signals: []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	err := d.AddService(validSvc)
+	err := d.AddServices(s1)
 	if err != nil {
-		t.Errorf("error adding service: %s", err)
+		t.Fatalf("error adding services: %s", err)
 	}
 
-	// valid service has no blocking code so it will run all lifecycle stages and exit.
 	err = d.Start(ctx)
 	if err != nil {
-		t.Errorf("expected: nil, got: %s", err)
+		t.Fatalf("error starting daemon: %s", err)
 	}
 
 }
+
+func TestDaemon_AddService(t *testing.T) {
+	d := NewDaemon("test-daemon", noopLogger{})
+
+	s := NewService("test-service", newMockService(100*time.Millisecond))
+
+	err := d.AddService(s)
+	if err != nil {
+		t.Fatalf("error adding service: %s", err)
+	}
+}
+
+func TestDaemon_AddServices(t *testing.T) {
+	d := NewDaemon("test-daemon", noopLogger{})
+
+	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
+	s2 := NewService("test-service-2", newMockService(100*time.Millisecond))
+
+	err := d.AddServices(s1, s2)
+	if err != nil {
+		t.Fatalf("error adding services: %s", err)
+	}
+}
+
+type noopLogger struct{}
+
+func (n noopLogger) Log(level log.Level, message string, fields ...log.Field) {}
+func (n noopLogger) SetLevel(level log.Level)                                 {}

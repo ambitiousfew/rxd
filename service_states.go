@@ -1,11 +1,50 @@
 package rxd
 
 import (
-	"context"
-	"fmt"
-
-	"github.com/ambitiousfew/intracom"
+	"strings"
 )
+
+const (
+	StateExit State = iota
+	StateInit
+	StateIdle
+	StateRun
+	StateStop
+)
+
+type State uint8
+
+func (s State) String() string {
+	switch s {
+	case StateInit:
+		return "init"
+	case StateIdle:
+		return "idle"
+	case StateRun:
+		return "run"
+	case StateStop:
+		return "stop"
+	case StateExit:
+		return "exit"
+	default:
+		return "unknown"
+	}
+}
+
+type ServiceStates map[string]State
+
+func (s ServiceStates) copy() ServiceStates {
+	c := make(ServiceStates, len(s))
+	for k, v := range s {
+		c[k] = v
+	}
+	return c
+}
+
+type StatesResponse struct {
+	States ServiceStates
+	Err    error
+}
 
 // StateUpdate reflects any given update of lifecycle state at a given time.
 type StateUpdate struct {
@@ -17,231 +56,18 @@ type StateUpdate struct {
 // reflects the service name and its lifecycle state.
 type States map[string]State
 
-func AnyServicesEnterState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
-	if sc.iStates == nil {
-		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
-		return nil, func() {} // noop cancel
-	}
-	checkC := make(chan States, 1)
-
-	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
-
-	go func() {
-		// subscribe to the internal states on behalf of the service context given.
-		consumer := internalEnterStatesConsumer(sc.Name, target)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
-			Topic:         internalServiceStates,
-			ConsumerGroup: consumer,
-			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
-		})
-
-		defer close(checkC)
-		defer unsubscribe()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-
-			case states, open := <-subscriberC:
-				if !open {
-					return
-				}
-
-				interestedServices := make(States)
-				for _, name := range serviceNames {
-					if val := states[name]; val == target {
-						// build states map of only services we care about.
-						interestedServices[name] = val
-					}
-				}
-
-				// if we found all those we care about.
-				if len(interestedServices) > 0 {
-					select {
-					case <-ctx.Done(): // user cancelled us
-						return
-					case checkC <- interestedServices: // send out the states we cared about
-					}
-				}
-			}
-
-		}
-
-	}()
-
-	return checkC, cancel
+// internalAllStatesConsumer returns a string that represents the internal consumer name
+// this is an internal helper to help build a more unique consumer name for the internal states
+// to prevent overlapping consumer group names within the same service
+// format: _rxd.states.all.<consumer>
+func internalAllStatesConsumer(consumer string) string {
+	return strings.Join([]string{internalServiceStates, "all", consumer}, ".")
 }
 
-func AllServicesEnterState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
-	if sc.iStates == nil {
-		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
-		return nil, func() {} // noop cancel
-	}
-	checkC := make(chan States, 1)
-
-	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
-
-	go func() {
-		// subscribe to the internal states on behalf of the service context given.
-		consumer := internalEnterStatesConsumer(sc.Name, target)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
-			Topic:         internalServiceStates,
-			ConsumerGroup: consumer,
-			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
-		})
-
-		defer close(checkC)
-		defer unsubscribe()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-
-			case states, open := <-subscriberC:
-				if !open {
-					return
-				}
-
-				interestedServices := make(States)
-				for _, name := range serviceNames {
-					if val := states[name]; val == target {
-						// build states map of only services we care about.
-						interestedServices[name] = val
-					}
-				}
-
-				// if we found all those we care about.
-				if len(interestedServices) == len(serviceNames) {
-					select {
-					case <-ctx.Done(): // user cancelled us
-						return
-					case checkC <- interestedServices: // send out the states
-					}
-				}
-			}
-
-		}
-
-	}()
-
-	return checkC, cancel
-}
-
-// AnyServicesExitState
-func AnyServicesExitState(sc *ServiceContext, target State, serviceNames ...string) (<-chan States, context.CancelFunc) {
-	if sc.iStates == nil {
-		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
-		return nil, func() {} // noop cancel
-	}
-	checkC := make(chan States, 1)
-
-	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
-
-	go func() {
-		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
-		consumer := internalExitStatesConsumer(sc.Name, target)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
-			Topic:         internalServiceStates,
-			ConsumerGroup: consumer,
-			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
-		})
-
-		defer close(checkC)
-		defer unsubscribe()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-
-			case states, open := <-subscriberC:
-				if !open {
-					return
-				}
-
-				interestedExits := make(States)
-				for _, name := range serviceNames {
-					if state := states[name]; state != target {
-						// build the map of exited states to send out.
-						interestedExits[name] = state
-					}
-				}
-
-				if len(interestedExits) > 0 {
-
-					select {
-					case <-ctx.Done(): // user cancelled us
-						return
-					case checkC <- interestedExits: // send out the states we cared about
-					}
-				}
-			}
-
-		}
-
-	}()
-
-	return checkC, cancel
-}
-
-func AllServicesStates(sc *ServiceContext) (<-chan States, context.CancelFunc) {
-	if sc.iStates == nil {
-		sc.Log.Warn("AllServicesEnteredState called with nil iStates")
-		return nil, func() {} // noop cancel
-	}
-	checkC := make(chan States, 1)
-
-	ctx, cancel := context.WithCancel(sc.ShutdownCtx)
-
-	go func() {
-		// subscribe to the internal states on behalf of the service context given to _rxd.<state>.states.<service_name>
-		consumer := internalAllStatesConsumer(sc.Name)
-		subscriberC, unsubscribe := sc.iStates.Subscribe(intracom.SubscriberConfig{
-			Topic:         internalServiceStates,
-			ConsumerGroup: consumer,
-			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
-		})
-		defer func() {
-			close(checkC)
-			unsubscribe()
-		}()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case states, open := <-subscriberC:
-				if !open {
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				case checkC <- states:
-				}
-			}
-		}
-
-	}()
-
-	return checkC, cancel
-}
-
-func internalAllStatesConsumer(name string) string {
-	return fmt.Sprintf("%s.%s", internalServiceAllStates, name)
-}
-
-func internalEnterStatesConsumer(name string, state State) string {
-	return fmt.Sprintf("%s.%s.%s", internalServiceEnterStates, state, name)
-}
-
-func internalExitStatesConsumer(name string, state State) string {
-	return fmt.Sprintf("%s.%s.%s", internalServiceExitStates, state, name)
+// internalStatesConsumer returns a string that represents the internal consumer name
+// this is an internal helper to help build a more unique consumer name for the internal states
+// to prevent overlapping consumer group names within the same service
+// format: _rxd.states.<action>.<target>.<consumer>
+func internalStatesConsumer(action ServiceAction, target State, consumer string) string {
+	return strings.Join([]string{internalServiceStates, action.String(), target.String(), consumer}, ".")
 }

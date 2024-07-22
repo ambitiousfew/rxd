@@ -2,337 +2,383 @@ package rxd
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
+	"io"
+	"net/http"
+	"net/rpc"
 	"os"
 	"os/signal"
+	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
-	"github.com/ambitiousfew/intracom"
+	"github.com/ambitiousfew/rxd/intracom"
+	"github.com/ambitiousfew/rxd/log"
 )
 
+type Daemon interface {
+	AddServices(services ...Service) error
+	AddService(service Service) error
+	Start(ctx context.Context) error
+}
+
 type daemon struct {
-	services sync.Map // map[string]*ServiceContext
-	total    int      // total number of services added to daemon
-
-	conf DaemonConfig
-
-	iSignals *intracom.Intracom[rxdSignal] // signals from daemon to manager
-	iStates  *intracom.Intracom[States]    // services state updates to manager
-
-	log *slog.Logger
-
-	started atomic.Bool
+	name            string                    // name of the daemon will be used in logging
+	signals         []os.Signal               // OS signals you want your daemon to listen for
+	services        map[string]DaemonService  // map of service name to struct carrying the service runner and name.
+	managers        map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
+	ic              *intracom.Intracom        // intracom registry for the daemon to communicate with services
+	reportAliveSecs uint64                    // system service manager alive report timeout in seconds aka watchdog timeout
+	logC            chan DaemonLog            // log channel for the daemon to log service logs to
+	serviceLogger   log.Logger                // logger used by user services
+	internalLogger  log.Logger                // logger for the internal daemon, debugging
+	started         atomic.Bool               // flag to indicate if the daemon has been started
+	rpcEnabled      bool                      // flag to indicate if the daemon has rpc enabled
+	rpcConfig       RPCConfig                 // rpc configuration for the daemon
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
-func NewDaemon(conf DaemonConfig) *daemon {
-	var logger *slog.Logger
-	if conf.LogHandler == nil {
-		logger = slog.Default().With("rxd", conf.Name)
-	} else {
-		logger = slog.New(conf.LogHandler).With("rxd", conf.Name)
-	}
-
-	iSignals := intracom.New[rxdSignal]("rxd-signals")
-	iStates := intracom.New[States]("rxd-states")
-
-	// override log handler for intracom instances, gives ability to debug intracom
-	if conf.IntracomLogHandler != nil {
-		iSignals.SetLogHandler(conf.IntracomLogHandler)
-		iStates.SetLogHandler(conf.IntracomLogHandler)
-	}
-
-	return &daemon{
-		services: sync.Map{},
-		total:    0,
-		conf:     conf,
-
-		iSignals: iSignals,
-		iStates:  iStates,
-
-		log: logger,
-
+func NewDaemon(name string, logger log.Logger, options ...DaemonOption) Daemon {
+	d := &daemon{
+		name:            name,
+		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		services:        make(map[string]DaemonService),
+		managers:        make(map[string]ServiceManager),
+		ic:              intracom.New("rxd-intracom"),
+		reportAliveSecs: 0,
+		logC:            make(chan DaemonLog, 100),
+		serviceLogger:   logger,
+		// by default the internal daemon logger is disabled.
+		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
+			filepath: "rxd.log",        // relative to the executable, if enabled
+			enabled:  false,            // disabled by default
+			total:    0,                // total bytes written to the log file
+			limit:    10 * 1024 * 1024, // 10MB (if enabled)
+			file:     nil,
+			mu:       sync.RWMutex{},
+		}),
 		started: atomic.Bool{},
 	}
+
+	for _, option := range options {
+		option(d)
+	}
+
+	return d
+
 }
 
-// AddService adds a service to the daemon.
-// if the service fails to be added, the error will be returned.
-func (d *daemon) AddService(s *ServiceContext) error {
-	if d.started.Load() {
-		return fmt.Errorf("cannot add a service once the daemon is started")
+func (d *daemon) Start(parent context.Context) error {
+	// pre-start checks
+	if d.started.Swap(true) {
+		return ErrDaemonStarted
 	}
-	return d.addService(s)
 
+	if len(d.services) == 0 {
+		return ErrNoServices
+	}
+
+	nameField := log.String("rxd", d.name)
+
+	// daemon child context from parent
+	dctx, dcancel := context.WithCancel(parent)
+	defer dcancel()
+
+	// --- Service Manager Notifier ---
+	// TODO:: Future work here will be to support multiple platform service managers
+	// such as windows service manager, systemd, etc.
+	//
+	// This will require manager selection to be selected dynamically at runtime.
+	// notifier := GetSystemNotifier(ctx) --- probably...
+	// For now, we are only supporting linux - systemd.
+	notifier, err := NewSystemdNotifier(os.Getenv("NOTIFY_SOCKET"), d.reportAliveSecs)
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error creating systemd notifier", log.Error("error", err), nameField)
+		return err
+	}
+
+	d.internalLogger.Log(log.LevelDebug, "starting system notifier", nameField)
+	// Start the notifier, this will start the watchdog portion.
+	// so we can notify systemd that we have not hung.
+	err = notifier.Start(dctx, d.internalLogger)
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error starting system notifier", log.Error("error", err), nameField)
+		return err
+	}
+
+	// --- Start the Daemon Service Log Watcher ---
+	// listens for logs from services via channel and logs them to the daemon logger.
+	loggerDoneC := d.serviceLogWatcher(d.logC)
+
+	// --- Daemon Signal Watcher ---
+	// listens for signals to stop the daemon such as OS signals or context done.
+	go func() {
+		signalC := make(chan os.Signal, 1)
+		signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(signalC)
+
+		select {
+		case <-dctx.Done():
+			d.internalLogger.Log(log.LevelDebug, "signal watcher received context done from parent context", nameField)
+		case sig := <-signalC:
+			d.internalLogger.Log(log.LevelNotice, "signal watcher received an os signal", log.String("signal", sig.String()), nameField)
+		}
+
+		// if we received a signal to stop, cancel the context
+		dcancel()
+
+		// inform systemd that we are stopping/cleaning up
+		// TODO: Test if this notify should happen before or after cancel()
+		// since the watchdog notify continues to until the context is cancelled.
+		err := notifier.Notify(NotifyStateStopping)
+		if err != nil {
+			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", nameField)
+		}
+
+	}()
+
+	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates), nameField)
+	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{
+		Name: internalServiceStates,
+		// Buffer:      1,
+		ErrIfExists: true,
+	})
+
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err), nameField)
+		return err
+	}
+
+	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
+
+	// --- Service States Watcher ---
+	// states watcher routine needs to be closed once all services have exited.
+	d.internalLogger.Log(log.LevelInfo, "starting service states watcher", nameField)
+	statesDoneC := d.statesWatcher(statesTopic, stateUpdateC)
+
+	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services", nameField)
+	// --- Launch Daemon Service(s) ---
+	var dwg sync.WaitGroup
+	// launch all services in their own routine.
+	for _, service := range d.services {
+		dwg.Add(1)
+
+		manager, ok := d.managers[service.Name]
+		if !ok {
+			// TODO: Should we be doing pre-flight checks?
+			// is it better to log the error and still try to start the daemon with the services that dont error
+			// or is it better to fail fast and exit the daemon with an error?
+			d.internalLogger.Log(log.LevelError, "error getting manager for service", log.String("service_name", service.Name), nameField)
+			continue
+		}
+
+		// each service is handled in its own routine.
+		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
+			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
+			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, d.ic)
+			// run the service according to the manager policy
+			manager.Manage(sctx, ds, func(service string, state State) {
+				stateC <- StateUpdate{Name: service, State: state}
+			})
+			scancel()
+			wg.Done()
+			d.internalLogger.Log(log.LevelInfo, "service has stopped", log.String("service_name", ds.Name), nameField)
+		}(&dwg, dctx, service, manager, stateUpdateC)
+	}
+
+	// --- Daemon RPC Server ---
+	var server *http.Server
+
+	if d.rpcEnabled {
+		mux := http.NewServeMux()
+		rpcServer := rpc.NewServer()
+
+		cmdHandler := CommandHandler{
+			sLogger: d.serviceLogger,
+			iLogger: d.internalLogger,
+		}
+
+		err := rpcServer.Register(cmdHandler)
+		if err != nil {
+			// couldnt register the rpc handler, log the error and continue without rpc
+			d.internalLogger.Log(log.LevelError, "error registering rpc handler", nameField)
+		} else {
+			// rpc handlers registered successfully, try to start the rpc server
+			addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
+			mux.Handle("/rpc", rpcServer)
+			server = &http.Server{
+				Addr:    addr,
+				Handler: mux,
+			}
+
+			go func(s *http.Server) {
+				d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr, nameField)
+				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					d.internalLogger.Log(log.LevelError, "error starting rpc server", nameField)
+					return
+				}
+				d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully", nameField)
+			}(server)
+		}
+	}
+
+	err = notifier.Notify(NotifyStateReady)
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.Error("error", err), nameField)
+	}
+
+	// block until all services have exited their lifecycles
+	dwg.Wait()
+
+	// -- ALL SERVICES HAVE EXITED THEIR LIFECYCLES --
+	//         CLEANUP AND SHUTDOWN
+
+	// --- Clean up RPC if it was enabled and set ---
+	if server != nil {
+		timedctx, timedcancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer timedcancel()
+		if err := server.Shutdown(timedctx); err != nil {
+			return err
+		}
+	}
+
+	// since all services have exited their lifecycles, we can close the states update channel.
+	close(stateUpdateC)
+	<-statesDoneC // wait for states watcher to finish
+	d.internalLogger.Log(log.LevelDebug, "states channel completed", nameField)
+
+	// TODO: these logs should not be interleaved with the user service logs.
+	err = intracom.Close(d.ic)
+	// err = d.icStates.Close()
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error closing intracom", log.Error("error", err), nameField)
+	} else {
+		d.internalLogger.Log(log.LevelDebug, "intracom closed", nameField)
+	}
+
+	close(d.logC) // signal close the log channel
+	<-loggerDoneC // wait for log watcher to finish
+
+	d.internalLogger.Log(log.LevelDebug, "service log watcher closed", nameField)
+
+	// if the internal logger is an io.Closer, close it.
+	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
+		internalLogger.Close()
+	}
+	return nil
 }
 
 // AddServices adds a list of services to the daemon.
 // if any service fails to be added, the error is logged and the next service is attempted.
 // any services that fail likely are failing due to name overlap and will be skipped
 // if daemon is already started, no new services can be added.
-func (d *daemon) AddServices(services ...*ServiceContext) error {
-	if d.started.Load() {
-		return fmt.Errorf("cannot add a service once the daemon is started")
-	}
-
+func (d *daemon) AddServices(services ...Service) error {
 	for _, service := range services {
 		err := d.addService(service)
 		if err != nil {
-			d.log.Error(err.Error())
-			continue
+			return err
 		}
 	}
 	return nil
 }
 
-func (d *daemon) Start(ctx context.Context) error {
-	if d.started.Load() {
-		return fmt.Errorf("daemon is already running")
-	}
-
-	if d.total < 1 {
-		return fmt.Errorf("no services were added prior to starting the daemon")
-	}
-
-	d.started.Store(true)
-
-	// start an intracom instance for daemon to communicate with manager
-	err := d.iSignals.Start()
-	if err != nil {
-		return err
-	}
-
-	// start an intracom instance for services to communicate with manager
-	err = d.iStates.Start()
-	if err != nil {
-		return err
-	}
-
-	// register the internal states topic for use by the service state watcher to push states to services.
-	statePublishC, unregisterStateC := d.iStates.Register(internalServiceStates)
-
-	// noop consumer to ensure that internal states broadcaster is actively storing last messages
-	// in a case where the caller never makes a subscription to the internal states topic.
-	// basically, if the rxd states helper functions are never used.
-	_, unsubscribe := d.iStates.Subscribe(intracom.SubscriberConfig{
-		Topic:         internalServiceStates,
-		ConsumerGroup: "_rxd.noop",
-		BufferSize:    1,
-		BufferPolicy:  intracom.DropOldest,
-	})
-	defer unsubscribe()
-
-	publishSignalC, unregisterSignalC := d.iSignals.Register(internalSignalsManager)
-
-	var wg sync.WaitGroup
-
-	wg.Add(3) // signal watcher and manager
-
-	signalStopC := make(chan struct{}, 1)
-
-	go d.signalWatcher(&wg, ctx, publishSignalC, signalStopC) // OS Signal watcher routine.
-	go d.managerWatcher(&wg)
-	go d.manager(&wg, statePublishC, signalStopC) // handles starting services and watching for signal to shutdown
-
-	wg.Wait() // wait for signal watcher and manager to finish
-
-	d.log.Debug("manager and signal watcher have stopped running, daemon is exiting")
-
-	// ensure unregisters take place before closing intracom instances
-	unregisterStateC()
-	unregisterSignalC()
-
-	d.started.Store(false)
-
-	d.iSignals.Close() // close the internal signals intracom, now unusable
-	d.iStates.Close()  // close the internal states intracom, now unusable
-	return nil
+// AddService adds a service to the daemon.
+// if the service fails to be added, the error will be returned.
+func (d *daemon) AddService(service Service) error {
+	return d.addService(service)
 }
 
 // addService is a helper function to add a service to the daemon.
-func (d *daemon) addService(s *ServiceContext) error {
-	// ensure the service name hasn't already been added.
-	if service, exists := d.services.Load(s.Name); exists {
-		return fmt.Errorf("service with the name '%s' already exists", service.(*ServiceContext).Name)
+func (d *daemon) addService(service Service) error {
+	if d.started.Load() {
+		return ErrAddingServiceOnceStarted
 	}
 
-	d.services.Store(s.Name, s)
-	d.total++
+	if service.Name == "" {
+		return ErrNoServiceName
+	}
+
+	if service.Manager == nil {
+		service.Manager = NewDefaultManager()
+	}
+
+	// NOTE: reflect is being used here only before startup.
+	// Since both value structs and pointer structs are allowed to meet an interface
+	// the compiler wont catch nil pointer struct with a value receiver.
+	// Instead of throwing a panic causing partial startup in Start() later
+	// we can pre-flight check the service handler once before hand.
+	// Runners can be caught via recover() in their own routines and passed to handler as an error.
+
+	err := checkNilStructPointer(reflect.ValueOf(service.Manager), reflect.TypeOf(service.Manager), "Manage")
+	if err != nil {
+		return err
+	}
+
+	// add the service to the daemon services
+	d.services[service.Name] = DaemonService{
+		Name:   service.Name,
+		Runner: service.Runner,
+	}
+
+	// add the handler to a similar map of service name to handlers
+	d.managers[service.Name] = service.Manager
 
 	return nil
 }
 
-func (d *daemon) manager(wg *sync.WaitGroup, statePublishC chan<- States, doneC chan<- struct{}) {
-	defer wg.Done()
-	// create a channel for each service to publish state updates to state watcher
-	stateUpdateC := make(chan StateUpdate, d.total*2)
-	defer close(stateUpdateC)
-
-	// a channel to signal the service state watcher to stop.
-	stateWatcherStopC := make(chan struct{})
-
-	// launch the service state watcher routine, signals on doneC when routine has exited.
-	watcherDoneC := d.serviceStateWatcher(statePublishC, stateUpdateC, stateWatcherStopC)
-
-	// services wait group
-	var swg sync.WaitGroup
-
-	var totalStarted int
-
-	d.services.Range(func(name, anyService interface{}) bool {
-		service, ok := anyService.(*ServiceContext) // all services must be of type *ServiceContext
-		if !ok {
-			d.log.Error("failed to start service", "name", name, "error", "failed to cast service to *ServiceContext")
-			return false
-		}
-		// service := service                                // rebind loop variable
-		service.iStates = d.iStates // attach the manager's internal states to each service
-		if service.Log == nil {     // if service has no logger, create child off the daemons logger
-			service.Log = d.log.With("service", service.Name) // attach child logger instance with service name
-		}
-
-		swg.Add(1)
-		// Start each service in its own routine logic / conditional lifecycle.
-		go startService(&swg, stateUpdateC, service)
-		totalStarted++
-		return true
-	})
-
-	d.log.Debug("manager started services", "total", totalStarted)
-	swg.Wait() // blocks until all services have exited their lifecycles
-
-	// all services have exited their lifecycles at this point.
-	close(stateWatcherStopC) // signal to state watcher to stop
-	<-watcherDoneC           // wait for state watcher to signal done
-	close(doneC)             // signal done in case signal watcher is still running
-
-}
-
-// serviceStateWatcher is run in its own routine by daemon to listen for updates from services as they change lifecycles.
-// it will publish the states of all services to anyone listening on the internal states topic.
-func (d *daemon) serviceStateWatcher(statePublishC chan<- States, stateUpdateC <-chan StateUpdate, stopC chan struct{}) <-chan struct{} {
-	signalDoneC := make(chan struct{})
+func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
+	doneC := make(chan struct{})
 
 	go func() {
-		defer close(signalDoneC)
-
-		// create a local states map to track the state of each service.
-		localStates := make(States)
-
-		d.services.Range(func(anyName, anyService interface{}) bool {
-			name, ok := anyName.(string)
-			if !ok {
-				d.log.Error("state watcher failed to update local service cache", "name", name, "error", "failed to cast service name to string")
-				return false
-			}
-			// update the local states map with the initial state of each service.
-			localStates[name] = InitState
-			return true
-		})
-
-		for {
-			select {
-			case <-stopC:
-				return
-			case update, open := <-stateUpdateC:
-				if !open {
-					return
-				}
-				currState, found := localStates[update.Name]
-				if found && currState == update.State {
-					// skip any non-changes from previous state.
-					continue
-				}
-
-				// update the local state
-				localStates[update.Name] = update.State
-
-				// make a copy of the updated local states to send out
-				states := make(States)
-				for name, state := range localStates {
-					states[name] = state
-				}
-
-				// send the updated states to anyone listening
-				// at minimum noop consumer is subscribed to ensure last message is stored.
-				select {
-				case <-stopC:
-					return
-				case statePublishC <- states:
-				}
-			}
+		for entry := range logC {
+			d.serviceLogger.Log(entry.Level, entry.Message, entry.Fields...)
 		}
+		close(doneC)
 	}()
 
-	return signalDoneC
+	return doneC
 }
+func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateUpdatesC <-chan StateUpdate) <-chan struct{} {
+	doneC := make(chan struct{})
 
-// signal watcher is run in its own routine by daemon to watch for context done and OS Signals.
-func (d *daemon) signalWatcher(wg *sync.WaitGroup, ctx context.Context, managerC chan<- rxdSignal, stopSignal <-chan struct{}) {
-	defer wg.Done()
+	go func() {
+		// retrieve the publisher channel for the states topic
+		statesC := statesTopic.PublishChannel()
 
-	if len(d.conf.Signals) == 0 {
-		d.conf.Signals = []os.Signal{syscall.SIGINT, syscall.SIGTERM}
-	}
+		states := make(ServiceStates, len(d.services))
+		for name := range d.services {
+			states[name] = StateExit
+		}
 
-	// Watch for OS Signals in separate go routine so we dont block main thread.
-	d.log.Debug("daemon starting signal watcher")
+		// states watcher routine should be closed after all services have exited.
+		for state := range stateUpdatesC {
+			// if current, ok := states[state.Name]; ok && current != state.State {
+			// TODO: daemon internal logs like this should probably get their own logger like intracom.
+			// we dont really want these logs interleaved with the user service logs.
+			// d.logger.Log(log.LevelDebug, "service state update", log.String("service_name", state.Name), log.String("state", state.State.String()))
+			// }
+			// update the state of the service only if it changed.
+			states[state.Name] = state.State
 
-	osSignal := make(chan os.Signal, 1)
-	signal.Notify(osSignal, d.conf.Signals...)
+			// send the updated states to the intracom bus
+			statesC <- states.copy()
+		}
 
-	// TODO: future, add restart/hot-reload signal handler
-	// after receiving any signal, inform manager to stop.
-	defer func() {
-		signal.Stop(osSignal)  // stop receiving OS signals
-		close(osSignal)        // close the signal channel
-		managerC <- signalStop // signal to manager via intracom to stop
+		// signal done after states watcher has finished.
+		close(doneC)
 	}()
 
-	for {
-		select {
-		case <-ctx.Done():
-			d.log.Debug("daemon received context done signal")
-			return
-		case <-osSignal:
-			d.log.Debug("daemon os signal received")
-			return
-		case <-stopSignal:
-			d.log.Debug("daemon received signal from manager that all services have stopped")
-			return
-		}
-	}
+	return doneC
 }
 
-// managerWatcher is run in its own routine by daemon to watch for internal signals from daemon to manager.
-// if a signal is received from daemon, it will signal all services manager is running to shutdown.
-func (d *daemon) managerWatcher(wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	// watch for internal signals from daemon to manager
-	signalC, unsubscribe := d.iSignals.Subscribe(intracom.SubscriberConfig{
-		Topic:         internalSignalsManager,
-		ConsumerGroup: "manager",
-		BufferSize:    1,
-		BufferPolicy:  intracom.DropNone,
-	})
-	defer unsubscribe()
-
-	<-signalC // if we receive a signal from daemon signal watcher, we are done running.
-	d.log.Debug("manager watcher received stop signal from daemon signal watcher")
-
-	d.services.Range(func(anyName, anyService interface{}) bool {
-		service, ok := anyService.(*ServiceContext)
-		if !ok {
-			d.log.Error("failed to stop service", "name", anyName, "error", "failed to cast service to *ServiceContext")
-			return false
+func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string) error {
+	if ival.Kind() == reflect.Ptr && ival.IsNil() {
+		handlerMethod, _ := itype.Elem().MethodByName(method)
+		if handlerMethod.Type.NumIn() > 0 && handlerMethod.Type.In(0).Kind() == reflect.Struct {
+			return ErrUninitialized{StructName: itype.String(), Method: method}
 		}
-		service.shutdown()
-		return true
-	})
-
-	d.log.Debug("manager watcher signaled shutdown to all services", "total", d.total)
+	}
+	return nil
 }

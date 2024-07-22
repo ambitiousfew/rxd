@@ -2,57 +2,103 @@ package rxd
 
 import (
 	"testing"
+	"time"
 )
 
-type validService struct{}
+func TestNewService(t *testing.T) {
+	name := "test-mock-service"
 
-func (vs *validService) Init(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, IdleState)
-}
-func (vs *validService) Idle(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, RunState)
-}
-func (vs *validService) Run(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, StopState)
-}
-func (vs *validService) Stop(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, ExitState)
-}
+	mockService := newMockService(100 * time.Millisecond)
+	service := NewService(name, mockService)
 
-type invalidService struct{}
+	if service.Name != name {
+		t.Errorf("Expected service.Name to be %s, got %s", name, service.Name)
+	}
 
-func (vs *invalidService) Init(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, IdleState)
-}
+	if service.Runner != mockService {
+		t.Errorf("Expected service.Runner to be %v, got %v", mockService, service.Runner)
+	}
 
-// missing Idle
-func (vs *invalidService) Run(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, StopState)
-}
-func (vs *invalidService) Stop(sc *ServiceContext) ServiceResponse {
-	return NewResponse(nil, ExitState)
-}
-
-func meetsInterface[T any](i T, n any) bool {
-	_, ok := n.(T)
-	return ok
-}
-
-func TestValidService(t *testing.T) {
-	var vs any = &validService{}
-
-	_, ok := vs.(Service)
-	if !ok {
-		t.Errorf("ValidService did not meet the Service interface to be a valid service")
+	if _, ok := service.Manager.(RunContinuousManager); !ok {
+		t.Errorf("Expected service.Handler to be DefaultHandler{}, got %v", service.Manager)
 	}
 }
 
-func TestInvalidService(t *testing.T) {
-	var ivs any = &invalidService{}
+func TestNewServiceWithHandler(t *testing.T) {
+	name := "test-mock-service"
 
-	_, ok := ivs.(Service)
+	mockService := newMockService(100 * time.Millisecond)
+	mockManager := mockServiceManager{}
+	service := NewService(name, mockService, WithManager(mockManager))
 
-	if ok {
-		t.Errorf("InvalidService should not not meet the Service interface but did")
+	if service.Name != name {
+		t.Errorf("Expected service.Name to be %s, got %s", name, service.Name)
+	}
+
+	if service.Runner != mockService {
+		t.Errorf("Expected service.Runner to be %v, got %v", mockService, service.Runner)
+	}
+
+	if _, ok := service.Manager.(mockServiceManager); !ok {
+		t.Errorf("Expected service.Handler to be a mockServiceHandler{}, got %v", service.Manager)
+	}
+
+}
+
+type mockService struct {
+	TransitionTimeout time.Duration
+}
+
+func newMockService(stateTimeout time.Duration) *mockService {
+	return &mockService{
+		TransitionTimeout: stateTimeout,
+	}
+}
+
+func (m *mockService) Init(sctx ServiceContext) error {
+	ticker := time.NewTicker(m.TransitionTimeout)
+	defer ticker.Stop()
+
+	select {
+	case <-sctx.Done():
+		return nil
+	case <-ticker.C:
+		return nil
+	}
+}
+
+func (m *mockService) Idle(sctx ServiceContext) error {
+	ticker := time.NewTicker(m.TransitionTimeout)
+	defer ticker.Stop()
+
+	select {
+	case <-sctx.Done():
+		return nil
+	case <-ticker.C:
+		return nil
+	}
+}
+
+func (m *mockService) Run(sctx ServiceContext) error {
+	ticker := time.NewTicker(m.TransitionTimeout)
+	defer ticker.Stop()
+
+	select {
+	case <-sctx.Done():
+		return nil
+	case <-ticker.C:
+		return nil
+	}
+}
+
+func (m *mockService) Stop(sctx ServiceContext) error {
+	ticker := time.NewTicker(m.TransitionTimeout)
+	defer ticker.Stop()
+
+	select {
+	case <-sctx.Done():
+		return nil
+	case <-ticker.C:
+		return nil
 	}
 }
