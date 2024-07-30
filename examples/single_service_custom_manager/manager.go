@@ -18,7 +18,7 @@ type CustomManager struct{}
 // If an error occurs during Idle or Run state, the manager will transition to the Stop state.
 // The Stop state will always transition back to the Init state if there is no error.
 // The manager always checks for context cancellation and will exit if the context is cancelled between state transitions.
-func (m CustomManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateState func(string, rxd.State)) {
+func (m CustomManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateC chan<- rxd.StateUpdate) {
 	// Set an initial state to init
 	state := rxd.StateInit
 
@@ -32,7 +32,7 @@ func (m CustomManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, upd
 		// calling this function sends the current state to RxD's states watcher.
 		// this is useful when wanting to monitor the state of a service or
 		// have other services subscribe to the state of any other service.
-		updateState(ds.Name, state)
+		updateC <- rxd.StateUpdate{Name: ds.Name, State: state}
 
 		select {
 		case <-sctx.Done():
@@ -85,5 +85,5 @@ func (m CustomManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, upd
 	}
 
 	// Because ExitState is a terminal state, we should send the final state to the states watcher before exiting.
-	updateState(ds.Name, rxd.StateExit)
+	updateC <- rxd.StateUpdate{Name: ds.Name, State: rxd.StateExit}
 }

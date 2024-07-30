@@ -1,3 +1,13 @@
+// For this example we will create two services that will run until they are stopped.
+// The first service is a simple HTTP server that listens on port 8000 and responds with a JSON object.
+// Response: 200 OK  Body: {"hello": "world"}
+//
+// This example is meant to show off RxDs ability to have any service subscribe interest to the state of another service.
+// The Polling service will Idle until the HelloWorldAPI service enters a RunState.
+// Then the Polling service will enter Run and resubscribe interest to the HelloWorldAPI service Exiting its RunState.
+// The Polling service can comfortably poll the HelloWorldAPI service for changes in state if the HelloWorldAPI service
+// has a sudden change in state causing it to leave its RunState the Polling service will be notified as that happens.
+// and can immediately react without Polling an API service that is no longer even running.
 package main
 
 import (

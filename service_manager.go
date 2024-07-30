@@ -9,7 +9,7 @@ import (
 
 // ServiceManager interface defines the methods that a service handler must implement
 type ServiceManager interface {
-	Manage(ctx ServiceContext, dService DaemonService, updateState func(service string, state State))
+	Manage(ctx ServiceContext, dService DaemonService, updateC chan<- StateUpdate)
 }
 
 type ManagerStateTimeouts map[State]time.Duration
@@ -41,7 +41,7 @@ func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 // RunContinuousManager runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
-func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, updateState func(string, State)) {
+func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -59,7 +59,7 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
-		updateState(ds.Name, state)
+		updateC <- StateUpdate{Name: ds.Name, State: state}
 
 		select {
 		case <-sctx.Done():
@@ -127,5 +127,112 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 	}
 
 	// push final state to the daemon states watcher.
-	updateState(ds.Name, StateExit)
+	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+}
+
+type RunUntilSuccessManager struct {
+	StartupDelay time.Duration
+	DefaultDelay time.Duration
+}
+
+// NewRunUntilSuccessManager creates a new RunUntilSuccessManager with the provided startup delay.
+// RunUntilSuccessManager will continue to try to run the service lifecycles until the service
+// exits Run with nil error.
+func NewRunUntilSuccessManager(defaultDelay, startupDelay time.Duration) RunUntilSuccessManager {
+	m := RunUntilSuccessManager{
+		StartupDelay: startupDelay,
+		DefaultDelay: defaultDelay,
+	}
+
+	return m
+}
+
+func (m RunUntilSuccessManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) {
+	defer func() {
+		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
+		if r := recover(); r != nil {
+			sctx.Log(log.LevelError, fmt.Sprintf("recovered from a panic: %v", r))
+		}
+	}()
+
+	ticker := time.NewTicker(m.StartupDelay)
+	defer ticker.Stop()
+
+	var hasStopped bool
+	// run continous manager will always start from the init state.
+	var state State = StateInit
+	select {
+	case <-sctx.Done():
+		state = StateExit
+	case <-ticker.C:
+		// startup delay has passed, we can start the service runner loop.
+		if err := ds.Runner.Init(sctx); err != nil {
+			sctx.Log(log.LevelError, err.Error())
+			state = StateStop
+		}
+		state = StateIdle
+		ticker.Reset(m.DefaultDelay)
+	}
+
+	for state != StateExit {
+		// relay the current state we are about to enter to the daemon's states watcher.
+		updateC <- StateUpdate{Name: ds.Name, State: state}
+
+		select {
+		case <-sctx.Done():
+			// if the context is cancelled, transition to exit so we exit the loop.
+			state = StateExit
+			continue
+		case <-ticker.C:
+			if hasStopped {
+				// if we enter are entering this block we are attempting a state other than exit.
+				hasStopped = false
+			}
+
+			switch state {
+			case StateInit:
+				if err := ds.Runner.Init(sctx); err != nil {
+					sctx.Log(log.LevelError, err.Error())
+					state = StateStop
+					continue
+				}
+				state = StateIdle
+
+			case StateIdle:
+				if err := ds.Runner.Idle(sctx); err != nil {
+					sctx.Log(log.LevelError, err.Error())
+					state = StateStop
+					continue
+				}
+				state = StateRun
+
+			case StateRun:
+				if err := ds.Runner.Run(sctx); err != nil {
+					sctx.Log(log.LevelError, err.Error())
+					state = StateStop
+					continue
+				}
+				// run exited successfully, we can exit the loop.
+				state = StateExit
+			case StateStop:
+				if err := ds.Runner.Stop(sctx); err != nil {
+					sctx.Log(log.LevelError, err.Error())
+				}
+				state = StateInit
+				hasStopped = true
+			}
+		}
+
+	}
+
+	if !hasStopped {
+		// ensure that if any lifecycle ran after stop, we run stop again (for cleanup).
+		if err := ds.Runner.Stop(sctx); err != nil {
+			sctx.Log(log.LevelError, err.Error())
+		}
+	}
+
+	// push final state to the daemon states watcher.
+	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+
 }

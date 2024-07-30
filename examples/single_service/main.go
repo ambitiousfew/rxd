@@ -1,3 +1,11 @@
+// For this example we will create a simple API service that will run until it is stopped
+// either via the context timeout (30s) or an OS signal (SIGINT, SIGTERM).
+// It runs a Hello World API server on port 8000, http://127.0.0.1:8000/
+//
+// During run the service spawns an intentional timeout error that triggers a shutdown of the server.
+// This is just to simulate edge cases that might lead to something forcing an error against the
+// HTTP server causing it to shutdown and to show how the service will handle cycling back through
+// the lifecycle methods.
 package main
 
 import (

@@ -179,9 +179,7 @@ func (d *daemon) Start(parent context.Context) error {
 			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
 			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, d.ic)
 			// run the service according to the manager policy
-			manager.Manage(sctx, ds, func(service string, state State) {
-				stateC <- StateUpdate{Name: service, State: state}
-			})
+			manager.Manage(sctx, ds, stateC)
 			scancel()
 			wg.Done()
 			d.internalLogger.Log(log.LevelInfo, "service has stopped", log.String("service_name", ds.Name), nameField)
