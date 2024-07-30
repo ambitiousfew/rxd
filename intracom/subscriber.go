@@ -15,16 +15,16 @@ type subscriber[T any] struct {
 
 	ch     chan T
 	stopC  chan struct{}
-	closed atomic.Bool
+	closed *atomic.Bool
 }
 
-func newSubscriber[T any](conf SubscriberConfig) *subscriber[T] {
+func newSubscriber[T any](conf SubscriberConfig) subscriber[T] {
 	var timer *time.Timer
 	if conf.BufferPolicy == DropNewestAfterTimeout || conf.BufferPolicy == DropOldestAfterTimeout {
 		timer = time.NewTimer(conf.DropTimeout)
 		timer.Stop()
 	}
-	return &subscriber[T]{
+	return subscriber[T]{
 		// topic:         conf.Topic,
 		consumerGroup: conf.ConsumerGroup,
 		bufferSize:    conf.BufferSize,
@@ -33,7 +33,7 @@ func newSubscriber[T any](conf SubscriberConfig) *subscriber[T] {
 		timer:         timer,
 		ch:            make(chan T, conf.BufferSize),
 		stopC:         make(chan struct{}),
-		closed:        atomic.Bool{},
+		closed:        &atomic.Bool{},
 	}
 }
 

@@ -132,7 +132,7 @@ func (t *topic[T]) Close() error {
 //
 //	requestC <-chan any - a channel to receive requests to interrupt the broadcaster.
 func (t *topic[T]) broadcast(requestC <-chan any) {
-	subscribers := make(map[string]*subscriber[T])
+	subscribers := make(map[string]subscriber[T])
 
 	var publishC chan T
 

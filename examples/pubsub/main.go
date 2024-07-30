@@ -40,6 +40,7 @@ func main() {
 	go func(ctx context.Context, topic intracom.Topic[int]) {
 		publishC := topic.PublishChannel()
 
+		// publish 100 messages to the topic
 		for i := 0; i < 100; i++ {
 			select {
 			case <-ctx.Done():
@@ -51,6 +52,7 @@ func main() {
 		topic.Close()
 	}(parent, topic)
 
+	// consume the messages over subscriber channel.
 	for msg := range sub {
 		log.Println("received message", msg)
 	}

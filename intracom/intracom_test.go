@@ -482,7 +482,7 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		pubC := testTopic.PublishChannel()
 
 		publishing := true
-		for count := 0; publishing && count < 1_000_000; count++ {
+		for count := 0; publishing && count < b.N; count++ {
 			select {
 			case <-ctx.Done():
 				b.Errorf("publisher timed out waiting for subscriber")
