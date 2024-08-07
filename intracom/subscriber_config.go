@@ -2,20 +2,20 @@ package intracom
 
 import "time"
 
-type BufferPolicy int
+// type BufferPolicy int
 
-const (
-	DropNone BufferPolicy = iota
-	DropOldest
-	DropOldestAfterTimeout
-	DropNewest
-	DropNewestAfterTimeout
-)
+// const (
+// 	DropNone BufferPolicy = iota
+// 	DropOldest
+// 	DropOldestAfterTimeout
+// 	DropNewest
+// 	DropNewestAfterTimeout
+// )
 
-type SubscriberConfig struct {
+type SubscriberConfig[T any] struct {
 	ConsumerGroup string
 	ErrIfExists   bool
 	BufferSize    int
-	BufferPolicy  BufferPolicy
+	BufferPolicy  BufferPolicyHandler[T]
 	DropTimeout   time.Duration
 }

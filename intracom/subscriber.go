@@ -1,126 +1,82 @@
 package intracom
 
 import (
+	"errors"
 	"sync/atomic"
 	"time"
 )
 
 type subscriber[T any] struct {
-	// topic         string
 	consumerGroup string
 	bufferSize    int
-	bufferPolicy  BufferPolicy
+	bufferPolicy  BufferPolicyHandler[T]
 	dropTimeout   time.Duration
-	timer         *time.Timer
-
-	ch     chan T
-	stopC  chan struct{}
-	closed *atomic.Bool
+	ch            chan T
+	stopC         chan struct{}
+	closed        *atomic.Bool
 }
 
-func newSubscriber[T any](conf SubscriberConfig) subscriber[T] {
-	var timer *time.Timer
-	if conf.BufferPolicy == DropNewestAfterTimeout || conf.BufferPolicy == DropOldestAfterTimeout {
-		timer = time.NewTimer(conf.DropTimeout)
-		timer.Stop()
+func newSubscriber[T any](conf SubscriberConfig[T]) subscriber[T] {
+	var bufferPolicy BufferPolicyHandler[T]
+	// ensure timer is set for timeout buffer policies
+	switch bp := conf.BufferPolicy.(type) {
+	case DropOldestAfterTimeoutHandler[T]:
+		if bp.Timer == nil {
+			bp.Timer = time.NewTimer(conf.DropTimeout)
+		}
+		bp.Timer.Stop()
+	case DropNewestAfterTimeoutHandler[T]:
+		if bp.Timer == nil {
+			bp.Timer = time.NewTimer(conf.DropTimeout)
+		}
+		bp.Timer.Stop()
+		bufferPolicy = bp
+	default:
+		bufferPolicy = bp
 	}
+
 	return subscriber[T]{
-		// topic:         conf.Topic,
 		consumerGroup: conf.ConsumerGroup,
 		bufferSize:    conf.BufferSize,
-		bufferPolicy:  conf.BufferPolicy,
+		bufferPolicy:  bufferPolicy,
 		dropTimeout:   conf.DropTimeout,
-		timer:         timer,
 		ch:            make(chan T, conf.BufferSize),
 		stopC:         make(chan struct{}),
 		closed:        &atomic.Bool{},
 	}
 }
 
+func (s subscriber[T]) Chan() <-chan T {
+	return s.ch
+}
+
 // send sends a message to the subscriber's channel.
 // if the channel is full, the buffer policy will come into effect on
 // how to handle the message.
-func (s *subscriber[T]) send(message T) {
+func (s subscriber[T]) Send(message T) error {
 	if s.closed.Load() {
-		return
+		return errors.New("subscriber already closed")
 	}
 
-	switch s.bufferPolicy {
-	case DropNone:
-		select {
-		case <-s.stopC:
-			return
-		case s.ch <- message:
-		}
-		return
-
-	case DropOldest: // if the channel is full, drop the oldest message
-		select {
-		case <-s.stopC:
-			return
-		case s.ch <- message:
-		default:
-			<-s.ch          // pop one
-			s.ch <- message // push one
-			return
-		}
-
-	case DropOldestAfterTimeout:
-		select {
-		case <-s.stopC:
-			return
-		case s.ch <- message:
-		default:
-			s.timer.Reset(s.dropTimeout)
-			select {
-			case s.ch <- message: // try to push the message again
-			case <-s.timer.C: // if the timer expires, drop the oldest message
-				<-s.ch
-				s.ch <- message
-				return
-			}
-		}
-
-	case DropNewest: // try to push the message, if the channel is full, drop the current message
-		select {
-		case <-s.stopC:
-			return
-		case s.ch <- message:
-		default:
-			return
-		}
-
-	case DropNewestAfterTimeout:
-		select {
-		case <-s.stopC:
-			return
-		case s.ch <- message:
-		default:
-			s.timer.Reset(s.dropTimeout)
-			select {
-			case <-s.stopC:
-				return
-			case s.ch <- message:
-			case <-s.timer.C:
-				// do nothing
-				return
-			}
-		}
-	}
+	return s.bufferPolicy.Handle(s.ch, message, s.stopC)
 }
 
-func (s *subscriber[T]) close() {
+func (s subscriber[T]) Close() error {
 	if s.closed.Swap(true) {
-		return
+		return errors.New("subscriber already closed")
 	}
 
 	//signal to stop
 	close(s.stopC)
 
-	// if timer is not nil, stop it
-	if s.timer != nil {
-		s.timer.Stop()
+	// stop the timer if it was a timeout buffer policy
+	switch bp := s.bufferPolicy.(type) {
+	case DropOldestAfterTimeoutHandler[T]:
+		bp.Timer.Stop()
+	case DropNewestAfterTimeoutHandler[T]:
+		bp.Timer.Stop()
 	}
 
 	close(s.ch)
+	return nil
 }

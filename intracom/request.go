@@ -1,7 +1,7 @@
 package intracom
 
 type subscribeRequest[T any] struct {
-	conf      SubscriberConfig
+	conf      SubscriberConfig[T]
 	responseC chan<- subscribeResponse[T]
 }
 

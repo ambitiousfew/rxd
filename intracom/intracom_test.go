@@ -173,10 +173,10 @@ func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  DropNoneHandler[string]{},
 	})
 
 	if err != nil {
@@ -193,10 +193,10 @@ func TestIntracom_CreateSubscriptionWithNoTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  DropNoneHandler[string]{},
 	})
 
 	if err == nil {
@@ -226,10 +226,10 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  DropNoneHandler[string]{},
 	})
 
 	if err != nil {
@@ -277,11 +277,11 @@ func TestIntracom_SinglePublisherSingleSubscriber(t *testing.T) {
 		defer wg.Done()
 		maxWait := 500 * time.Millisecond
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxWait, SubscriberConfig{
-			ConsumerGroup: t.Name(), // unique consumer group name
-			ErrIfExists:   true,     // error if consumer group already exists
-			BufferSize:    1,        // subscriber channel buffer size
-			BufferPolicy:  DropNone, // policy for handling buffer overflow
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxWait, SubscriberConfig[int]{
+			ConsumerGroup: t.Name(),               // unique consumer group name
+			ErrIfExists:   true,                   // error if consumer group already exists
+			BufferSize:    1,                      // subscriber channel buffer size
+			BufferPolicy:  DropNoneHandler[int]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -376,11 +376,11 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		subscriberName := b.Name() + "-1"
 
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig{
-			ConsumerGroup: subscriberName, // unique consumer group name
-			ErrIfExists:   true,           // error if consumer group already exists
-			BufferSize:    1,              // subscriber channel buffer size
-			BufferPolicy:  DropNone,       // policy for handling buffer overflow
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[int]{
+			ConsumerGroup: subscriberName,         // unique consumer group name
+			ErrIfExists:   true,                   // error if consumer group already exists
+			BufferSize:    1,                      // subscriber channel buffer size
+			BufferPolicy:  DropNoneHandler[int]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -423,11 +423,11 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		subscriberName := b.Name() + "-2"
 
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig{
-			ConsumerGroup: subscriberName, // unique consumer group name
-			ErrIfExists:   true,           // error if consumer group already exists
-			BufferSize:    1,              // subscriber channel buffer size
-			BufferPolicy:  DropNone,       // policy for handling buffer overflow
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[int]{
+			ConsumerGroup: subscriberName,         // unique consumer group name
+			ErrIfExists:   true,                   // error if consumer group already exists
+			BufferSize:    1,                      // subscriber channel buffer size
+			BufferPolicy:  DropNoneHandler[int]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
