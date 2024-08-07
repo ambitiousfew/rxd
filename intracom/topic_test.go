@@ -24,7 +24,7 @@ func TestIntracom_TopicSubscribe(t *testing.T) {
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		ErrIfExists:   true,
-		BufferPolicy:  DropNoneHandler[string]{},
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -54,7 +54,7 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 		ConsumerGroup: t.Name() + "_1",
 		ErrIfExists:   true,
 		BufferSize:    1,
-		BufferPolicy:  DropNoneHandler[string]{},
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -64,7 +64,7 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 		ConsumerGroup: t.Name() + "_2",
 		ErrIfExists:   true,
 		BufferSize:    1,
-		BufferPolicy:  DropNoneHandler[string]{},
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -104,7 +104,7 @@ func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
 		ConsumerGroup: t.Name(),
 		ErrIfExists:   true,
 		BufferSize:    1,
-		BufferPolicy:  DropNoneHandler[string]{},
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 
 	if err == nil {

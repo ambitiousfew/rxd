@@ -9,9 +9,9 @@ type BufferPolicyHandler[T any] interface {
 	Handle(ch chan T, message T, stopC <-chan struct{}) error
 }
 
-type DropNoneHandler[T any] struct{}
+type BufferPolicyDropNone[T any] struct{}
 
-func (d DropNoneHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
+func (d BufferPolicyDropNone[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
 		return errors.New("subscriber stopped")
@@ -20,9 +20,9 @@ func (d DropNoneHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}) 
 	}
 }
 
-type DropOldestHandler[T any] struct{}
+type BufferPolicyDropOldest[T any] struct{}
 
-func (d DropOldestHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
+func (d BufferPolicyDropOldest[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
 		// subscriber stopped dont try to send the message
@@ -53,12 +53,12 @@ func (d DropOldestHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}
 	}
 }
 
-type DropOldestAfterTimeoutHandler[T any] struct {
+type BufferPolicyDropOldestAfterTimeout[T any] struct {
 	Timer       *time.Timer
 	DropTimeout time.Duration
 }
 
-func (d DropOldestAfterTimeoutHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
+func (d BufferPolicyDropOldestAfterTimeout[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
 		// subscriber stopped dont try to send the message
@@ -102,9 +102,9 @@ func (d DropOldestAfterTimeoutHandler[T]) Handle(ch chan T, message T, stopC <-c
 	}
 }
 
-type DropNewestHandler[T any] struct{}
+type BufferPolicyDropNewest[T any] struct{}
 
-func (d DropNewestHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
+func (d BufferPolicyDropNewest[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
 		return errors.New("subscriber stopped")
@@ -118,12 +118,12 @@ func (d DropNewestHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}
 	}
 }
 
-type DropNewestAfterTimeoutHandler[T any] struct {
+type BufferPolicyDropNewestAfterTimeout[T any] struct {
 	Timer      *time.Timer
 	DropTimout time.Duration
 }
 
-func (d DropNewestAfterTimeoutHandler[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
+func (d BufferPolicyDropNewestAfterTimeout[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
 		// subscriber stopped dont try to send the message

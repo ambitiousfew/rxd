@@ -141,11 +141,11 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalStatesConsumer(action, target, sc.fqcn)
 
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig{
+		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
+			BufferPolicy:  intracom.BufferPolicyDropOldest[ServiceStates]{},
 		})
 
 		// sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
@@ -216,11 +216,11 @@ func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, se
 
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalStatesConsumer(action, target, sc.fqcn)
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig{
+		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
+			BufferPolicy:  intracom.BufferPolicyDropOldest[ServiceStates]{},
 		})
 		// sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
 		// 	ConsumerGroup: consumer,
@@ -285,11 +285,11 @@ func (sc serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSta
 		defer close(ch)
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalAllStatesConsumer(sc.fqcn)
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig{
+		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
-			BufferPolicy:  intracom.DropOldest,
+			BufferPolicy:  intracom.BufferPolicyDropOldest[ServiceStates]{},
 		})
 
 		// sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{

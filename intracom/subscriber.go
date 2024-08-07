@@ -20,12 +20,12 @@ func newSubscriber[T any](conf SubscriberConfig[T]) subscriber[T] {
 	var bufferPolicy BufferPolicyHandler[T]
 	// ensure timer is set for timeout buffer policies
 	switch bp := conf.BufferPolicy.(type) {
-	case DropOldestAfterTimeoutHandler[T]:
+	case BufferPolicyDropOldestAfterTimeout[T]:
 		if bp.Timer == nil {
 			bp.Timer = time.NewTimer(conf.DropTimeout)
 		}
 		bp.Timer.Stop()
-	case DropNewestAfterTimeoutHandler[T]:
+	case BufferPolicyDropNewestAfterTimeout[T]:
 		if bp.Timer == nil {
 			bp.Timer = time.NewTimer(conf.DropTimeout)
 		}
@@ -71,9 +71,9 @@ func (s subscriber[T]) Close() error {
 
 	// stop the timer if it was a timeout buffer policy
 	switch bp := s.bufferPolicy.(type) {
-	case DropOldestAfterTimeoutHandler[T]:
+	case BufferPolicyDropOldestAfterTimeout[T]:
 		bp.Timer.Stop()
-	case DropNewestAfterTimeoutHandler[T]:
+	case BufferPolicyDropNewestAfterTimeout[T]:
 		bp.Timer.Stop()
 	}
 

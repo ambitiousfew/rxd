@@ -26,10 +26,10 @@ func main() {
 	}
 
 	// create a subscriber
-	sub, err := topic.Subscribe(parent, intracom.SubscriberConfig{
+	sub, err := topic.Subscribe(parent, intracom.SubscriberConfig[int]{
 		ConsumerGroup: "group1",
 		BufferSize:    10,
-		BufferPolicy:  intracom.DropNone,
+		BufferPolicy:  intracom.BufferPolicyDropNone[int]{},
 	})
 
 	if err != nil {
