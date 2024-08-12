@@ -1,8 +1,14 @@
 package rxd
 
 const (
-	Entering ServiceAction = iota
+	Entered ServiceAction = iota
+	Exited
+	Changed
+	// Deprecated: In favor of using Entered
+	Entering
+	// Deprecated: In favor of using Exited
 	Exiting
+	// Deprecated: In favor of using Changed
 	Changing
 )
 
@@ -16,6 +22,12 @@ func (s ServiceAction) String() string {
 		return "exiting"
 	case Changing:
 		return "changing"
+	case Entered:
+		return "entered"
+	case Exited:
+		return "exited"
+	case Changed:
+		return "changed"
 	default:
 		return "unknown"
 	}

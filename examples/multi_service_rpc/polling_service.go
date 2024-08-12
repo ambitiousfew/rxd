@@ -42,7 +42,7 @@ func NewAPIPollingService() *APIPollingService {
 func (s *APIPollingService) Idle(sctx rxd.ServiceContext) error {
 	sctx.Log(log.LevelDebug, "entered idle state")
 
-	statesC, cancel := sctx.WatchAllServices(rxd.Entering, rxd.StateRun, ServiceHelloWorldAPI)
+	statesC, cancel := sctx.WatchAllServices(rxd.Entered, rxd.StateRun, ServiceHelloWorldAPI)
 	defer cancel()
 
 	for {
@@ -67,7 +67,7 @@ func (s *APIPollingService) Run(sctx rxd.ServiceContext) error {
 	// Here we are registering our interest in ANY of the services passed EXITING a "RunState"
 	// So if any service given here for some reasons LEAVES their RunState, we will be notified.
 
-	statesC, cancel := sctx.WatchAllServices(rxd.Exiting, rxd.StateRun, ServiceHelloWorldAPI)
+	statesC, cancel := sctx.WatchAllServices(rxd.Exited, rxd.StateRun, ServiceHelloWorldAPI)
 	defer cancel()
 
 	sctx.Log(log.LevelInfo, "starting to poll")
