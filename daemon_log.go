@@ -92,3 +92,8 @@ func (h *daemonLogHandler) Close() error {
 	}
 	return nil
 }
+
+type noopLogger struct{}
+
+func (n noopLogger) Log(level log.Level, message string, fields ...log.Field) {}
+func (n noopLogger) SetLevel(level log.Level)                                 {}

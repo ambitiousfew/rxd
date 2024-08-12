@@ -3,6 +3,8 @@ package rxd
 import (
 	"testing"
 	"time"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
 func TestNewService(t *testing.T) {
@@ -46,59 +48,61 @@ func TestNewServiceWithHandler(t *testing.T) {
 }
 
 type mockService struct {
-	TransitionTimeout time.Duration
+	timer        *time.Timer
+	stateTimeout time.Duration
 }
 
 func newMockService(stateTimeout time.Duration) *mockService {
 	return &mockService{
-		TransitionTimeout: stateTimeout,
+		stateTimeout: stateTimeout,
+		timer:        time.NewTimer(stateTimeout),
 	}
 }
 
 func (m *mockService) Init(sctx ServiceContext) error {
-	ticker := time.NewTicker(m.TransitionTimeout)
-	defer ticker.Stop()
+	sctx.Log(log.LevelInfo, "mockService.Init")
+	m.timer.Reset(m.stateTimeout)
 
 	select {
 	case <-sctx.Done():
 		return nil
-	case <-ticker.C:
+	case <-m.timer.C:
+		sctx.Log(log.LevelInfo, "timer expired moving to idle state")
 		return nil
 	}
 }
 
 func (m *mockService) Idle(sctx ServiceContext) error {
-	ticker := time.NewTicker(m.TransitionTimeout)
-	defer ticker.Stop()
-
+	sctx.Log(log.LevelInfo, "mockService.Idle")
+	m.timer.Reset(m.stateTimeout)
 	select {
 	case <-sctx.Done():
 		return nil
-	case <-ticker.C:
+	case <-m.timer.C:
 		return nil
 	}
 }
 
 func (m *mockService) Run(sctx ServiceContext) error {
-	ticker := time.NewTicker(m.TransitionTimeout)
-	defer ticker.Stop()
+	sctx.Log(log.LevelInfo, "mockService.Run")
+	m.timer.Reset(m.stateTimeout)
 
 	select {
 	case <-sctx.Done():
 		return nil
-	case <-ticker.C:
+	case <-m.timer.C:
 		return nil
 	}
 }
 
 func (m *mockService) Stop(sctx ServiceContext) error {
-	ticker := time.NewTicker(m.TransitionTimeout)
-	defer ticker.Stop()
+	sctx.Log(log.LevelInfo, "mockService.Stop")
+	m.timer.Reset(m.stateTimeout)
 
 	select {
 	case <-sctx.Done():
 		return nil
-	case <-ticker.C:
+	case <-m.timer.C:
 		return nil
 	}
 }

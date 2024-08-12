@@ -66,7 +66,7 @@ func main() {
 	// NOTE: Make sure you watch for <service context>.ChangeState() in your polling stage that cares.
 
 	// Pass N services for daemon to manage and start
-	daemon := rxd.NewDaemon(DaemonName, logger)
+	daemon := rxd.NewDaemon(DaemonName)
 
 	err := daemon.AddServices(services...)
 	if err != nil {

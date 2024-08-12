@@ -32,9 +32,9 @@ type Subscription struct {
 }
 
 type TopicConfig struct {
-	Name                 string // unique name for the topic
-	ErrIfExists          bool   // return error if topic already exists
-	SubscriberAwareCount uint32 // number of consumers to wait for before broadcasting, 0 means unaware
+	Name            string // unique name for the topic
+	ErrIfExists     bool   // return error if topic already exists
+	SubscriberAware bool   // if true, topic broadcaster wont broadcast if there are no subscribers.
 }
 
 type topic[T any] struct {
@@ -46,17 +46,19 @@ type topic[T any] struct {
 	mu       sync.RWMutex
 }
 
-func NewTopic[T any](name string, opts ...TopicOption[T]) Topic[T] {
+func NewTopic[T any](conf TopicConfig, opts ...TopicOption[T]) Topic[T] {
 	publishC := make(chan T)
 	requestC := make(chan any, 1)
 
 	t := &topic[T]{
-		name:     name,
+		name:     conf.Name,
 		publishC: publishC,
 		requestC: requestC,
 		closed:   atomic.Bool{},
-		bc:       SyncBroadcaster[T]{},
-		mu:       sync.RWMutex{},
+		bc: SyncBroadcaster[T]{
+			SubscriberAware: conf.SubscriberAware,
+		},
+		mu: sync.RWMutex{},
 	}
 
 	for _, opt := range opts {

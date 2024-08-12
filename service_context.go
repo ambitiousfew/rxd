@@ -50,7 +50,7 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 		fields = append(fields, log.String("service", name))
 	}
 
-	return serviceContext{
+	return &serviceContext{
 		Context: ctx,
 		name:    name,
 		fqcn:    name,
@@ -65,49 +65,36 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 // The new child context will have the same name and fields as the original parent that created it.
 // However if the original parent context is cancelled, the child context will not be cancelled.
 // The new child will only be cancelled if the new parent context is cancelled.
-func (sc serviceContext) WithParent(parent context.Context) (ServiceContext, context.CancelFunc) {
+func (sc *serviceContext) WithParent(parent context.Context) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
-	return serviceContext{
-		Context: ctx,
-		name:    sc.name,
-		fields:  sc.fields,
-		logC:    sc.logC,
-		// icStates: sc.icStates,
-		ic: sc.ic,
-	}, cancel
+
+	newCtx := *sc
+	newCtx.Context = ctx
+	return &newCtx, cancel
 }
 
 // With returns a new child ServiceContext with the given fields appended to the existing fields.
 // The new child context will have the same name as the parent.
-func (sc serviceContext) WithFields(fields ...log.Field) ServiceContext {
-	return serviceContext{
-		Context: sc.Context,
-		name:    sc.name,
-		fields:  append(fields, sc.fields...),
-		logC:    sc.logC,
-		// icStates: sc.icStates,
-		ic: sc.ic,
-	}
+func (sc *serviceContext) WithFields(fields ...log.Field) ServiceContext {
+	newCtx := *sc
+	newCtx.fields = append(sc.fields, fields...)
+	return &newCtx
 }
 
-func (sc serviceContext) WithName(name string) (ServiceContext, context.CancelFunc) {
+func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(sc.Context)
-	return serviceContext{
-		Context: ctx,
-		name:    sc.name, // we keep the original service name
-		fqcn:    sc.fqcn + "_" + name,
-		fields:  sc.fields,
-		logC:    sc.logC,
-		// icStates: sc.icStates,
-		ic: sc.ic,
-	}, cancel
+	newCtx := *sc
+	newCtx.Context = ctx
+	newCtx.name = name
+	newCtx.fqcn = sc.fqcn + "_" + name
+	return &newCtx, cancel
 }
 
-func (sc serviceContext) Name() string {
+func (sc *serviceContext) Name() string {
 	return sc.name
 }
 
-func (sc serviceContext) Log(level log.Level, message string, fields ...log.Field) {
+func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
 	sc.logC <- DaemonLog{
 		Name:    sc.name,
 		Level:   level,
@@ -116,23 +103,23 @@ func (sc serviceContext) Log(level log.Level, message string, fields ...log.Fiel
 	}
 }
 
-func (sc serviceContext) Deadline() (deadline time.Time, ok bool) {
+func (sc *serviceContext) Deadline() (deadline time.Time, ok bool) {
 	return sc.Context.Deadline()
 }
 
-func (sc serviceContext) Done() <-chan struct{} {
+func (sc *serviceContext) Done() <-chan struct{} {
 	return sc.Context.Done()
 }
 
-func (sc serviceContext) Err() error {
+func (sc *serviceContext) Err() error {
 	return sc.Context.Err()
 }
 
-func (sc serviceContext) Value(key interface{}) interface{} {
+func (sc *serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
 }
 
-func (sc serviceContext) WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
+func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
 
@@ -207,7 +194,7 @@ func (sc serviceContext) WatchAllServices(action ServiceAction, target State, se
 	return ch, cancel
 }
 
-func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
+func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
 
@@ -277,7 +264,7 @@ func (sc serviceContext) WatchAnyServices(action ServiceAction, target State, se
 	return ch, cancel
 }
 
-func (sc serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceStates, context.CancelFunc) {
+func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
 

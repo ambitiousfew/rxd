@@ -47,7 +47,7 @@ func main() {
 	}
 
 	// Create a new daemon giving it a name, service logger and options
-	daemon := rxd.NewDaemon(DaemonName, logger, dopts...)
+	daemon := rxd.NewDaemon(DaemonName, dopts...)
 
 	// Add the single service to the daemon
 	err := daemon.AddService(apiSvc)

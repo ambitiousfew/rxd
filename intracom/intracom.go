@@ -57,7 +57,7 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	topicAny, ok := ic.topics[conf.Name]
 	ic.mu.RUnlock()
 	if !ok {
-		topic := NewTopic[T](conf.Name)
+		topic := NewTopic[T](conf)
 
 		ic.mu.Lock()
 		ic.topics[conf.Name] = topic

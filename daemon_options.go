@@ -9,6 +9,12 @@ import (
 
 type DaemonOption func(*daemon)
 
+func WithLogWorkerCount(count int) DaemonOption {
+	return func(d *daemon) {
+		d.logWorkerCount = count
+	}
+}
+
 func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.serviceLogger = logger

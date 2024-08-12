@@ -324,8 +324,8 @@ func TestIntracom_SinglePublisherSingleSubscriber(t *testing.T) {
 		testTopic, err := CreateTopic[int](ic, TopicConfig{
 			Name: topicName,
 			// Buffer:               1,
-			ErrIfExists:          true,
-			SubscriberAwareCount: 1, // dont publish until you see a subscriber.
+			ErrIfExists:     true,
+			SubscriberAware: true, // dont publish until you see a subscriber.
 		})
 
 		if err != nil {
@@ -470,8 +470,8 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		testTopic, err := CreateTopic[int](ic, TopicConfig{
 			Name: topicName,
 			// Buffer:               1000,
-			ErrIfExists:          true,
-			SubscriberAwareCount: 2, // dont publish until you see 2 subscribers.
+			ErrIfExists:     true,
+			SubscriberAware: true, // dont publish until you see 2 subscribers.
 		})
 
 		if err != nil {

@@ -31,7 +31,7 @@ type daemon struct {
 	managers        map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
 	ic              *intracom.Intracom        // intracom registry for the daemon to communicate with services
 	reportAliveSecs uint64                    // system service manager alive report timeout in seconds aka watchdog timeout
-	logC            chan DaemonLog            // log channel for the daemon to log service logs to
+	logWorkerCount  int                       // number of concurrent log workers used to receive and write service logs (default: 2)
 	serviceLogger   log.Logger                // logger used by user services
 	internalLogger  log.Logger                // logger for the internal daemon, debugging
 	started         atomic.Bool               // flag to indicate if the daemon has been started
@@ -39,8 +39,9 @@ type daemon struct {
 	rpcConfig       RPCConfig                 // rpc configuration for the daemon
 }
 
-// NewDaemon creates and return an instance of the reactive daemon
-func NewDaemon(name string, logger log.Logger, options ...DaemonOption) Daemon {
+// NewDaemonWithLogger creates and return an instance of the reactive daemon with a custom service logger
+// NOTE: this can also be set by passing the WithServiceLogger option in NewDaemon
+func NewDaemonWithLogger(name string, logger log.Logger, options ...DaemonOption) Daemon {
 	d := &daemon{
 		name:            name,
 		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
@@ -48,8 +49,40 @@ func NewDaemon(name string, logger log.Logger, options ...DaemonOption) Daemon {
 		managers:        make(map[string]ServiceManager),
 		ic:              intracom.New("rxd-intracom"),
 		reportAliveSecs: 0,
-		logC:            make(chan DaemonLog, 100),
+		logWorkerCount:  2,
 		serviceLogger:   logger,
+		// by default the internal daemon logger is disabled.
+		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
+			filepath: "rxd.log",        // relative to the executable, if enabled
+			enabled:  false,            // disabled by default
+			total:    0,                // total bytes written to the log file
+			limit:    10 * 1024 * 1024, // 10MB (if enabled)
+			file:     nil,
+			mu:       sync.RWMutex{},
+		}),
+		started: atomic.Bool{},
+	}
+
+	for _, option := range options {
+		option(d)
+	}
+
+	return d
+
+}
+
+// NewDaemon creates and return an instance of the reactive daemon
+// NOTE: The service logger by default is no-op logger.
+func NewDaemon(name string, options ...DaemonOption) Daemon {
+	d := &daemon{
+		name:            name,
+		signals:         []os.Signal{syscall.SIGINT, syscall.SIGTERM},
+		services:        make(map[string]DaemonService),
+		managers:        make(map[string]ServiceManager),
+		ic:              intracom.New("rxd-intracom"),
+		reportAliveSecs: 0,
+		logWorkerCount:  2,
+		serviceLogger:   noopLogger{},
 		// by default the internal daemon logger is disabled.
 		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
 			filepath: "rxd.log",        // relative to the executable, if enabled
@@ -108,9 +141,10 @@ func (d *daemon) Start(parent context.Context) error {
 		return err
 	}
 
+	logC := make(chan DaemonLog, 50)
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
-	loggerDoneC := d.serviceLogWatcher(d.logC)
+	loggerDoneC := d.serviceLogWatcher(logC)
 
 	// --- Daemon Signal Watcher ---
 	// listens for signals to stop the daemon such as OS signals or context done.
@@ -124,10 +158,9 @@ func (d *daemon) Start(parent context.Context) error {
 			d.internalLogger.Log(log.LevelDebug, "signal watcher received context done from parent context", nameField)
 		case sig := <-signalC:
 			d.internalLogger.Log(log.LevelNotice, "signal watcher received an os signal", log.String("signal", sig.String()), nameField)
+			// if we received a signal to stop, cancel the context
+			dcancel()
 		}
-
-		// if we received a signal to stop, cancel the context
-		dcancel()
 
 		// inform systemd that we are stopping/cleaning up
 		// TODO: Test if this notify should happen before or after cancel()
@@ -159,12 +192,11 @@ func (d *daemon) Start(parent context.Context) error {
 	statesDoneC := d.statesWatcher(statesTopic, stateUpdateC)
 
 	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services", nameField)
+	var dwg sync.WaitGroup // daemon wait group
+
 	// --- Launch Daemon Service(s) ---
-	var dwg sync.WaitGroup
 	// launch all services in their own routine.
 	for _, service := range d.services {
-		dwg.Add(1)
-
 		manager, ok := d.managers[service.Name]
 		if !ok {
 			// TODO: Should we be doing pre-flight checks?
@@ -174,16 +206,17 @@ func (d *daemon) Start(parent context.Context) error {
 			continue
 		}
 
+		dwg.Add(1)
 		// each service is handled in its own routine.
-		go func(wg *sync.WaitGroup, ctx context.Context, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
+		go func(ctx context.Context, wg *sync.WaitGroup, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
 			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
-			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.logC, d.ic)
+			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, logC, d.ic)
 			// run the service according to the manager policy
 			manager.Manage(sctx, ds, stateC)
 			scancel()
 			wg.Done()
 			d.internalLogger.Log(log.LevelInfo, "service has stopped", log.String("service_name", ds.Name), nameField)
-		}(&dwg, dctx, service, manager, stateUpdateC)
+		}(dctx, &dwg, service, manager, stateUpdateC)
 	}
 
 	// --- Daemon RPC Server ---
@@ -229,7 +262,6 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// block until all services have exited their lifecycles
 	dwg.Wait()
-
 	// -- ALL SERVICES HAVE EXITED THEIR LIFECYCLES --
 	//         CLEANUP AND SHUTDOWN
 
@@ -242,11 +274,13 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 	}
 
+	d.internalLogger.Log(log.LevelDebug, "closing states watcher", nameField)
 	// since all services have exited their lifecycles, we can close the states update channel.
 	close(stateUpdateC)
 	<-statesDoneC // wait for states watcher to finish
-	d.internalLogger.Log(log.LevelDebug, "states channel completed", nameField)
+	d.internalLogger.Log(log.LevelDebug, "states watcher closed", nameField)
 
+	d.internalLogger.Log(log.LevelDebug, "closing intracom", nameField)
 	// TODO: these logs should not be interleaved with the user service logs.
 	err = intracom.Close(d.ic)
 	// err = d.icStates.Close()
@@ -256,10 +290,11 @@ func (d *daemon) Start(parent context.Context) error {
 		d.internalLogger.Log(log.LevelDebug, "intracom closed", nameField)
 	}
 
-	close(d.logC) // signal close the log channel
+	d.internalLogger.Log(log.LevelDebug, "closing services log channel", nameField)
+	close(logC)   // signal close the log channel
 	<-loggerDoneC // wait for log watcher to finish
 
-	d.internalLogger.Log(log.LevelDebug, "service log watcher closed", nameField)
+	d.internalLogger.Log(log.LevelDebug, "services log channel closed", nameField)
 
 	// if the internal logger is an io.Closer, close it.
 	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
@@ -330,8 +365,14 @@ func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
 	doneC := make(chan struct{})
 
 	go func() {
+		// semaphore to limit the number of concurrent log writes to the daemon logger.
+		sema := make(chan struct{}, d.logWorkerCount)
 		for entry := range logC {
-			d.serviceLogger.Log(entry.Level, entry.Message, entry.Fields...)
+			sema <- struct{}{}
+			go func() {
+				d.serviceLogger.Log(entry.Level, entry.Message, entry.Fields...)
+				<-sema
+			}()
 		}
 		close(doneC)
 	}()
@@ -343,6 +384,7 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 
 	go func() {
 		// retrieve the publisher channel for the states topic
+		d.internalLogger.Log(log.LevelDebug, "states topic publish channel", log.String("topic", internalServiceStates))
 		statesC := statesTopic.PublishChannel()
 
 		states := make(ServiceStates, len(d.services))
@@ -352,6 +394,7 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 
 		// states watcher routine should be closed after all services have exited.
 		for state := range stateUpdatesC {
+			d.internalLogger.Log(log.LevelDebug, "states transition update", log.String("service_name", state.Name), log.String("state", state.State.String()))
 			// if current, ok := states[state.Name]; ok && current != state.State {
 			// TODO: daemon internal logs like this should probably get their own logger like intracom.
 			// we dont really want these logs interleaved with the user service logs.
@@ -363,7 +406,7 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 			// send the updated states to the intracom bus
 			statesC <- states.copy()
 		}
-
+		d.internalLogger.Log(log.LevelDebug, "states watcher completed")
 		// signal done after states watcher has finished.
 		close(doneC)
 	}()

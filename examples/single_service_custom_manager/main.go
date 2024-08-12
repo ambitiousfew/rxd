@@ -37,7 +37,7 @@ func main() {
 		rxd.WithSignals(os.Interrupt, syscall.SIGINT, syscall.SIGTERM),
 	}
 	// Create a new daemon instance with a name and options
-	daemon := rxd.NewDaemon(DaemonName, logger, dopts...)
+	daemon := rxd.NewDaemon(DaemonName, dopts...)
 
 	// Add the service to the daemon
 	err := daemon.AddService(apiSvc)

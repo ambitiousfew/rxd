@@ -2,17 +2,36 @@ package rxd
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ambitiousfew/rxd/log"
 )
 
+type testLogger struct {
+	t *testing.T
+}
+
+func (t testLogger) Handle(level log.Level, message string, fields []log.Field) {
+	var buf strings.Builder
+	for _, f := range fields {
+		buf.WriteString(" ")
+		buf.WriteString(f.Key)
+		buf.WriteString("=")
+		buf.WriteString(f.Value)
+	}
+
+	t.t.Logf("[%s] %s %s", level, message, buf.String())
+}
+
 func TestDaemon_StartAService(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	d := NewDaemon("test-daemon", noopLogger{})
+	logger := log.NewLogger(log.LevelDebug, testLogger{t: t})
+
+	d := NewDaemon("test-daemon", WithInternalLogger(logger))
 
 	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
 
@@ -29,7 +48,7 @@ func TestDaemon_StartAService(t *testing.T) {
 }
 
 func TestDaemon_AddService(t *testing.T) {
-	d := NewDaemon("test-daemon", noopLogger{})
+	d := NewDaemon("test-daemon")
 
 	s := NewService("test-service", newMockService(100*time.Millisecond))
 
@@ -40,7 +59,7 @@ func TestDaemon_AddService(t *testing.T) {
 }
 
 func TestDaemon_AddServices(t *testing.T) {
-	d := NewDaemon("test-daemon", noopLogger{})
+	d := NewDaemon("test-daemon")
 
 	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
 	s2 := NewService("test-service-2", newMockService(100*time.Millisecond))
@@ -50,8 +69,3 @@ func TestDaemon_AddServices(t *testing.T) {
 		t.Fatalf("error adding services: %s", err)
 	}
 }
-
-type noopLogger struct{}
-
-func (n noopLogger) Log(level log.Level, message string, fields ...log.Field) {}
-func (n noopLogger) SetLevel(level log.Level)                                 {}

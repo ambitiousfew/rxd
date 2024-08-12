@@ -27,7 +27,8 @@ type RunContinuousManager struct {
 func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 	timeouts := make(ManagerStateTimeouts)
 	m := RunContinuousManager{
-		StartupDelay:  10 * time.Nanosecond,
+		DefaultDelay:  1 * time.Millisecond,
+		StartupDelay:  1 * time.Millisecond,
 		StateTimeouts: timeouts,
 	}
 
@@ -42,13 +43,6 @@ func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
 func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) {
-	defer func() {
-		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
-		if r := recover(); r != nil {
-			sctx.Log(log.LevelError, fmt.Sprintf("recovered from a panic: %v", r))
-		}
-	}()
-
 	timeout := time.NewTimer(m.StartupDelay)
 	defer timeout.Stop()
 
@@ -59,6 +53,7 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
+		fmt.Println("pushing state", state)
 		updateC <- StateUpdate{Name: ds.Name, State: state}
 
 		select {
@@ -126,8 +121,10 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 		}
 	}
 
+	fmt.Println("pushing final state...", state)
 	// push final state to the daemon states watcher.
 	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+	fmt.Println("exiting service manager")
 }
 
 type RunUntilSuccessManager struct {
