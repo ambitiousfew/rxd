@@ -96,7 +96,6 @@ func (sc *serviceContext) Name() string {
 
 func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
 	sc.logC <- DaemonLog{
-		Name:    sc.name,
 		Level:   level,
 		Message: message,
 		Fields:  append(fields, sc.fields...),

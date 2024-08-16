@@ -9,6 +9,12 @@ import (
 
 type DaemonOption func(*daemon)
 
+func WithPrestartPipeline(pipeline PrestartPipeline) DaemonOption {
+	return func(d *daemon) {
+		d.prestart = pipeline
+	}
+}
+
 func WithLogWorkerCount(count int) DaemonOption {
 	return func(d *daemon) {
 		d.logWorkerCount = count

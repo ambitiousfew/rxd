@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,13 +42,42 @@ func main() {
 	// Give the service a name, the service runner, and any options you want to pass to the service.
 	apiSvc := rxd.NewService("helloworld-api", helloWorld)
 
+	// Create a new prestart pipeline
+	// This pipeline will run the stages (if any) in order and restart from the beginning if an error occurs.
+	prestartPipeline := rxd.NewPrestartPipeline(rxd.PrestartConfig{
+		RestartOnError: true,
+		RestartDelay:   10 * time.Second,
+	})
+
 	// configure any daemon options
 	dopts := []rxd.DaemonOption{
 		rxd.WithSignals(os.Interrupt, syscall.SIGINT, syscall.SIGTERM),
+		rxd.WithServiceLogger(logger),
+		rxd.WithPrestartPipeline(prestartPipeline),
 	}
 
 	// Create a new daemon giving it a name, service logger and options
 	daemon := rxd.NewDaemon(DaemonName, dopts...)
+
+	// This is only used for the commented out PrestartPipeline below
+	ready := &atomic.Bool{}
+	timer := time.NewTimer(6 * time.Second)
+	go func() {
+		<-timer.C
+		timer.Stop()
+		ready.Store(true)
+	}()
+
+	// Uncomment: to demonstrate PrestartPipeline
+	// daemon.AddPrestartStage(rxd.Stage{
+	// 	Name: "timer-ready",
+	// 	Func: func(ctx context.Context) error {
+	// 		if ready.Load() {
+	// 			return nil
+	// 		}
+	// 		return errors.New("timer is not ready")
+	// 	},
+	// })
 
 	// Add the single service to the daemon
 	err := daemon.AddService(apiSvc)

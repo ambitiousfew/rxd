@@ -53,7 +53,6 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
-		fmt.Println("pushing state", state)
 		updateC <- StateUpdate{Name: ds.Name, State: state}
 
 		select {
@@ -121,10 +120,8 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 		}
 	}
 
-	fmt.Println("pushing final state...", state)
 	// push final state to the daemon states watcher.
 	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
-	fmt.Println("exiting service manager")
 }
 
 type RunUntilSuccessManager struct {
