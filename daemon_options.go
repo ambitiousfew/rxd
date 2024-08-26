@@ -9,6 +9,24 @@ import (
 
 type DaemonOption func(*daemon)
 
+func WithPrestart(conf PrestartConfig, stages ...Stage) DaemonOption {
+	return func(d *daemon) {
+		d.prestart = NewPrestartPipeline(conf, stages...)
+	}
+}
+
+func WithCustomPrestartPipeline(prestart Pipeline) DaemonOption {
+	return func(d *daemon) {
+		d.prestart = prestart
+	}
+}
+
+func WithLogWorkerCount(count int) DaemonOption {
+	return func(d *daemon) {
+		d.logWorkerCount = count
+	}
+}
+
 func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.serviceLogger = logger

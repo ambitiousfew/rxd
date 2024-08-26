@@ -173,10 +173,10 @@ func TestIntracom_CreateSubscriptionWithTopic(t *testing.T) {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 
 	if err != nil {
@@ -193,10 +193,10 @@ func TestIntracom_CreateSubscriptionWithNoTopic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 
 	if err == nil {
@@ -226,10 +226,10 @@ func TestIntracom_RemoveSubscriptionFromTopic(t *testing.T) {
 		t.Fatalf("topic publisher should not be nil")
 	}
 
-	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig{
+	sub, err := CreateSubscription[string](ctx, sharedIC, t.Name(), 0, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 
 	if err != nil {
@@ -277,11 +277,11 @@ func TestIntracom_SinglePublisherSingleSubscriber(t *testing.T) {
 		defer wg.Done()
 		maxWait := 500 * time.Millisecond
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxWait, SubscriberConfig{
-			ConsumerGroup: t.Name(), // unique consumer group name
-			ErrIfExists:   true,     // error if consumer group already exists
-			BufferSize:    1,        // subscriber channel buffer size
-			BufferPolicy:  DropNone, // policy for handling buffer overflow
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxWait, SubscriberConfig[int]{
+			ConsumerGroup: t.Name(),                    // unique consumer group name
+			ErrIfExists:   true,                        // error if consumer group already exists
+			BufferSize:    1,                           // subscriber channel buffer size
+			BufferPolicy:  BufferPolicyDropNone[int]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -324,8 +324,8 @@ func TestIntracom_SinglePublisherSingleSubscriber(t *testing.T) {
 		testTopic, err := CreateTopic[int](ic, TopicConfig{
 			Name: topicName,
 			// Buffer:               1,
-			ErrIfExists:          true,
-			SubscriberAwareCount: 1, // dont publish until you see a subscriber.
+			ErrIfExists:     true,
+			SubscriberAware: true, // dont publish until you see a subscriber.
 		})
 
 		if err != nil {
@@ -376,11 +376,11 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		subscriberName := b.Name() + "-1"
 
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig{
-			ConsumerGroup: subscriberName, // unique consumer group name
-			ErrIfExists:   true,           // error if consumer group already exists
-			BufferSize:    1,              // subscriber channel buffer size
-			BufferPolicy:  DropNone,       // policy for handling buffer overflow
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[int]{
+			ConsumerGroup: subscriberName,              // unique consumer group name
+			ErrIfExists:   true,                        // error if consumer group already exists
+			BufferSize:    1,                           // subscriber channel buffer size
+			BufferPolicy:  BufferPolicyDropNone[int]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -423,11 +423,11 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		subscriberName := b.Name() + "-2"
 
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig{
-			ConsumerGroup: subscriberName, // unique consumer group name
-			ErrIfExists:   true,           // error if consumer group already exists
-			BufferSize:    1,              // subscriber channel buffer size
-			BufferPolicy:  DropNone,       // policy for handling buffer overflow
+		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[int]{
+			ConsumerGroup: subscriberName,              // unique consumer group name
+			ErrIfExists:   true,                        // error if consumer group already exists
+			BufferSize:    1,                           // subscriber channel buffer size
+			BufferPolicy:  BufferPolicyDropNone[int]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -470,8 +470,8 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		testTopic, err := CreateTopic[int](ic, TopicConfig{
 			Name: topicName,
 			// Buffer:               1000,
-			ErrIfExists:          true,
-			SubscriberAwareCount: 2, // dont publish until you see 2 subscribers.
+			ErrIfExists:     true,
+			SubscriberAware: true, // dont publish until you see 2 subscribers.
 		})
 
 		if err != nil {
@@ -482,7 +482,7 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		pubC := testTopic.PublishChannel()
 
 		publishing := true
-		for count := 0; publishing && count < 1_000_000; count++ {
+		for count := 0; publishing && count < b.N; count++ {
 			select {
 			case <-ctx.Done():
 				b.Errorf("publisher timed out waiting for subscriber")

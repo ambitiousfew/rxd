@@ -20,11 +20,11 @@ func TestIntracom_TopicSubscribe(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	sub, err := testTopic.Subscribe(ctx, SubscriberConfig{
+	sub, err := testTopic.Subscribe(ctx, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		BufferSize:    1,
 		ErrIfExists:   true,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -50,21 +50,21 @@ func TestIntracom_TopicMultipleSubscribers(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	sub1, err := testTopic.Subscribe(ctx, SubscriberConfig{
+	sub1, err := testTopic.Subscribe(ctx, SubscriberConfig[string]{
 		ConsumerGroup: t.Name() + "_1",
 		ErrIfExists:   true,
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
 	}
 
-	sub2, err := testTopic.Subscribe(ctx, SubscriberConfig{
+	sub2, err := testTopic.Subscribe(ctx, SubscriberConfig[string]{
 		ConsumerGroup: t.Name() + "_2",
 		ErrIfExists:   true,
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 	if err != nil {
 		t.Fatalf("error subscribing to topic: %v", err)
@@ -91,7 +91,7 @@ func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
 		t.Fatalf("error creating topic: %v", err)
 	}
 
-	sub1, err := testTopic.Subscribe(ctx, SubscriberConfig{
+	sub1, err := testTopic.Subscribe(ctx, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		ErrIfExists:   true,
 	})
@@ -100,11 +100,11 @@ func TestIntracom_TopicDuplicateSubscribers(t *testing.T) {
 		t.Fatalf("error subscribing to topic: %v", err)
 	}
 
-	sub2, err := testTopic.Subscribe(ctx, SubscriberConfig{
+	sub2, err := testTopic.Subscribe(ctx, SubscriberConfig[string]{
 		ConsumerGroup: t.Name(),
 		ErrIfExists:   true,
 		BufferSize:    1,
-		BufferPolicy:  DropNone,
+		BufferPolicy:  BufferPolicyDropNone[string]{},
 	})
 
 	if err == nil {

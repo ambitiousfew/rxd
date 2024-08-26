@@ -9,11 +9,19 @@ import (
 )
 
 type Topic[T any] interface {
-	Name() string                                                           // Name returns the unique name of the topic.
-	PublishChannel() chan<- T                                               // PublishChannel returns the channel publishers use to send messages to the topic.
-	Subscribe(ctx context.Context, conf SubscriberConfig) (<-chan T, error) // Subscribe will attemp to add a consumer group to the topic.
-	Unsubscribe(consumer string, ch <-chan T) error                         // Unsubscribe will remove the consumer group from the topic and close the subscriber channel.
-	Close() error                                                           // Close will remove all consumer groups from the topic and close all channels.
+	Name() string                                                              // Name returns the unique name of the topic.
+	PublishChannel() chan<- T                                                  // PublishChannel returns the channel publishers use to send messages to the topic.
+	Subscribe(ctx context.Context, conf SubscriberConfig[T]) (<-chan T, error) // Subscribe will attemp to add a consumer group to the topic.
+	Unsubscribe(consumer string, ch <-chan T) error                            // Unsubscribe will remove the consumer group from the topic and close the subscriber channel.
+	Close() error                                                              // Close will remove all consumer groups from the topic and close all channels.
+}
+
+type TopicOption[T any] func(*topic[T])
+
+func WithBroadcaster[T any](b Broadcaster[T]) TopicOption[T] {
+	return func(t *topic[T]) {
+		t.bc = b
+	}
 }
 
 type Subscription struct {
@@ -24,33 +32,42 @@ type Subscription struct {
 }
 
 type TopicConfig struct {
-	Name                 string // unique name for the topic
-	ErrIfExists          bool   // return error if topic already exists
-	SubscriberAwareCount uint32 // number of consumers to wait for before broadcasting, 0 means unaware
+	Name            string // unique name for the topic
+	ErrIfExists     bool   // return error if topic already exists
+	SubscriberAware bool   // if true, topic broadcaster wont broadcast if there are no subscribers.
 }
 
 type topic[T any] struct {
-	name       string
-	publishC   chan T
-	requestC   chan any
-	awareCount uint32 // number of consumers to wait for before broadcasting
-	closed     atomic.Bool
-	mu         sync.RWMutex
+	name     string
+	publishC chan T
+	requestC chan any
+	bc       Broadcaster[T]
+	closed   atomic.Bool
+	mu       sync.RWMutex
 }
 
-func newTopic[T any](name string, awareCount uint32, publishC chan T) Topic[T] {
+func NewTopic[T any](conf TopicConfig, opts ...TopicOption[T]) Topic[T] {
+	publishC := make(chan T)
 	requestC := make(chan any, 1)
+
 	t := &topic[T]{
-		name:       name,
-		publishC:   publishC,
-		requestC:   requestC,
-		awareCount: awareCount,
-		closed:     atomic.Bool{},
-		mu:         sync.RWMutex{},
+		name:     conf.Name,
+		publishC: publishC,
+		requestC: requestC,
+		closed:   atomic.Bool{},
+		bc: SyncBroadcaster[T]{
+			SubscriberAware: conf.SubscriberAware,
+		},
+		mu: sync.RWMutex{},
+	}
+
+	for _, opt := range opts {
+		opt(t)
 	}
 
 	// start a broadcaster for this topic
-	go t.broadcast(requestC)
+	go t.bc.Broadcast(requestC, publishC)
+
 	return t
 }
 
@@ -62,7 +79,7 @@ func (t *topic[T]) PublishChannel() chan<- T {
 	return t.publishC
 }
 
-func (t *topic[T]) Subscribe(ctx context.Context, conf SubscriberConfig) (<-chan T, error) {
+func (t *topic[T]) Subscribe(ctx context.Context, conf SubscriberConfig[T]) (<-chan T, error) {
 	if t.closed.Load() {
 		return nil, errors.New("cannot subscribe, topic already closed")
 	}
@@ -120,119 +137,4 @@ func (t *topic[T]) Close() error {
 	close(t.requestC)
 	close(t.publishC)
 	return nil
-}
-
-// broadcast runs in its own routine and is responsible for broadcasting messages to all subscribers.
-// It maintains a map of subscribers and listens for 3 types of requests that interrupt the broadcaster.
-// 1. subscribeRequest - to add a consumer group to the topic.
-// 2. unsubscribeRequest - to remove a consumer group from the topic.
-// 3. closeRequest - to close the topic and all consumer groups.
-//
-// Parameters:
-//
-//	requestC <-chan any - a channel to receive requests to interrupt the broadcaster.
-func (t *topic[T]) broadcast(requestC <-chan any) {
-	subscribers := make(map[string]*subscriber[T])
-
-	var publishC chan T
-
-	var subscriberAware bool
-	if t.awareCount < 1 {
-		// if subscriber count is less than 1, then we are not subscriber aware
-		// and we can broadcast messages to all subscribers whether they exist or not.
-		publishC = t.publishC
-	} else {
-		// if subscriber count is greater than 0, then we are subscriber aware
-		// and we need to wait for the number of subscribers to reach the count before broadcasting.
-		subscriberAware = true
-	}
-
-	for {
-		select {
-		case msg, ok := <-publishC:
-			if !ok {
-				// if the publish channel is closed, then we are done
-				return
-			}
-
-			for _, sub := range subscribers {
-				sub.send(msg)
-			}
-			// NOTE: broadcasting into goroutines leads to huge increase in allocations and GC.
-			// var bwg sync.WaitGroup
-			// for _, sub := range subscribers {
-			// bwg.Add(1)
-			// go func(wg *sync.WaitGroup) {
-			// sub.send(msg)
-			// wg.Done()
-			// }(&bwg)
-			// }
-			// wait for all subscribers to finish sending the message
-			// bwg.Wait()
-
-		case req, open := <-requestC:
-			if !open {
-				// if the request channel is closed, then we are done
-				return
-			}
-
-			switch r := req.(type) {
-			case subscribeRequest[T]:
-				// handle subscribe request
-				sub, exists := subscribers[r.conf.ConsumerGroup]
-				// sub, exists := t.subscribers[r.conf.ConsumerGroup]
-				if exists && r.conf.ErrIfExists {
-					r.responseC <- subscribeResponse[T]{ch: sub.ch, err: errors.New("consumer group '" + r.conf.ConsumerGroup + "' already exists")}
-					continue
-				}
-
-				if !exists {
-					sub = newSubscriber[T](r.conf)
-					subscribers[r.conf.ConsumerGroup] = sub
-				}
-
-				r.responseC <- subscribeResponse[T]{ch: sub.ch, err: nil}
-
-				// if we are subscriber aware, then we need to check if we can enable the publishing channel
-				if subscriberAware && len(subscribers) >= int(t.awareCount) {
-					publishC = t.publishC
-				}
-
-			case unsubscribeRequest[T]:
-				// handle unsubscribe request
-
-				sub, exists := subscribers[r.consumer]
-				if exists {
-					if sub.ch != r.ch {
-						// if the channel is not the same, then we cannot unsubscribe
-						r.responseC <- unsubscribeResponse{err: errors.New("consumer group channel'" + r.consumer + "' does not match")}
-						continue
-					}
-					sub.close()
-					delete(subscribers, r.consumer)
-				}
-
-				// TODO: we could capture sub close errors now and pass it in the unsubscribe response.
-				r.responseC <- unsubscribeResponse{err: nil}
-
-				// if we are subscriber aware, then we need to check if we can disable the publishing channel
-				if subscriberAware && len(subscribers) < int(t.awareCount) {
-					publishC = nil
-				}
-
-			case closeRequest:
-				publishC = nil // disable anymore publishing.
-				// handle close request
-				for name, sub := range subscribers {
-					sub.close()
-					delete(subscribers, name)
-				}
-				// signal back that we are done
-				r.responseC <- closeResponse{}
-			default:
-				// unknown request, do nothing.
-			}
-		}
-
-	}
 }

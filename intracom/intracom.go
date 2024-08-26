@@ -57,9 +57,7 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	topicAny, ok := ic.topics[conf.Name]
 	ic.mu.RUnlock()
 	if !ok {
-		// ch := make(chan T, conf.Buffer)
-		ch := make(chan T)
-		topic := newTopic[T](conf.Name, conf.SubscriberAwareCount, ch)
+		topic := NewTopic[T](conf)
 
 		ic.mu.Lock()
 		ic.topics[conf.Name] = topic
@@ -111,7 +109,7 @@ func RemoveTopic[T any](ic *Intracom, name string) error {
 // If maxWait is 0, the function will wait indefinitely for the topic to exist.
 // If the intracom is closed, an error is returned.
 // If the context is canceled, a context error is returned.
-func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, maxWait time.Duration, conf SubscriberConfig) (<-chan T, error) {
+func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, maxWait time.Duration, conf SubscriberConfig[T]) (<-chan T, error) {
 	if ic == nil {
 		// return nil, ErrCreatingSubscription{Topic: topic, Err: ErrInvalidIntracomNil}
 		return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrInvalidIntracomNil}

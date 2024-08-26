@@ -1,3 +1,11 @@
+// For this example we will create a simple API service that will run until it is stopped
+// either via the context timeout (30s) or an OS signal (SIGINT, SIGTERM).
+// It runs a Hello World API server on port 8000, http://127.0.0.1:8000/
+//
+// During run the service spawns an intentional timeout error that triggers a shutdown of the server.
+// This is just to simulate edge cases that might lead to something forcing an error against the
+// HTTP server causing it to shutdown and to show how the service will handle cycling back through
+// the lifecycle methods.
 package main
 
 import (
@@ -5,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,13 +42,44 @@ func main() {
 	// Give the service a name, the service runner, and any options you want to pass to the service.
 	apiSvc := rxd.NewService("helloworld-api", helloWorld)
 
-	// configure any daemon options
+	// This is only used for the commented out PrestartPipeline below
+	ready := &atomic.Bool{}
+	timer := time.NewTimer(6 * time.Second)
+	go func() {
+		<-timer.C
+		timer.Stop()
+		ready.Store(true)
+	}()
+
+	prestartConf := rxd.PrestartConfig{
+		RestartOnError: true,             // if any stage errors, restart the pipeline from the beginning
+		RestartDelay:   10 * time.Second, // delay between restarts
+	}
+
+	prestartStages := []rxd.Stage{
+		{
+			// some arbitrary stage to demonastrate how to use the prestart stages
+			Name: "timer-ready",
+			Func: func(ctx context.Context) error {
+				if ready.Load() {
+					return nil
+				}
+				return errors.New("timer is not ready")
+			},
+		},
+	}
+
+	// customizing daemon options
 	dopts := []rxd.DaemonOption{
 		rxd.WithSignals(os.Interrupt, syscall.SIGINT, syscall.SIGTERM),
+		// This adds a prestart pipeline that will run the stages (if any) in order and restart from the beginning if an error occurs.
+		rxd.WithPrestart(prestartConf, prestartStages...),
+		// This adds a service logger to the daemon so all services can log in the same logging format.
+		rxd.WithServiceLogger(logger),
 	}
 
 	// Create a new daemon giving it a name, service logger and options
-	daemon := rxd.NewDaemon(DaemonName, logger, dopts...)
+	daemon := rxd.NewDaemon(DaemonName, dopts...)
 
 	// Add the single service to the daemon
 	err := daemon.AddService(apiSvc)

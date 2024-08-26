@@ -63,7 +63,7 @@ func main() {
 			Port: 1337,
 		}),
 	}
-	daemon := rxd.NewDaemon(DaemonName, logger, dopts...)
+	daemon := rxd.NewDaemon(DaemonName, dopts...)
 
 	err := daemon.AddServices(services...)
 	if err != nil {

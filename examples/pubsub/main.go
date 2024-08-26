@@ -17,19 +17,19 @@ func main() {
 
 	someTopic := "pubsub-topic" // unique topic name
 	topic, err := intracom.CreateTopic[int](ic, intracom.TopicConfig{
-		Name:                 someTopic,
-		ErrIfExists:          true,
-		SubscriberAwareCount: 1,
+		Name:            someTopic,
+		ErrIfExists:     true,
+		SubscriberAware: true,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// create a subscriber
-	sub, err := topic.Subscribe(parent, intracom.SubscriberConfig{
+	sub, err := topic.Subscribe(parent, intracom.SubscriberConfig[int]{
 		ConsumerGroup: "group1",
 		BufferSize:    10,
-		BufferPolicy:  intracom.DropNone,
+		BufferPolicy:  intracom.BufferPolicyDropNone[int]{},
 	})
 
 	if err != nil {
@@ -40,6 +40,7 @@ func main() {
 	go func(ctx context.Context, topic intracom.Topic[int]) {
 		publishC := topic.PublishChannel()
 
+		// publish 100 messages to the topic
 		for i := 0; i < 100; i++ {
 			select {
 			case <-ctx.Done():
@@ -51,6 +52,7 @@ func main() {
 		topic.Close()
 	}(parent, topic)
 
+	// consume the messages over subscriber channel.
 	for msg := range sub {
 		log.Println("received message", msg)
 	}
