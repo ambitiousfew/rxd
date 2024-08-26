@@ -27,8 +27,8 @@ type RunContinuousManager struct {
 func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 	timeouts := make(ManagerStateTimeouts)
 	m := RunContinuousManager{
-		DefaultDelay:  1 * time.Millisecond,
-		StartupDelay:  1 * time.Millisecond,
+		DefaultDelay:  100 * time.Millisecond,
+		StartupDelay:  100 * time.Millisecond,
 		StateTimeouts: timeouts,
 	}
 
