@@ -2,13 +2,6 @@ package rxd
 
 import "time"
 
-// type ServiceRunner interface {
-// 	Init(ServiceContext) (State, error)
-// 	Idle(ServiceContext) (State, error)
-// 	Run(ServiceContext) (State, error)
-// 	Stop(ServiceContext) (State, error)
-// }
-
 type ServiceRunner interface {
 	Init(ServiceContext) error
 	Idle(ServiceContext) error

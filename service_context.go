@@ -23,7 +23,6 @@ type ServiceContext interface {
 	ServiceWatcher
 	ServiceLogger
 	Name() string
-	// With returns a new ServiceContext with the given fields appended to the existing fields.
 	WithFields(fields ...log.Field) ServiceContext
 	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
 	WithName(name string) (ServiceContext, context.CancelFunc)
@@ -35,9 +34,7 @@ type serviceContext struct {
 	fqcn   string // useful for child contexts to have a unique name without having to modify service name when subscribing.
 	fields []log.Field
 	logC   chan<- DaemonLog
-	// icStates intracom.Topic[ServiceStates]
-	ic *intracom.Intracom
-	// icStates intracom.Topic[ServiceStates]
+	ic     *intracom.Intracom
 }
 
 // newServiceWithCancel produces a new cancellable ServiceContext with the given name and fields.
@@ -56,8 +53,7 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 		fqcn:    name,
 		fields:  fields,
 		logC:    logC,
-		// icStates: icStates,
-		ic: ic,
+		ic:      ic,
 	}, cancel
 }
 
@@ -134,12 +130,6 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 			BufferPolicy:  intracom.BufferPolicyDropOldest[ServiceStates]{},
 		})
 
-		// sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
-		// 	ConsumerGroup: consumer,
-		// 	ErrIfExists:   false,
-		// 	BufferSize:    1,
-		// 	BufferPolicy:  intracom.DropOldest,
-		// })
 		if err != nil {
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
@@ -208,12 +198,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 			BufferSize:    1,
 			BufferPolicy:  intracom.BufferPolicyDropOldest[ServiceStates]{},
 		})
-		// sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
-		// 	ConsumerGroup: consumer,
-		// 	ErrIfExists:   false,
-		// 	BufferSize:    1,
-		// 	BufferPolicy:  intracom.DropOldest,
-		// })
+
 		if err != nil {
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
@@ -278,18 +263,11 @@ func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSt
 			BufferPolicy:  intracom.BufferPolicyDropOldest[ServiceStates]{},
 		})
 
-		// sub, err := sc.icStates.Subscribe(intracom.SubscriberConfig{
-		// 	ConsumerGroup: consumer,
-		// 	ErrIfExists:   false,
-		// 	BufferSize:    1,
-		// 	BufferPolicy:  intracom.DropOldest,
-		// })
 		if err != nil {
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
 		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
-		// defer sc.icStates.Unsubscribe(consumer, sub)
 
 		for {
 			select {

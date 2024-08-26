@@ -186,8 +186,8 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 	}()
 
-	// --- Preflight Checks ---
-	// run all preflight checks in order
+	// --- Prestart Pipeline ---
+	// run all prestart checks in order
 	errC := d.prestart.Run(dctx)
 	for err := range errC {
 		logC <- err
