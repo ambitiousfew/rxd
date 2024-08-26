@@ -9,9 +9,15 @@ import (
 
 type DaemonOption func(*daemon)
 
-func WithPrestartPipeline(pipeline PrestartPipeline) DaemonOption {
+func WithPrestart(conf PrestartConfig, stages ...Stage) DaemonOption {
 	return func(d *daemon) {
-		d.prestart = pipeline
+		d.prestart = NewPrestartPipeline(conf, stages...)
+	}
+}
+
+func WithCustomPrestartPipeline(prestart Pipeline) DaemonOption {
+	return func(d *daemon) {
+		d.prestart = prestart
 	}
 }
 

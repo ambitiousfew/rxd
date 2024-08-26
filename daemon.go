@@ -21,8 +21,6 @@ import (
 type Daemon interface {
 	AddServices(services ...Service) error
 	AddService(service Service) error
-	AddPrestartStage(stage Stage)
-	AddPrestartStages(stages ...Stage)
 	Start(ctx context.Context) error
 }
 
@@ -31,7 +29,7 @@ type daemon struct {
 	signals         []os.Signal               // OS signals you want your daemon to listen for
 	services        map[string]DaemonService  // map of service name to struct carrying the service runner and name.
 	managers        map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
-	prestart        PrestartPipeline          // preflight pipeline to run before starting the daemon
+	prestart        Pipeline                  // prestart pipeline to run before starting the daemon services
 	ic              *intracom.Intracom        // intracom registry for the daemon to communicate with services
 	reportAliveSecs uint64                    // system service manager alive report timeout in seconds aka watchdog timeout
 	logWorkerCount  int                       // number of concurrent log workers used to receive and write service logs (default: 2)
@@ -43,8 +41,12 @@ type daemon struct {
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
-// NOTE: The service logger by default is no-op logger.
+// NOTE: The service logger runs with a default stdout logger.
+// This can be optionally changed by passing the WithServiceLogger option in NewDaemon
+// The internal logger is disabled by default and can be enabled by passing the WithInternalLogger option in NewDaemon
 func NewDaemon(name string, options ...DaemonOption) Daemon {
+	defaultLogger := log.NewLogger(log.LevelInfo, log.NewHandler())
+
 	d := &daemon{
 		name:     name,
 		signals:  []os.Signal{syscall.SIGINT, syscall.SIGTERM},
@@ -58,7 +60,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		ic:              intracom.New("rxd-intracom"),
 		reportAliveSecs: 0,
 		logWorkerCount:  2,
-		serviceLogger:   noopLogger{},
+		serviceLogger:   defaultLogger,
 		// by default the internal daemon logger is disabled.
 		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
 			filepath: "rxd.log",        // relative to the executable, if enabled
@@ -80,6 +82,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 
 // NewDaemonWithLogger creates and return an instance of the reactive daemon with a custom service logger
 // NOTE: this can also be set by passing the WithServiceLogger option in NewDaemon
+// This is to support the old pattern of creating a daemon with a custom service logger.
 func NewDaemonWithLogger(name string, logger log.Logger, options ...DaemonOption) Daemon {
 	d := &daemon{
 		name:     name,
@@ -333,16 +336,6 @@ func (d *daemon) AddServices(services ...Service) error {
 		}
 	}
 	return nil
-}
-
-func (d *daemon) AddPrestartStage(stage Stage) {
-	d.prestart.Add(stage)
-}
-
-func (d *daemon) AddPrestartStages(stages ...Stage) {
-	for _, stage := range stages {
-		d.prestart.Add(stage)
-	}
 }
 
 // AddService adds a service to the daemon.

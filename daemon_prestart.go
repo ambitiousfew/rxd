@@ -7,7 +7,7 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-type PrestartPipeline interface {
+type Pipeline interface {
 	Add(stage Stage)
 	Run(ctx context.Context) <-chan DaemonLog
 }
@@ -30,7 +30,7 @@ type PrestartConfig struct {
 	RestartDelay   time.Duration
 }
 
-func NewPrestartPipeline(conf PrestartConfig, stages ...Stage) PrestartPipeline {
+func NewPrestartPipeline(conf PrestartConfig, stages ...Stage) Pipeline {
 	return &prestartPipeline{
 		RestartOnError: conf.RestartOnError,
 		RestartDelay:   conf.RestartDelay,
