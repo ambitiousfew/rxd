@@ -9,29 +9,17 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-type testLogger struct {
-	t *testing.T
-}
-
-func (t testLogger) Handle(level log.Level, message string, fields []log.Field) {
-	var buf strings.Builder
-	for _, f := range fields {
-		buf.WriteString(" ")
-		buf.WriteString(f.Key)
-		buf.WriteString("=")
-		buf.WriteString(f.Value)
-	}
-
-	t.t.Logf("[%s] %s %s", level, message, buf.String())
-}
-
 func TestDaemon_StartAService(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	logger := log.NewLogger(log.LevelDebug, testLogger{t: t})
+	internalWriter := new(strings.Builder)
+	svcWriter := new(strings.Builder)
 
-	d := NewDaemon("test-daemon", WithInternalLogger(logger))
+	testInternallogger := log.NewLogger(log.LevelDebug, newTestLogger(internalWriter))
+	testServicelogger := log.NewLogger(log.LevelDebug, newTestLogger(svcWriter))
+
+	d := NewDaemon("test-daemon", WithInternalLogger(testInternallogger), WithServiceLogger(testServicelogger))
 
 	s1 := NewService("test-service-1", newMockService(100*time.Millisecond))
 
@@ -68,4 +56,39 @@ func TestDaemon_AddServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error adding services: %s", err)
 	}
+}
+
+func TestDaemon_PanicService(t *testing.T) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	internalWriter := new(strings.Builder)
+	svcWriter := new(strings.Builder)
+
+	testInternallogger := log.NewLogger(log.LevelDebug, newTestLogger(internalWriter))
+	testServicelogger := log.NewLogger(log.LevelDebug, newTestLogger(svcWriter))
+
+	d := NewDaemon("test-daemon", WithInternalLogger(testInternallogger), WithServiceLogger(testServicelogger))
+
+	s := NewService("test-service", newMockPanicService(100*time.Millisecond))
+
+	err := d.AddService(s)
+	if err != nil {
+		t.Fatalf("error adding service: %s", err)
+	}
+
+	err = d.Start(ctx)
+	if err != nil {
+		t.Fatalf("expected no error starting daemon: %s", err)
+	}
+
+	if !strings.Contains(svcWriter.String(), "intentional panic") {
+		t.Fatalf("expected panic message in service logger")
+	}
+
+	if !strings.Contains(internalWriter.String(), "intentional panic") {
+		t.Fatalf("expected panic message in internal logger")
+	}
+
 }

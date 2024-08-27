@@ -230,13 +230,27 @@ func (d *daemon) Start(parent context.Context) error {
 		dwg.Add(1)
 		// each service is handled in its own routine.
 		go func(ctx context.Context, wg *sync.WaitGroup, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
-			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
 			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, logC, d.ic)
+
+			defer func() {
+				// recover from any panics in the service runner
+				// no service should be able to crash the daemon.
+				if r := recover(); r != nil {
+					d.serviceLogger.Log(log.LevelError, "recovered from panic", log.String("service", ds.Name), log.Any("error", r))
+					d.internalLogger.Log(log.LevelError, "recovered from panic", log.String("service_name", ds.Name), log.Any("error", r), nameField)
+					stateC <- StateUpdate{Name: ds.Name, State: StateExit}
+				}
+				scancel()
+				wg.Done()
+				d.internalLogger.Log(log.LevelInfo, "service has stopped", log.String("service_name", ds.Name), nameField)
+			}()
+
+			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
 			// run the service according to the manager policy
 			manager.Manage(sctx, ds, stateC)
-			scancel()
-			wg.Done()
-			d.internalLogger.Log(log.LevelInfo, "service has stopped", log.String("service_name", ds.Name), nameField)
+			// scancel()
+			// wg.Done()
+
 		}(dctx, &dwg, service, manager, stateUpdateC)
 	}
 
