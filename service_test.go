@@ -60,6 +60,7 @@ func newTestLogger(writer io.Writer) *testServiceLogger {
 	return &testServiceLogger{
 		writer: writer,
 		level:  log.LevelDebug,
+		mu:     sync.RWMutex{},
 	}
 }
 

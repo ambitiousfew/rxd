@@ -3,6 +3,7 @@ package rxd
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -65,6 +66,7 @@ func TestDaemon_PanicService(t *testing.T) {
 
 	internalWriter := new(strings.Builder)
 	svcWriter := new(strings.Builder)
+	mu := new(sync.RWMutex)
 
 	testInternallogger := log.NewLogger(log.LevelDebug, newTestLogger(internalWriter))
 	testServicelogger := log.NewLogger(log.LevelDebug, newTestLogger(svcWriter))
@@ -78,16 +80,22 @@ func TestDaemon_PanicService(t *testing.T) {
 		t.Fatalf("error adding service: %s", err)
 	}
 
+	mu.Lock()
 	err = d.Start(ctx)
+	mu.Unlock()
 	if err != nil {
 		t.Fatalf("expected no error starting daemon: %s", err)
 	}
 
+	mu.RLock()
 	if !strings.Contains(svcWriter.String(), "intentional panic") {
+		mu.RUnlock()
 		t.Fatalf("expected panic message in service logger")
 	}
 
+	mu.RLock()
 	if !strings.Contains(internalWriter.String(), "intentional panic") {
+		mu.RUnlock()
 		t.Fatalf("expected panic message in internal logger")
 	}
 
