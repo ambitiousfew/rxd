@@ -3,7 +3,6 @@ package rxd
 import (
 	"context"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -14,11 +13,11 @@ func TestDaemon_StartAService(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	internalWriter := new(strings.Builder)
-	svcWriter := new(strings.Builder)
+	internalTestLogger := newTestLogger()
+	svcTestLogger := newTestLogger()
 
-	testInternallogger := log.NewLogger(log.LevelDebug, newTestLogger(internalWriter))
-	testServicelogger := log.NewLogger(log.LevelDebug, newTestLogger(svcWriter))
+	testInternallogger := log.NewLogger(log.LevelDebug, internalTestLogger)
+	testServicelogger := log.NewLogger(log.LevelDebug, svcTestLogger)
 
 	d := NewDaemon("test-daemon", WithInternalLogger(testInternallogger), WithServiceLogger(testServicelogger))
 
@@ -64,12 +63,10 @@ func TestDaemon_PanicService(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	internalWriter := new(strings.Builder)
-	svcWriter := new(strings.Builder)
-	mu := new(sync.RWMutex)
-
-	testInternallogger := log.NewLogger(log.LevelDebug, newTestLogger(internalWriter))
-	testServicelogger := log.NewLogger(log.LevelDebug, newTestLogger(svcWriter))
+	internalTestLogger := newTestLogger()
+	svcTestLogger := newTestLogger()
+	testInternallogger := log.NewLogger(log.LevelDebug, internalTestLogger)
+	testServicelogger := log.NewLogger(log.LevelDebug, svcTestLogger)
 
 	d := NewDaemon("test-daemon", WithInternalLogger(testInternallogger), WithServiceLogger(testServicelogger))
 
@@ -80,22 +77,16 @@ func TestDaemon_PanicService(t *testing.T) {
 		t.Fatalf("error adding service: %s", err)
 	}
 
-	mu.Lock()
 	err = d.Start(ctx)
-	mu.Unlock()
 	if err != nil {
 		t.Fatalf("expected no error starting daemon: %s", err)
 	}
 
-	mu.RLock()
-	if !strings.Contains(svcWriter.String(), "intentional panic") {
-		mu.RUnlock()
+	if !strings.Contains(svcTestLogger.Output(), "intentional panic") {
 		t.Fatalf("expected panic message in service logger")
 	}
 
-	mu.RLock()
-	if !strings.Contains(internalWriter.String(), "intentional panic") {
-		mu.RUnlock()
+	if !strings.Contains(internalTestLogger.Output(), "intentional panic") {
 		t.Fatalf("expected panic message in internal logger")
 	}
 

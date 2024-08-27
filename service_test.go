@@ -1,7 +1,6 @@
 package rxd
 
 import (
-	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -51,37 +50,42 @@ func TestNewServiceWithHandler(t *testing.T) {
 }
 
 type testServiceLogger struct {
-	writer io.Writer
-	level  log.Level
-	mu     sync.RWMutex
+	buf   strings.Builder
+	level log.Level
+	mu    sync.RWMutex
 }
 
-func newTestLogger(writer io.Writer) *testServiceLogger {
+func newTestLogger() *testServiceLogger {
+	var buf strings.Builder
 	return &testServiceLogger{
-		writer: writer,
-		level:  log.LevelDebug,
-		mu:     sync.RWMutex{},
+		buf:   buf,
+		level: log.LevelDebug,
+		mu:    sync.RWMutex{},
 	}
 }
 
-func (m *testServiceLogger) Handle(level log.Level, message string, fields []log.Field) {
+func (m *testServiceLogger) Output() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.buf.String()
+}
 
+func (m *testServiceLogger) Handle(level log.Level, message string, fields []log.Field) {
 	var fieldOut strings.Builder
 	for _, field := range fields {
 		fieldOut.WriteString(field.Key + "=" + field.Value + " ")
 	}
-
 	message += " " + fieldOut.String()
 
-	m.writer.Write([]byte(message + "\n"))
+	m.mu.Lock()
+	m.buf.Write([]byte(message + "\n"))
+	m.mu.Unlock()
 }
 
 func (m *testServiceLogger) SetLevel(level log.Level) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.level = level
+	m.mu.Unlock()
 }
 
 type mockService struct {
