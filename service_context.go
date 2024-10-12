@@ -149,13 +149,13 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 				interestedServices := make(ServiceStates, len(services))
 				for _, name := range services {
 					switch action {
-					case Entering:
+					case Entered, Entering:
 						// entering is the same as the target state, so we check for the exact target state.
 						if val, ok := states[name]; ok && val == target {
 							interestedServices[name] = val
 						}
 
-					case Exiting:
+					case Exited, Exiting:
 						// exiting is the opposite of entering, so we check for the opposite of the target state.
 						if val, ok := states[name]; ok && val != target {
 							interestedServices[name] = val
@@ -219,12 +219,11 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 				interestedServices := make(ServiceStates, len(services))
 				for _, service := range services {
 					switch action {
-					case Entering:
+					case Entered, Entering:
 						if val, ok := states[service]; ok && val == target {
 							interestedServices[service] = val
 						}
-
-					case Exiting:
+					case Exited, Exiting:
 						if val, ok := states[service]; ok && val != target {
 							interestedServices[service] = val
 						}
