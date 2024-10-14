@@ -10,6 +10,7 @@ const (
 	Exiting
 	// Deprecated: In favor of using Changed
 	Changing
+	NotIn // used for inverse matching of states
 )
 
 type ServiceAction uint8
