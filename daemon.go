@@ -82,44 +82,6 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 	return d
 }
 
-// NewDaemonWithLogger creates and return an instance of the reactive daemon with a custom service logger
-// NOTE: this can also be set by passing the WithServiceLogger option in NewDaemon
-// This is to support the old pattern of creating a daemon with a custom service logger.
-func NewDaemonWithLogger(name string, logger log.Logger, options ...DaemonOption) Daemon {
-	d := &daemon{
-		name:     name,
-		signals:  []os.Signal{syscall.SIGINT, syscall.SIGTERM},
-		services: make(map[string]DaemonService),
-		managers: make(map[string]ServiceManager),
-		prestart: &prestartPipeline{
-			RestartOnError: true,
-			RestartDelay:   5 * time.Second,
-			Stages:         []Stage{},
-		},
-		ic:              intracom.New("rxd-intracom"),
-		reportAliveSecs: 0,
-		logWorkerCount:  2,
-		serviceLogger:   logger,
-		// by default the internal daemon logger is disabled.
-		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
-			filepath: "rxd.log",        // relative to the executable, if enabled
-			enabled:  false,            // disabled by default
-			total:    0,                // total bytes written to the log file
-			limit:    10 * 1024 * 1024, // 10MB (if enabled)
-			file:     nil,
-			mu:       sync.RWMutex{},
-		}),
-		started: atomic.Bool{},
-	}
-
-	for _, option := range options {
-		option(d)
-	}
-
-	return d
-
-}
-
 func (d *daemon) Start(parent context.Context) error {
 	// pre-start checks
 	if d.started.Swap(true) {
@@ -303,6 +265,7 @@ func (d *daemon) Start(parent context.Context) error {
 	d.internalLogger.Log(log.LevelDebug, "closing states watcher", nameField)
 	// since all services have exited their lifecycles, we can close the states update channel.
 	close(stateUpdateC)
+
 	<-statesDoneC // wait for states watcher to finish
 	d.internalLogger.Log(log.LevelDebug, "states watcher closed", nameField)
 

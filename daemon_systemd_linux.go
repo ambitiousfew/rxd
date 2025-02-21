@@ -12,6 +12,36 @@ import (
 	"time"
 )
 
+const (
+	NotifyStateStopped NotifyState = iota
+	NotifyStateStopping
+	NotifyStateRestarting
+	NotifyStateReloading
+	NotifyStateReady
+	NotifyStateAlive
+)
+
+type NotifyState uint8
+
+func (s NotifyState) String() string {
+	switch s {
+	case NotifyStateStopped:
+		return "STOPPED"
+	case NotifyStateStopping:
+		return "STOPPING"
+	case NotifyStateRestarting:
+		return "RESTARTING"
+	case NotifyStateReloading:
+		return "RELOADING"
+	case NotifyStateReady:
+		return "READY"
+	case NotifyStateAlive:
+		return "ALIVE"
+	default:
+		return ""
+	}
+}
+
 type SystemdAgentOption func(*systemdAgent)
 
 func NewSystemdAgent(opt ...SystemdAgentOption) *systemdAgent {
