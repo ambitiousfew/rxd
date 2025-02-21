@@ -9,6 +9,12 @@ import (
 
 type DaemonOption func(*daemon)
 
+func WithDaemonAgent(agent DaemonAgent) DaemonOption {
+	return func(d *daemon) {
+		d.agent = agent
+	}
+}
+
 func WithPrestart(conf PrestartConfig, stages ...Stage) DaemonOption {
 	return func(d *daemon) {
 		d.prestart = NewPrestartPipeline(conf, stages...)
@@ -30,14 +36,6 @@ func WithLogWorkerCount(count int) DaemonOption {
 func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.serviceLogger = logger
-	}
-}
-
-// WithReportAlive sets the interval in seconds for when the daemon should report that it is still alive
-// to the service manager. If the value is set to 0, the daemon will not interact with the service manager.
-func WithReportAlive(timeoutSecs uint64) DaemonOption {
-	return func(d *daemon) {
-		d.reportAliveSecs = timeoutSecs
 	}
 }
 

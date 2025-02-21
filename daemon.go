@@ -29,6 +29,7 @@ type daemon struct {
 	signals         []os.Signal               // OS signals you want your daemon to listen for
 	services        map[string]DaemonService  // map of service name to struct carrying the service runner and name.
 	managers        map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
+	agent           DaemonAgent               // daemon agent that interacts with the OS specific system service manager
 	prestart        Pipeline                  // prestart pipeline to run before starting the daemon services
 	ic              *intracom.Intracom        // intracom registry for the daemon to communicate with services
 	reportAliveSecs uint64                    // system service manager alive report timeout in seconds aka watchdog timeout
@@ -52,6 +53,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		signals:  []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services: make(map[string]DaemonService),
 		managers: make(map[string]ServiceManager),
+		agent:    noopAgent{},
 		prestart: &prestartPipeline{
 			RestartOnError: true,
 			RestartDelay:   5 * time.Second,
@@ -128,34 +130,23 @@ func (d *daemon) Start(parent context.Context) error {
 		return ErrNoServices
 	}
 
-	nameField := log.String("rxd", d.name)
-
 	// daemon child context from parent
-	dctx, dcancel := context.WithCancel(parent)
-	defer dcancel()
+	daemonCtx, daemonCancel := context.WithCancel(parent)
+	defer daemonCancel()
 
-	// --- Service Manager Notifier ---
-	// TODO:: Future work here will be to support multiple platform service managers
-	// such as windows service manager, systemd, etc.
-	//
-	// This will require manager selection to be selected dynamically at runtime.
-	// notifier := GetSystemNotifier(ctx) --- probably...
-	// For now, we are only supporting linux - systemd.
-	notifier, err := NewSystemdNotifier(os.Getenv("NOTIFY_SOCKET"), d.reportAliveSecs)
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error creating systemd notifier", log.Error("error", err), nameField)
-		return err
+	// if the daemon has a platform agent, run it.
+	// this will start the agent and daemon will run in the background.
+	if d.agent != nil {
+		go func() {
+			err := d.agent.Run(daemonCtx)
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
+				daemonCancel()
+			}
+		}()
 	}
 
-	d.internalLogger.Log(log.LevelDebug, "starting system notifier", nameField)
-	// Start the notifier, this will start the watchdog portion.
-	// so we can notify systemd that we have not hung.
-	err = notifier.Start(dctx, d.internalLogger)
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error starting system notifier", log.Error("error", err), nameField)
-		return err
-	}
-
+	nameField := log.String("rxd", d.name)
 	logC := make(chan DaemonLog, 50)
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
@@ -169,18 +160,18 @@ func (d *daemon) Start(parent context.Context) error {
 		defer signal.Stop(signalC)
 
 		select {
-		case <-dctx.Done():
+		case <-daemonCtx.Done():
 			d.internalLogger.Log(log.LevelDebug, "signal watcher received context done from parent context", nameField)
 		case sig := <-signalC:
 			d.internalLogger.Log(log.LevelNotice, "signal watcher received an os signal", log.String("signal", sig.String()), nameField)
 			// if we received a signal to stop, cancel the context
-			dcancel()
+			daemonCancel()
 		}
 
 		// inform systemd that we are stopping/cleaning up
 		// TODO: Test if this notify should happen before or after cancel()
 		// since the watchdog notify continues to until the context is cancelled.
-		err := notifier.Notify(NotifyStateStopping)
+		err := d.agent.Notify(NotifyStateStopping)
 		if err != nil {
 			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", nameField)
 		}
@@ -188,7 +179,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// --- Prestart Pipeline ---
 	// run all prestart checks in order
-	errC := d.prestart.Run(dctx)
+	errC := d.prestart.Run(daemonCtx)
 	for err := range errC {
 		logC <- err
 	}
@@ -251,7 +242,7 @@ func (d *daemon) Start(parent context.Context) error {
 			// scancel()
 			// wg.Done()
 
-		}(dctx, &dwg, service, manager, stateUpdateC)
+		}(daemonCtx, &dwg, service, manager, stateUpdateC)
 	}
 
 	// --- Daemon RPC Server ---
@@ -290,7 +281,7 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 	}
 
-	err = notifier.Notify(NotifyStateReady)
+	err = d.agent.Notify(NotifyStateReady)
 	if err != nil {
 		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.Error("error", err), nameField)
 	}
