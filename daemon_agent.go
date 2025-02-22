@@ -1,6 +1,19 @@
 package rxd
 
-import "context"
+import (
+	"context"
+)
+
+const (
+	NotifyStateStopped NotifyState = iota
+	NotifyStateStopping
+	NotifyStateRestarting
+	NotifyStateReloading
+	NotifyStateReady
+	NotifyStateAlive
+)
+
+type NotifyState uint8
 
 type DaemonAgent interface {
 	Run(ctx context.Context) error
