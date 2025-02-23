@@ -69,21 +69,21 @@ func (l Level) String() string {
 
 func LevelFromString(level string) Level {
 	switch strings.ToUpper(level) {
-	case "EMERGENCY":
+	case "EMERGENCY", "0":
 		return LevelEmergency
-	case "ALERT":
+	case "ALERT", "1":
 		return LevelAlert
-	case "CRITICAL":
+	case "CRITICAL", "2":
 		return LevelCritical
-	case "ERROR":
+	case "ERROR", "3":
 		return LevelError
-	case "WARNING":
+	case "WARNING", "4":
 		return LevelWarning
-	case "NOTICE":
+	case "NOTICE", "5":
 		return LevelNotice
-	case "INFO":
+	case "INFO", "6":
 		return LevelInfo
-	case "DEBUG":
+	case "DEBUG", "7":
 		return LevelDebug
 	default:
 		return LevelInfo

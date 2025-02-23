@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -11,34 +12,40 @@ import (
 	"github.com/ambitiousfew/rxd/pkg/rpc"
 )
 
-func processCommand(command string) rpc.Command {
-	switch command {
-	case "setlevel":
-		return rpc.SetLevel
-	// case "stop":
-	// 	return rpc.Stop
-	// case "start":
-	// 	return rpc.Start
-	// case "list":
-	// 	return rpc.List
-	default:
-		return rpc.Unknown
-	}
-}
-
 func main() {
 	// should never take more than a few seconds to run this client.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	if len(os.Args) < 2 {
-		log.Println("usage: rpc_client setlevel <command>")
+		log.Printf("usage: %s help", os.Args[0])
 		os.Exit(1)
 	}
 
-	cmd := processCommand(os.Args[1])
-
-	if cmd == rpc.Unknown {
+	cmd := os.Args[1]
+	switch cmd {
+	case "help":
+		log.Println("usage: rpc_client <command> <args>")
+		log.Println("commands:")
+		log.Println("  help")
+		log.Println("  version")
+		log.Println("  signal <signal> <service>")
+		log.Println("  loglevel <level>")
+		os.Exit(0)
+	case "version":
+		log.Println("v0.0.1")
+		os.Exit(0)
+	case "signal":
+		if len(os.Args) < 4 {
+			log.Println("usage: rpc_client signal <signal> <service>")
+			os.Exit(1)
+		}
+	case "loglevel":
+		if len(os.Args) < 3 {
+			log.Println("usage: rpc_client loglevel <level>")
+			os.Exit(1)
+		}
+	default:
 		log.Println("unknown command:", os.Args[1])
 		os.Exit(1)
 	}
@@ -49,31 +56,50 @@ func main() {
 		log.Println(err)
 		os.Exit(1)
 	}
+	defer client.Close()
 
 	switch cmd {
-	case rpc.SetLevel:
-		if len(os.Args) < 3 {
-			log.Println("usage: rpc_client loglevel <level>")
-			os.Exit(1)
-		}
-
-		level := int8(rxlog.LevelFromString(os.Args[2]))
-
-		if level < 0 {
-			log.Println("unknown log level:", os.Args[2])
-			os.Exit(1)
-		}
-
-		// Call the ChangeLogLevel method on the RPC server, pass level and pass response
-		err = client.ChangeLogLevel(ctx, rxlog.Level(level))
+	case "loglevel":
+		err := handleLogLevel(ctx, client, os.Args[2:])
 		if err != nil {
 			log.Println(err)
 			os.Exit(1)
 		}
-
-		log.Println("log level changed to:", os.Args[2])
-		return
+	case "signal":
+		err := handleSignal(ctx, client, os.Args[2:])
+		if err != nil {
+			log.Println("BUTT BALLS: ", err)
+			os.Exit(1)
+		}
 	}
 
-	log.Println("client has exited successfully.")
+}
+
+func handleLogLevel(ctx context.Context, client *rpc.Client, args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: rpc_client loglevel <level>")
+	}
+
+	level := int8(rxlog.LevelFromString(args[0]))
+	if level < 0 {
+		return errors.New("unknown log level: '" + args[0] + "'")
+	}
+
+	// Call the ChangeLogLevel method on the RPC server, pass level and pass response
+	err := client.ChangeLogLevel(ctx, rxlog.Level(level))
+	if err != nil {
+		return err
+	}
+
+	log.Println("log level changed to:", args[0])
+	return nil
+}
+
+func handleSignal(ctx context.Context, client *rpc.Client, args []string) error {
+	if len(args) < 2 {
+		return errors.New("usage: rpc_client signal <signal> <service>")
+	}
+	signal := rpc.CommandSignalFromString(args[0])
+	// Call the ChangeService method on the RPC server, pass service and pass response
+	return client.SendSignal(ctx, signal, args[1])
 }

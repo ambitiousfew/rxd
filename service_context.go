@@ -24,7 +24,7 @@ type ServiceContext interface {
 	ServiceLogger
 	Name() string
 	WithFields(fields ...log.Field) ServiceContext
-	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
+	WithParent(ctx context.Context) ServiceContext
 	WithName(name string) (ServiceContext, context.CancelFunc)
 }
 
@@ -39,21 +39,21 @@ type serviceContext struct {
 
 // newServiceWithCancel produces a new cancellable ServiceContext with the given name and fields.
 // func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Topic[ServiceStates]) (ServiceContext, context.CancelFunc) {
-func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, ic *intracom.Intracom) (ServiceContext, context.CancelFunc) {
+func NewServiceContextWithCancel(parent context.Context, service DaemonService) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 
 	fields := []log.Field{}
-	if name != "" {
-		fields = append(fields, log.String("service", name))
+	if service.Name != "" {
+		fields = append(fields, log.String("service", service.Name))
 	}
 
 	return &serviceContext{
 		Context: ctx,
-		name:    name,
-		fqcn:    name,
+		name:    service.Name,
+		fqcn:    service.Name,
 		fields:  fields,
-		logC:    logC,
-		ic:      ic,
+		logC:    service.logC,
+		ic:      service.ic,
 	}, cancel
 }
 
@@ -61,29 +61,42 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 // The new child context will have the same name and fields as the original parent that created it.
 // However if the original parent context is cancelled, the child context will not be cancelled.
 // The new child will only be cancelled if the new parent context is cancelled.
-func (sc *serviceContext) WithParent(parent context.Context) (ServiceContext, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(parent)
+func (sc *serviceContext) WithParent(parent context.Context) ServiceContext {
+	ctx := context.WithoutCancel(parent)
 
-	newCtx := *sc
-	newCtx.Context = ctx
-	return &newCtx, cancel
+	return &serviceContext{
+		Context: ctx,
+		name:    sc.name,
+		fqcn:    sc.fqcn,
+		fields:  sc.fields,
+		logC:    sc.logC,
+		ic:      sc.ic,
+	}
 }
 
 // With returns a new child ServiceContext with the given fields appended to the existing fields.
 // The new child context will have the same name as the parent.
 func (sc *serviceContext) WithFields(fields ...log.Field) ServiceContext {
-	newCtx := *sc
-	newCtx.fields = append(sc.fields, fields...)
-	return &newCtx
+	return &serviceContext{
+		Context: sc.Context,
+		name:    sc.name,
+		fqcn:    sc.fqcn,
+		fields:  append(sc.fields, fields...),
+		logC:    sc.logC,
+		ic:      sc.ic,
+	}
 }
 
 func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(sc.Context)
-	newCtx := *sc
-	newCtx.Context = ctx
-	newCtx.name = name
-	newCtx.fqcn = sc.fqcn + "_" + name
-	return &newCtx, cancel
+	return &serviceContext{
+		Context: ctx,
+		name:    name,
+		fqcn:    sc.fqcn + "_" + name,
+		fields:  sc.fields,
+		logC:    sc.logC,
+		ic:      sc.ic,
+	}, cancel
 }
 
 func (sc *serviceContext) Name() string {

@@ -11,10 +11,14 @@ import (
 
 type Option func(*Intracom)
 
-// Intracom acts as a registry for all topic channels.
-// The Intracom struct is thread-safe and can be used concurrently.
-// Use the pure generic functions below to operate against the Intracom struct:
-// CreateTopic, CreateSubscription, RemoveSubscription, Close
+// The Intracom struct is concurrent-safe when used by multiple goroutines.
+// Intracom struct acts as a registry for all generically typed topic channels.
+// The Intracom struct itself has no methods exposed, instead, it is meant to be
+// passed into the generic factory functions that use it. Such as:
+// - CreateTopic
+// - CreateSubscription
+// - RemoveSubscription
+// - Close
 type Intracom struct {
 	name   string
 	topics map[string]any

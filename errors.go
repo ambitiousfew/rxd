@@ -8,6 +8,7 @@ const (
 	ErrNilService               Error = Error("nil service provided")
 	ErrDuplicateServicePolicy   Error = Error("duplicate service policy found")
 	ErrAddingServiceOnceStarted Error = Error("cannot add a service once the daemon is started")
+	ErrNoIntracomBus            Error = Error("no intracom bus found")
 )
 
 type Error string

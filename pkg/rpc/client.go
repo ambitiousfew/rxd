@@ -38,7 +38,35 @@ func (c *Client) ChangeLogLevel(ctx context.Context, level log.Level) error {
 	var resp error
 
 	doneC := make(chan *rpc.Call, 1)
-	call := c.client.Go("CommandHandler.ChangeLogLevel", level, &resp, doneC)
+	call := c.client.Go("RPCCommandHandler.ChangeLogLevel", level, &resp, doneC)
+
+	select {
+	case <-ctx.Done():
+		if call != nil {
+			call.Done <- call
+		}
+	case result := <-doneC:
+		fmt.Println("result: ", result)
+		if result.Error != nil {
+			fmt.Println("error: ", result.Error)
+			return result.Error
+		}
+		fmt.Println("resp: ", resp)
+		return nil
+	}
+	return resp
+}
+
+func (c *Client) SendSignal(ctx context.Context, signal CommandSignal, service string) error {
+	var resp error
+
+	payload := CommandSignalPayload{
+		Service: service,
+		Signal:  signal,
+	}
+
+	doneC := make(chan *rpc.Call, 1)
+	call := c.client.Go("RPCCommandHandler.SendCommandSignal", payload, &resp, doneC)
 
 	select {
 	case <-ctx.Done():

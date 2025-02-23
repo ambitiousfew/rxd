@@ -1,6 +1,11 @@
 package rxd
 
-import "time"
+import (
+	"time"
+
+	"github.com/ambitiousfew/rxd/intracom"
+	"github.com/ambitiousfew/rxd/pkg/rpc"
+)
 
 type ServiceRunner interface {
 	Init(ServiceContext) error
@@ -22,8 +27,12 @@ type Service struct {
 // this struct is what is passed into a Handler for the  handler to decide how to
 // interact with the service using the ServiceRunner.
 type DaemonService struct {
-	Name   string
-	Runner ServiceRunner
+	Name     string
+	Runner   ServiceRunner
+	CommandC <-chan rpc.CommandSignal
+
+	logC chan<- DaemonLog
+	ic   *intracom.Intracom
 }
 
 func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {

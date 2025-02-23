@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -18,13 +19,17 @@ type CustomManager struct{}
 // If an error occurs during Idle or Run state, the manager will transition to the Stop state.
 // The Stop state will always transition back to the Init state if there is no error.
 // The manager always checks for context cancellation and will exit if the context is cancelled between state transitions.
-func (m CustomManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateC chan<- rxd.StateUpdate) {
+func (m CustomManager) Manage(ctx context.Context, ds rxd.DaemonService, updateC chan<- rxd.StateUpdate) {
+	// func (m CustomManager) Manage(sctx rxd.ServiceContext, ds rxd.DaemonService, updateC chan<- rxd.StateUpdate) {
 	// Set an initial state to init
 	state := rxd.StateInit
 
 	// Causing an intentional arbitrary delay of 1 second between state transitions
 	timeout := time.NewTimer(1 * time.Second)
 	defer timeout.Stop()
+
+	sctx, cancel := rxd.NewServiceContextWithCancel(ctx, ds)
+	defer cancel()
 
 	// Loop until the state is set to exit
 	for state != rxd.StateExit {

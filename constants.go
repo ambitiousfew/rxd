@@ -6,4 +6,5 @@ const (
 	internalServiceStates  string = prefix + ".states"
 	internalSignals        string = prefix + ".signals"
 	internalSignalsManager string = prefix + ".signals.manager"
+	internalCommandSignals string = prefix + ".command.signals"
 )

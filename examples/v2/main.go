@@ -2,28 +2,35 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/log"
 )
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	if err := run(ctx); err != nil {
-		log.Fatalf("Error: %v\n", err)
+		// log.Fatalf("Error: %v\n", err)
+		fmt.Println("Error: ", err)
 	}
-	log.Println("exiting...")
+	fmt.Println("Exiting...")
 }
 
 func run(ctx context.Context) error {
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
 		rxd.WithSignals(os.Interrupt, syscall.SIGTERM),
+		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
+		rxd.WithRPC(rxd.RPCConfig{
+			Addr: "127.0.0.1",
+			Port: 8080,
+		}),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
@@ -44,52 +51,62 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-type vsService struct{}
+type vsService struct {
+	timeout *time.Timer
+}
 
 func (s *vsService) Init(sctx rxd.ServiceContext) error {
-	log.Println("service init")
+	sctx.Log(log.LevelInfo, "service init")
+	if s.timeout == nil {
+		s.timeout = time.NewTimer(3 * time.Second)
+	} else {
+		s.timeout.Reset(3 * time.Second)
+	}
+
 	select {
 	case <-sctx.Done():
 		return nil
-	default:
-
+	case <-s.timeout.C:
+		sctx.Log(log.LevelDebug, "service init complete")
 		return nil
 	}
 }
 
 func (s *vsService) Idle(sctx rxd.ServiceContext) error {
-	log.Println("service idle")
+	s.timeout.Reset(1 * time.Second)
+	sctx.Log(log.LevelInfo, "service idle")
 	select {
 	case <-sctx.Done():
 		return nil
-	default:
-
+	case <-s.timeout.C:
+		sctx.Log(log.LevelDebug, "service idle complete")
 		return nil
 	}
 }
 
 func (s *vsService) Run(sctx rxd.ServiceContext) error {
-	timeout := time.NewTimer(3 * time.Second)
-	defer timeout.Stop()
-
-	log.Println("service run")
+	s.timeout.Reset(1 * time.Second)
+	sctx.Log(log.LevelInfo, "service run")
 	select {
 	case <-sctx.Done():
 		return nil
-	case <-timeout.C:
-		log.Println("service run complete")
+	case <-s.timeout.C:
+		sctx.Log(log.LevelDebug, "service run complete")
+		sctx.Log(log.LevelError, "logging an error for funsies")
 		return nil
 	}
 }
 
 func (s *vsService) Stop(sctx rxd.ServiceContext) error {
-	log.Println("service stop")
+	s.timeout.Reset(1 * time.Second)
+	sctx.Log(log.LevelInfo, "service stop")
 
 	select {
 	case <-sctx.Done():
 		return nil
-	default:
-
+	case <-s.timeout.C:
+		sctx.Log(log.LevelDebug, "service stop complete")
 		return nil
 	}
+
 }
