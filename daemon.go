@@ -27,21 +27,20 @@ type Daemon interface {
 }
 
 type daemon struct {
-	name          string                            // name of the daemon will be used in logging
-	signals       []os.Signal                       // OS signals you want your daemon to listen for
-	services      map[string]Service                // map of service name to struct carrying the service runner and name.
-	serviceRelays map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
-	// managers        map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
-	agent           sysctl.Agent       // daemon agent that interacts with the OS specific system service manager
-	prestart        Pipeline           // prestart pipeline to run before starting the daemon services
-	ic              *intracom.Intracom // intracom registry for the daemon to communicate with services
-	reportAliveSecs uint64             // system service manager alive report timeout in seconds aka watchdog timeout
-	logWorkerCount  int                // number of concurrent log workers used to receive and write service logs (default: 2)
-	serviceLogger   log.Logger         // logger used by user services
-	internalLogger  log.Logger         // logger for the internal daemon, debugging
-	started         atomic.Bool        // flag to indicate if the daemon has been started
-	rpcEnabled      bool               // flag to indicate if the daemon has rpc enabled
-	rpcConfig       RPCConfig          // rpc configuration for the daemon
+	name            string                            // name of the daemon will be used in logging
+	signals         []os.Signal                       // OS signals you want your daemon to listen for
+	services        map[string]Service                // map of service name to struct carrying the service runner and name.
+	serviceRelays   map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
+	agent           sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
+	prestart        Pipeline                          // prestart pipeline to run before starting the daemon services
+	ic              *intracom.Intracom                // intracom registry for the daemon to communicate with services
+	reportAliveSecs uint64                            // system service manager alive report timeout in seconds aka watchdog timeout
+	logWorkerCount  int                               // number of concurrent log workers used to receive and write service logs (default: 2)
+	serviceLogger   log.Logger                        // logger used by user services
+	internalLogger  log.Logger                        // logger for the internal daemon, debugging
+	started         atomic.Bool                       // flag to indicate if the daemon has been started
+	rpcEnabled      bool                              // flag to indicate if the daemon has rpc enabled
+	rpcConfig       RPCConfig                         // rpc configuration for the daemon
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
@@ -51,6 +50,7 @@ type daemon struct {
 func NewDaemon(name string, options ...DaemonOption) Daemon {
 	defaultLogger := log.NewLogger(log.LevelInfo, log.NewHandler())
 
+	// construct the daemon with reasonable default values
 	d := &daemon{
 		name:          name,
 		signals:       []os.Signal{syscall.SIGINT, syscall.SIGTERM},
@@ -78,6 +78,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		started: atomic.Bool{},
 	}
 
+	// apply any optional overrides to the daemon
 	for _, option := range options {
 		option(d)
 	}

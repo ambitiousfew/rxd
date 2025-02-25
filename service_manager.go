@@ -25,6 +25,9 @@ type RunContinuousManager struct {
 	DefaultDelay  time.Duration
 	StartupDelay  time.Duration
 	StateTimeouts ManagerStateTimeouts
+	LogWarning    bool          // if true, log a warning if the service has been stopped for longer than WarnDuration.
+	WarnDuration  time.Duration // if the service has been stopped for longer than this duration, log a warning.
+
 }
 
 func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
@@ -33,6 +36,8 @@ func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 		DefaultDelay:  100 * time.Millisecond,
 		StartupDelay:  100 * time.Millisecond,
 		StateTimeouts: timeouts,
+		LogWarning:    false,
+		WarnDuration:  10 * time.Second,
 	}
 
 	for _, opt := range opts {
@@ -184,6 +189,9 @@ func friendlyTimeDiff(elapsed time.Duration) string {
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
 func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonService, updateC chan<- StateUpdate) {
+	warningTimer := time.NewTimer(m.WarnDuration)
+	warningTimer.Stop()
+
 	var state State = StateInit
 	mu := new(sync.RWMutex)
 
@@ -223,10 +231,6 @@ func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonService, upda
 		}
 	}()
 
-	warningDuration := 10 * time.Second
-	warningTimer := time.NewTimer(warningDuration)
-	defer warningTimer.Stop()
-
 	var stoppedAt *time.Time
 
 	sctx, cancel := NewServiceContextWithCancel(ctx, ds)
@@ -248,7 +252,9 @@ loop:
 
 			timeDiff := time.Since(*stoppedAt)
 			sctx.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
-			warningTimer.Reset(warningDuration)
+			if m.LogWarning {
+				warningTimer.Reset(m.WarnDuration)
+			}
 		case cmd, open := <-signalC:
 			if !open {
 				break loop
@@ -276,11 +282,15 @@ loop:
 				}
 
 				stoppedAt = &now
-				warningTimer.Reset(warningDuration)
+				if m.LogWarning {
+					warningTimer.Reset(m.WarnDuration)
+				}
 			case rpc.CommandSignalRestart:
 				cancel()
 				stoppedAt = &now
-				warningTimer.Reset(warningDuration)
+				if m.LogWarning {
+					warningTimer.Reset(m.WarnDuration)
+				}
 				select {
 				case <-ctx.Done():
 					break loop
@@ -301,7 +311,10 @@ loop:
 			// do nothing, we are done.
 			sctx.Log(log.LevelWarning, "service has been stopped")
 			stoppedAt = &now
-			warningTimer.Reset(warningDuration)
+			if m.LogWarning {
+				warningTimer.Reset(m.WarnDuration)
+			}
+
 		}
 	}
 
