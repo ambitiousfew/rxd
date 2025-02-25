@@ -5,12 +5,17 @@ import (
 	"sync"
 
 	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 type DaemonOption func(*daemon)
 
-func WithDaemonAgent(agent DaemonAgent) DaemonOption {
+func WithDaemonAgent(agent sysctl.Agent) DaemonOption {
 	return func(d *daemon) {
+		if agent == nil {
+			agent = sysctl.NewDefaultSystemAgent()
+		}
+
 		d.agent = agent
 	}
 }

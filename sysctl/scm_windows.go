@@ -1,12 +1,20 @@
 //go:build windows
 
-package rxd
+package sysctl
 
 import (
 	"context"
 	"errors"
 	"syscall"
 	"unsafe"
+)
+
+// Windows API DLL and function references.
+var (
+	modAdvapi32                       = syscall.NewLazyDLL("advapi32.dll")
+	procStartServiceCtrlDispatcherW   = modAdvapi32.NewProc("StartServiceCtrlDispatcherW")
+	procRegisterServiceCtrlHandlerExW = modAdvapi32.NewProc("RegisterServiceCtrlHandlerExW")
+	procSetServiceStatus              = modAdvapi32.NewProc("SetServiceStatus")
 )
 
 // Constants for service states and control codes.
@@ -30,14 +38,6 @@ type serviceStatus struct {
 	dwCheckPoint              uint32
 	dwWaitHint                uint32
 }
-
-// Windows API DLL and function references.
-var (
-	modAdvapi32                       = syscall.NewLazyDLL("advapi32.dll")
-	procStartServiceCtrlDispatcherW   = modAdvapi32.NewProc("StartServiceCtrlDispatcherW")
-	procRegisterServiceCtrlHandlerExW = modAdvapi32.NewProc("RegisterServiceCtrlHandlerExW")
-	procSetServiceStatus              = modAdvapi32.NewProc("SetServiceStatus")
-)
 
 // serviceTableEntry mirrors the Windows SERVICE_TABLE_ENTRY structure.
 type serviceTableEntry struct {

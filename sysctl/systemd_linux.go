@@ -1,6 +1,6 @@
 //go:build linux
 
-package rxd
+package sysctl
 
 import (
 	"context"

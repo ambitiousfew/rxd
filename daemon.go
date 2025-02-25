@@ -17,6 +17,7 @@ import (
 	"github.com/ambitiousfew/rxd/intracom"
 	"github.com/ambitiousfew/rxd/log"
 	"github.com/ambitiousfew/rxd/pkg/rpc"
+	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 type Daemon interface {
@@ -31,7 +32,7 @@ type daemon struct {
 	services      map[string]Service                // map of service name to struct carrying the service runner and name.
 	serviceRelays map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
 	// managers        map[string]ServiceManager // map of service name to service handler that will run the service runner methods.
-	agent           DaemonAgent        // daemon agent that interacts with the OS specific system service manager
+	agent           sysctl.Agent       // daemon agent that interacts with the OS specific system service manager
 	prestart        Pipeline           // prestart pipeline to run before starting the daemon services
 	ic              *intracom.Intracom // intracom registry for the daemon to communicate with services
 	reportAliveSecs uint64             // system service manager alive report timeout in seconds aka watchdog timeout
@@ -55,7 +56,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		signals:       []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services:      make(map[string]Service),
 		serviceRelays: make(map[string]chan rpc.CommandSignal),
-		agent:         noopSystemAgent{},
+		agent:         sysctl.NewDefaultSystemAgent(),
 		prestart: &prestartPipeline{
 			RestartOnError: true,
 			RestartDelay:   5 * time.Second,
@@ -136,7 +137,7 @@ func (d *daemon) Start(parent context.Context) error {
 			daemonCancel()
 		}
 
-		err := d.agent.Notify(NotifyStateStopping)
+		err := d.agent.Notify(sysctl.NotifyStateStopping)
 		if err != nil {
 			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", nameField)
 		}
@@ -262,7 +263,7 @@ func (d *daemon) Start(parent context.Context) error {
 		}(service, stateUpdateC)
 	}
 
-	err = d.agent.Notify(NotifyStateReady)
+	err = d.agent.Notify(sysctl.NotifyStateReady)
 	if err != nil {
 		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.Error("error", err), nameField)
 	}

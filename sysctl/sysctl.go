@@ -1,10 +1,8 @@
-package rxd
+package sysctl
 
-import (
-	"context"
-)
+import "context"
 
-type DaemonAgent interface {
+type Agent interface {
 	Run(ctx context.Context) error
 	Notify(state NotifyState) error
 	Close() error
@@ -38,6 +36,10 @@ func (s NotifyState) String() string {
 	default:
 		return ""
 	}
+}
+
+func NewDefaultSystemAgent() Agent {
+	return noopSystemAgent{}
 }
 
 // noopSystemAgent is a no-op system agent that will be used
