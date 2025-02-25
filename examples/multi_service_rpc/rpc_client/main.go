@@ -18,14 +18,14 @@ func main() {
 	defer cancel()
 
 	if len(os.Args) < 2 {
-		log.Printf("usage: %s help", os.Args[0])
+		log.Printf("usage: %s help\n", os.Args[0])
 		os.Exit(1)
 	}
 
 	cmd := os.Args[1]
 	switch cmd {
 	case "help":
-		log.Println("usage: rpc_client <command> <args>")
+		log.Printf("usage: %s <command> <args>\n", os.Args[0])
 		log.Println("commands:")
 		log.Println("  help")
 		log.Println("  version")
@@ -37,12 +37,12 @@ func main() {
 		os.Exit(0)
 	case "signal":
 		if len(os.Args) < 4 {
-			log.Println("usage: rpc_client signal <signal> <service>")
+			log.Printf("usage: %s signal <signal> <service>\n", os.Args[0])
 			os.Exit(1)
 		}
 	case "loglevel":
 		if len(os.Args) < 3 {
-			log.Println("usage: rpc_client loglevel <level>")
+			log.Printf("usage: %s loglevel <level>\n", os.Args[0])
 			os.Exit(1)
 		}
 	default:
