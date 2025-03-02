@@ -80,7 +80,7 @@ func (a *winscmAgent) Run(ctx context.Context) error {
 	// Register a control handler callback.
 	handlerPtr := syscall.NewCallback(a.serviceCtrlHandler)
 	if handlerPtr == 0 {
-		return errors.New("Failed to create callback function.")
+		return errors.New("failed to create callback function")
 	}
 
 	ret, _, err := procRegisterServiceCtrlHandlerExW.Call(
@@ -90,10 +90,37 @@ func (a *winscmAgent) Run(ctx context.Context) error {
 	)
 
 	if ret == 0 || err != nil {
-		return errors.New("Failed to register service control handler.")
+		return errors.New("failed to register service control handler")
 	}
 
 	<-ctx.Done()
+	return nil
+}
+
+func (a *winscmAgent) Notify(state NotifyState) error {
+	var serviceState uint32
+	switch state {
+	case NotifyStateStopped:
+		serviceState = SERVICE_STOPPED
+	case NotifyStateStopping:
+		serviceState = SERVICE_STOP_PENDING
+	case NotifyStateReady:
+		serviceState = SERVICE_RUNNING
+	default:
+		return errors.New("unsupported state")
+	}
+
+	return a.reportStatus(serviceState, 0, 0)
+
+}
+
+func (a *winscmAgent) Close() error {
+	if a.events == nil {
+		return errors.New("agent is already closed")
+	}
+	close(a.events)
+	a.events = nil
+
 	return nil
 }
 
