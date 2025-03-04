@@ -6,7 +6,6 @@ import (
 	"net/http"
 	gorpc "net/rpc"
 	"os"
-	"os/signal"
 	"reflect"
 	"strconv"
 	"sync"
@@ -49,6 +48,17 @@ type daemon struct {
 // The internal logger is disabled by default and can be enabled by passing the WithInternalLogger option in NewDaemon
 func NewDaemon(name string, options ...DaemonOption) Daemon {
 	defaultLogger := log.NewLogger(log.LevelInfo, log.NewHandler())
+	internalLogger := log.NewLogger(log.LevelDebug, &daemonLogHandler{
+		filepath: "rxd.log",        // relative to the executable, if enabled
+		enabled:  false,            // disabled by default
+		total:    0,                // total bytes written to the log file
+		limit:    10 * 1024 * 1024, // 10MB (if enabled)
+		file:     nil,
+		mu:       sync.RWMutex{},
+	})
+
+	// construct a default system agent with a default internal logger
+	defaultAgent := sysctl.NewDefaultSystemAgent(sysctl.WithLogger(internalLogger))
 
 	// construct the daemon with reasonable default values
 	d := &daemon{
@@ -56,7 +66,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		signals:       []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services:      make(map[string]Service),
 		serviceRelays: make(map[string]chan rpc.CommandSignal),
-		agent:         sysctl.NewDefaultSystemAgent(),
+		agent:         defaultAgent,
 		prestart: &prestartPipeline{
 			RestartOnError: true,
 			RestartDelay:   5 * time.Second,
@@ -67,15 +77,8 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		logWorkerCount:  2,
 		serviceLogger:   defaultLogger,
 		// by default the internal daemon logger is disabled.
-		internalLogger: log.NewLogger(log.LevelDebug, &daemonLogHandler{
-			filepath: "rxd.log",        // relative to the executable, if enabled
-			enabled:  false,            // disabled by default
-			total:    0,                // total bytes written to the log file
-			limit:    10 * 1024 * 1024, // 10MB (if enabled)
-			file:     nil,
-			mu:       sync.RWMutex{},
-		}),
-		started: atomic.Bool{},
+		internalLogger: internalLogger,
+		started:        atomic.Bool{},
 	}
 
 	// apply any optional overrides to the daemon
@@ -104,16 +107,16 @@ func (d *daemon) Start(parent context.Context) error {
 	daemonCtx, daemonCancel := context.WithCancel(parent)
 	defer daemonCancel()
 
-	// if the daemon has a platform agent, run it.
-	// this will start the agent and daemon will run in the background.
 	if d.agent != nil {
+		// if the daemon has a platform agent, run it.
+		// this will start the agent and daemon will run in the background.
 		go func() {
-			err := d.agent.Run(daemonCtx)
+			err := d.agent.Run(parent)
 			if err != nil {
 				d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
-				daemonCancel()
 			}
 		}()
+
 	}
 
 	nameField := log.String("rxd", d.name)
@@ -121,28 +124,6 @@ func (d *daemon) Start(parent context.Context) error {
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
 	loggerDoneC := d.serviceLogWatcher(logC)
-
-	// --- Daemon Signal Watcher ---
-	// listens for signals to stop the daemon such as OS signals or context done.
-	go func() {
-		signalC := make(chan os.Signal, 1)
-		signal.Notify(signalC, syscall.SIGINT, syscall.SIGTERM)
-		defer signal.Stop(signalC)
-
-		select {
-		case <-daemonCtx.Done():
-			d.internalLogger.Log(log.LevelDebug, "signal watcher received context done from parent context", nameField)
-		case sig := <-signalC:
-			d.internalLogger.Log(log.LevelNotice, "signal watcher received an os signal", log.String("signal", sig.String()), nameField)
-			// if we received a signal to stop, cancel the context
-			daemonCancel()
-		}
-
-		err := d.agent.Notify(sysctl.NotifyStateStopping)
-		if err != nil {
-			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", nameField)
-		}
-	}()
 
 	// --- Prestart Pipeline ---
 	// run all prestart checks (if any) in order
@@ -264,18 +245,33 @@ func (d *daemon) Start(parent context.Context) error {
 		}(service, stateUpdateC)
 	}
 
-	err = d.agent.Notify(sysctl.NotifyStateReady)
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.Error("error", err), nameField)
+	// daemon agent watches for signals and acts accordingly
+	// blocks until the daemon context is cancelled or a signal (interrupt or terminate) is received
+	for signal := range d.agent.WatchForSignals(daemonCtx) {
+		d.internalLogger.Log(log.LevelNotice, "received agent signal", nameField, log.String("signal", signal.String()))
+		switch signal {
+		case sysctl.SignalReloading:
+			// TODO: Reload configuration...
+		case sysctl.SignalStarting:
+			err = d.agent.Notify(sysctl.NotifyRunning)
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+			}
+		case sysctl.SignalStopping, sysctl.SignalRestarting:
+			daemonCancel()
+		default:
+			d.internalLogger.Log(log.LevelNotice, "received ignored signal", log.String("signal", signal.String()), nameField)
+			continue
+		}
+
 	}
 
-	// blocks until all service managers have exited
-	// service managers only exit when their underlying service has exited
+	// Continue to block until all services have exited.
 	wg.Wait()
 	// ALL SERVICE MANAGERS HAVE EXITED THEIR LIFECYCLES
 	//   CLEANUP AND SHUTDOWN
 
-	// --- Clean up RPC if it was enabled and set ---
+	// --- Clean up RPC Server it was created ---
 	if server != nil {
 		timedctx, timedcancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer timedcancel()
@@ -284,17 +280,14 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 	}
 
+	// no services should be reporting their states anymore
 	d.internalLogger.Log(log.LevelDebug, "closing states watcher", nameField)
-	// since all services have exited their lifecycles, we can close the states update channel.
-	close(stateUpdateC)
-
-	<-statesDoneC // wait for states watcher to finish
+	close(stateUpdateC) // close the states update channel
+	<-statesDoneC       // wait for states watcher (routine) to exit
 	d.internalLogger.Log(log.LevelDebug, "states watcher closed", nameField)
 
 	d.internalLogger.Log(log.LevelDebug, "closing intracom", nameField)
-	// TODO: these logs should not be interleaved with the user service logs.
 	err = intracom.Close(d.ic)
-	// err = d.icStates.Close()
 	if err != nil {
 		d.internalLogger.Log(log.LevelError, "error closing intracom", log.Error("error", err), nameField)
 	} else {
@@ -302,15 +295,22 @@ func (d *daemon) Start(parent context.Context) error {
 	}
 
 	d.internalLogger.Log(log.LevelDebug, "closing services log channel", nameField)
+	// close the services log channel to signal the log watcher to finish
 	close(logC)   // signal close the log channel
 	<-loggerDoneC // wait for log watcher to finish
-
 	d.internalLogger.Log(log.LevelDebug, "services log channel closed", nameField)
 
 	// if the internal logger is an io.Closer, close it.
 	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
 		internalLogger.Close()
 	}
+
+	// finally notify the system service manager that the daemon has stopped
+	err = d.agent.Notify(sysctl.NotifyStopped)
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+	}
+
 	return nil
 }
 

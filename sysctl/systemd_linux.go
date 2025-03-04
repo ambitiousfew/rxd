@@ -5,14 +5,18 @@ package sysctl
 import (
 	"context"
 	"errors"
-	"log"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
-type SystemdAgentOption func(*systemdAgent)
+var _ Agent = (*systemdAgent)(nil)
 
 func NewSystemdAgent(opt ...SystemdAgentOption) *systemdAgent {
 	agent := &systemdAgent{
@@ -20,40 +24,83 @@ func NewSystemdAgent(opt ...SystemdAgentOption) *systemdAgent {
 		enableWatchdog:   false,
 		watchdogInterval: 0,
 		conn:             nil,
-		lastState:        NotifyStateStopped,
-		mu:               sync.RWMutex{},
+		notifyC:          make(chan NotifyState, 1),
+		signals: []os.Signal{
+			os.Interrupt,
+			syscall.SIGTERM,
+			syscall.SIGHUP,
+		},
+		mu:      sync.RWMutex{},
+		running: atomic.Bool{},
 	}
 
 	for _, o := range opt {
 		o(agent)
 	}
+
 	return agent
-}
-
-func WithNotifyReady(notifyReady bool) SystemdAgentOption {
-	return func(a *systemdAgent) {
-		a.notifyReady = notifyReady
-	}
-}
-
-func WithWatchdog(interval time.Duration) SystemdAgentOption {
-	return func(a *systemdAgent) {
-		a.enableWatchdog = true
-		a.watchdogInterval = interval
-	}
 }
 
 type systemdAgent struct {
 	notifyReady      bool
+	readyTimeout     time.Duration
 	enableWatchdog   bool
 	watchdogInterval time.Duration
 	conn             *net.UnixConn
+	signals          []os.Signal
+	notifyC          chan NotifyState
 
+	logger    log.Logger
 	lastState NotifyState
 	mu        sync.RWMutex
+	running   atomic.Bool
+}
+
+func (a *systemdAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
+	stateC := make(chan SignalState, 1)
+
+	go func() {
+		defer close(stateC)
+
+		signalC := make(chan os.Signal, 1)
+		signal.Notify(signalC, a.signals...)
+		defer signal.Stop(signalC)
+
+		select {
+		case <-ctx.Done():
+			return // exit
+		case stateC <- SignalStarting:
+			// inform caller we are starting the watcher
+			// So it can relay back to systemd that services are running.
+			a.logger.Log(log.LevelInfo, "systemd signal watcher is starting")
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case sig := <-signalC:
+				a.logger.Log(log.LevelDebug, "received signal: "+sig.String())
+				switch sig {
+				case os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT:
+					stateC <- SignalStopping
+				case syscall.SIGHUP:
+					stateC <- SignalReloading
+				default:
+					a.logger.Log(log.LevelDebug, "unsupported signal: "+sig.String())
+					continue
+				}
+			}
+		}
+	}()
+
+	return stateC
 }
 
 func (a *systemdAgent) Run(ctx context.Context) error {
+	a.running.Store(true)
+	defer a.running.Store(false)
+
 	if !a.notifyReady && !a.enableWatchdog {
 		// no-op
 		return nil
@@ -71,71 +118,169 @@ func (a *systemdAgent) Run(ctx context.Context) error {
 
 	a.conn = unixConn
 
-	// notify systemd that the service is ready
-
-	if a.notifyReady {
-		log.Println("Notifying systemd that the service is ready")
-		err := a.Notify(NotifyStateReady)
-		if err != nil {
-			log.Println("Failed to notify systemd that the service is ready:", err)
-			return err
-		} else {
-			log.Println("Notified systemd that the service is ready")
-		}
+	a.logger.Log(log.LevelInfo, "systemd agent is running")
+	// readyNotify checks if notifyReady is enabled and sends the ready signal
+	// to systemd. It will block until the signal is sent or the context is done.
+	// If the readyTimeout is set and exceeded, it will timeout and return an error.
+	// readyTimeout should be set to TimeoutStartSec in the systemd service file.
+	err = a.readyNotify(ctx)
+	if err != nil {
+		return err
 	}
 
+	// only if watchdog is enabled and has interval (WatchdogSec is set)
 	if a.enableWatchdog && a.watchdogInterval > 0 {
-		log.Println("Enabling systemd watchdog with interval", a.watchdogInterval)
-
-		ticker := time.NewTicker(a.watchdogInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-ticker.C:
-				if a.lastState == NotifyStateStopped || a.lastState == NotifyStateStopping {
-					continue // skip until the service is other than stopped
-				}
-				err := a.Notify(NotifyStateAlive)
-				if err != nil {
-					log.Println("Failed to notify systemd watchdog:", err)
-				} else {
-					log.Println("Notified systemd watchdog")
-				}
-			}
+		err := a.handleWatchdog(ctx)
+		if err != nil {
+			return err
 		}
 	}
 
-	log.Println("Systemd agent is running...")
-	<-ctx.Done()
+	// receive all notify signals until closed.
+	for signal := range a.notifyC {
+		a.logger.Log(log.LevelDebug, "received notify state: "+signal.String())
+	}
 
 	return nil
 }
 
 func (a *systemdAgent) Close() error {
 	if a.conn != nil {
-		return a.conn.Close()
+		a.conn.Close()
+	}
+
+	if a.notifyC != nil {
+		close(a.notifyC)
 	}
 
 	return nil
 }
 
 func (a *systemdAgent) Notify(state NotifyState) error {
+	if a.notifyReady && !a.running.Load() {
+		return errors.New("systemd agent is not running")
+	}
+
+	a.notifyC <- state
+	return nil
+}
+
+func (a *systemdAgent) SetLogger(logger log.Logger) {
+	a.logger = logger
+}
+
+func (a *systemdAgent) notify(signal SignalState) error {
 	var payload []byte
-	switch state {
-	case NotifyStateReady:
+	switch signal {
+	case SignalRunning:
 		payload = []byte("READY=1")
-	case NotifyStateStopping:
+	case SignalStopping:
 		payload = []byte("STOPPING=1")
-	case NotifyStateReloading:
+	case SignalReloading:
 		payload = []byte("RELOADING=1")
-	case NotifyStateAlive:
+	case SignalAlive:
 		payload = []byte("WATCHDOG=1")
+	// case SignalStatus: // not supported yet
+	// 	payload = []byte("STATUS=" + status)
 	default:
-		return errors.New("'" + string(state) + "' unsupported state for systemd notifier")
+		return errors.New("'" + string(signal) + "' unsupported state for systemd notifier")
 	}
 
 	_, err := a.conn.Write(payload)
 	return err
+}
+
+func (a *systemdAgent) readyNotify(ctx context.Context) error {
+	if !a.notifyReady {
+		return nil
+	}
+
+	a.logger.Log(log.LevelInfo, "systemd ready notify is enabled")
+
+	timer := time.NewTimer(a.readyTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return nil
+	case state, open := <-a.notifyC:
+		if !open {
+			return nil
+		}
+
+		switch state {
+		case NotifyRunning:
+			err := a.notify(SignalRunning)
+			if err != nil {
+				return err
+			}
+			a.logger.Log(log.LevelInfo, "notified systemd ready signal")
+		default:
+			return errors.New("unsupported state for systemd notifier")
+		}
+	}
+
+	return nil
+}
+
+func (a *systemdAgent) handleWatchdog(ctx context.Context) error {
+	a.logger.Log(log.LevelInfo, "enabling systemd watchdog with interval", log.Int("interval_ms", int(a.watchdogInterval.Milliseconds())))
+
+	var lastState SignalState
+
+	ticker := time.NewTicker(a.watchdogInterval)
+	defer ticker.Stop()
+
+watchdogloop:
+	for {
+		select {
+		case <-ctx.Done():
+			break watchdogloop
+
+		case state, open := <-a.notifyC:
+			// update the last state
+			if !open {
+				return nil
+			}
+
+			switch state {
+			case NotifyStopped:
+				lastState = SignalStopping
+				return nil // exit??
+			case NotifyStarted:
+				lastState = SignalStarting
+				// TODO: // if we leverage status maybe we could send this status?
+			case NotifyReloaded:
+				lastState = SignalRunning
+				// TODO: // if we leverage status maybe we could send this status?
+			case NotifyRunning:
+				lastState = SignalRunning
+			default:
+				continue
+			}
+
+			err := a.notify(lastState)
+			if err != nil {
+				a.logger.Log(log.LevelError, "failed to notify systemd watchdog", log.Error("error", err))
+			} else {
+				a.logger.Log(log.LevelInfo, "notified systemd watchdog", log.String("state", string(lastState)))
+			}
+
+		case <-ticker.C:
+			// if the watchdog ticker ticks, we send an alive signal
+			if lastState == SignalRunning {
+				err := a.notify(SignalAlive)
+				if err != nil {
+					return err
+				}
+				a.logger.Log(log.LevelDebug, "notified systemd watchdog", log.String("state", string(SignalAlive)))
+			}
+
+		}
+	}
+	// wait for notifyC to close, then exit
+	for range a.notifyC {
+	}
+	a.logger.Log(log.LevelInfo, "systemd watchdog handler is closing")
+	return nil
 }
