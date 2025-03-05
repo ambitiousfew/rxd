@@ -53,8 +53,11 @@ type NotifyState uint8
 
 const (
 	NotifyStopped NotifyState = iota
+	NotifyStopping
 	NotifyStarted
+	NotifyStarting
 	NotifyReloaded
+	NotifyReloading
 	NotifyRunning
 	NotifyIsAlive
 )
@@ -85,6 +88,7 @@ func NewDefaultSystemAgent(opts ...DefaultOption) Agent {
 			os.Interrupt,
 			syscall.SIGTERM,
 		},
+		logger:  noopLogger{},
 		notifyC: make(chan NotifyState),
 		running: new(atomic.Bool),
 	}

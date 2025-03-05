@@ -107,17 +107,13 @@ func (d *daemon) Start(parent context.Context) error {
 	daemonCtx, daemonCancel := context.WithCancel(parent)
 	defer daemonCancel()
 
-	if d.agent != nil {
-		// if the daemon has a platform agent, run it.
-		// this will start the agent and daemon will run in the background.
-		go func() {
-			err := d.agent.Run(parent)
-			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
-			}
-		}()
-
-	}
+	// call the platform agent Run method
+	go func() {
+		err := d.agent.Run(parent)
+		if err != nil {
+			d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
+		}
+	}()
 
 	nameField := log.String("rxd", d.name)
 	logC := make(chan DaemonLog, 50)
@@ -251,14 +247,23 @@ func (d *daemon) Start(parent context.Context) error {
 		d.internalLogger.Log(log.LevelNotice, "received agent signal", nameField, log.String("signal", signal.String()))
 		switch signal {
 		case sysctl.SignalReloading:
-			// TODO: Reload configuration...
+			// TODO: perform actual reload operation
+			err = d.agent.Notify(sysctl.NotifyReloaded)
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+			}
 		case sysctl.SignalStarting:
 			err = d.agent.Notify(sysctl.NotifyRunning)
 			if err != nil {
 				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
 			}
 		case sysctl.SignalStopping, sysctl.SignalRestarting:
+			err = d.agent.Notify(sysctl.NotifyStopping)
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+			}
 			daemonCancel()
+
 		default:
 			d.internalLogger.Log(log.LevelNotice, "received ignored signal", log.String("signal", signal.String()), nameField)
 			continue
