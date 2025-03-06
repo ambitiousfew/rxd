@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -71,7 +70,6 @@ func main() {
 
 	// customizing daemon options
 	dopts := []rxd.DaemonOption{
-		rxd.WithSignals(os.Interrupt, syscall.SIGINT, syscall.SIGTERM),
 		// This adds a prestart pipeline that will run the stages (if any) in order and restart from the beginning if an error occurs.
 		rxd.WithPrestart(prestartConf, prestartStages...),
 		// This adds a service logger to the daemon so all services can log in the same logging format.

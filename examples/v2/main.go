@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -25,7 +23,6 @@ func main() {
 func run(ctx context.Context) error {
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
-		rxd.WithSignals(os.Interrupt, syscall.SIGTERM),
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
 		rxd.WithRPC(rxd.RPCConfig{
 			Addr: "127.0.0.1",

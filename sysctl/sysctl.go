@@ -86,6 +86,7 @@ func NewDefaultSystemAgent(opts ...DefaultOption) Agent {
 	agent := defaultAgent{
 		signals: []os.Signal{
 			os.Interrupt,
+			syscall.SIGINT,
 			syscall.SIGTERM,
 		},
 		logger:  noopLogger{},

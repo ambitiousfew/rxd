@@ -72,7 +72,7 @@ func run(parent context.Context, app application) (err error) {
 	// respond to Interrupt / SIGINT / SIGTERM from the OS.
 	dopts := []rxd.DaemonOption{
 		rxd.WithServiceLogger(app.logger),
-		// rxd.WithDaemonAgent(agent),
+		// rxd.WithSystemAgent(agent),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)

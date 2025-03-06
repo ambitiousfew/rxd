@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -43,9 +42,7 @@ func main() {
 	apiSvc := rxd.NewService("startup-job", startupJob, rxd.WithManager(manager))
 
 	// configure any daemon options
-	dopts := []rxd.DaemonOption{
-		rxd.WithSignals(os.Interrupt, syscall.SIGINT, syscall.SIGTERM),
-	}
+	dopts := []rxd.DaemonOption{}
 
 	// Create a new daemon giving it a name, service logger and options
 	daemon := rxd.NewDaemon(DaemonName, dopts...)
