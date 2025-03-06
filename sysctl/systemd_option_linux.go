@@ -22,7 +22,7 @@ func WithWatchdog(interval time.Duration) SystemdAgentOption {
 	}
 }
 
-func WithSignals(signals ...os.Signal) SystemdAgentOption {
+func WithSystemdSignals(signals ...os.Signal) SystemdAgentOption {
 	return func(a *systemdAgent) {
 		if len(signals) == 0 {
 			signals = []os.Signal{os.Interrupt, syscall.SIGTERM}
