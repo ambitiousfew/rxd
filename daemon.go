@@ -109,6 +109,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// call the platform agent Run method
 	go func() {
+		d.internalLogger.Log(log.LevelDebug, "starting platform agent", log.String("name", d.name))
 		err := d.agent.Run(parent)
 		if err != nil {
 			d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
@@ -273,6 +274,12 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// Continue to block until all services have exited.
 	wg.Wait()
+
+	err = d.agent.Close()
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error closing system service manager", log.Error("error", err), nameField)
+	}
+
 	// ALL SERVICE MANAGERS HAVE EXITED THEIR LIFECYCLES
 	//   CLEANUP AND SHUTDOWN
 

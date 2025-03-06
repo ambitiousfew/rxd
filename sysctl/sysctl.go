@@ -131,13 +131,6 @@ func (a defaultAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
 		signal.Notify(signalC, a.signals...)
 		defer signal.Stop(signalC)
 
-		select {
-		case <-ctx.Done():
-			return // exit
-		case ch <- SignalStarting:
-			// inform caller we are starting the watcher
-		}
-
 		for {
 			select {
 			case <-ctx.Done():

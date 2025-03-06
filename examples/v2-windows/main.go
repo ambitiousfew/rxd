@@ -9,43 +9,70 @@ import (
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := run(ctx); err != nil {
-		// log.Fatalf("Error: %v\n", err)
-		fmt.Println("Error: ", err)
+	logPath := filepath.Join("v2-windows.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
-	fmt.Println("Exiting...")
+	defer logFile.Close()
+
+	serviceLogger := log.NewLogger(log.LevelDebug, log.NewHandler(log.WithWriter(logFile)))
+
+	app := application{
+		logger: serviceLogger,
+	}
+
+	if err := run(ctx, app); err != nil {
+		cancel()
+		fmt.Println(err)
+		serviceLogger.Log(log.LevelError, "Error: %v\n", log.Error("error", err))
+		logFile.Close()
+		os.Exit(1)
+	}
+	serviceLogger.Log(log.LevelInfo, "exited normally")
 }
 
-func run(ctx context.Context) error {
-	debugFilePath := filepath.Join("X:", "code", "dev", "go", "rxd", "examples", "v2-windows", "rxd-debug.log")
-	debugFile, err := os.Create(debugFilePath)
-	if err != nil {
-		return err
-	}
-	defer debugFile.Close()
+type application struct {
+	logger log.Logger
+}
+
+func run(parent context.Context, app application) (err error) {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
 	defer func() {
 		if r := recover(); r != nil {
-			debugFile.WriteString(fmt.Sprintf("Panic: %v\n", r))
+			app.logger.Log(log.LevelError, "Panic: %v\n", log.Any("panic", r))
 		}
 	}()
 
-	agent, err := sysctl.NewWindowsSCMAgent("v2-daemon")
-	if err != nil {
-		debugFile.WriteString(fmt.Sprintf("Error creating agent: %v\n", err))
-		return err
-	}
+	// If you want to build a binary that you can run as a service using Windows SCM, such as:
+	// sc.exe create <your-service-name> binPath= "C:\path\to\your\binary.exe"
+	// You will need to create a new agent passing in the service name.
+	//
+	// NOTE: The <your-service-name> must be unique and sc.exe <your-service-name>
+	// must match the same name as you pass to the NewWindowsSCMAgent function.
 
-	// create a new daemon
+	// agent, err = sysctl.NewWindowsSCMAgent("<your-service-name>")
+	// if err != nil {
+	// 	app.logger.Log(log.LevelError, "Error creating agent: %v\n", log.Error("error", err))
+	// 	return err
+	// }
+
+	// The default agent is being used below (by default for all OSes)
+	// runs similar to a normal process that would block your terminal.
+	// It does not interact with the service control manager but it does
+	// respond to Interrupt / SIGINT / SIGTERM from the OS.
 	dopts := []rxd.DaemonOption{
-		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
-		rxd.WithDaemonAgent(agent),
+		rxd.WithServiceLogger(app.logger),
+		// rxd.WithDaemonAgent(agent),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
@@ -55,16 +82,18 @@ func run(ctx context.Context) error {
 		Runner: &vsService{},
 	})
 	if err != nil {
-		debugFile.WriteString(fmt.Sprintf("Error adding service: %v\n", err))
+		app.logger.Log(log.LevelError, "Error adding service: %v\n", log.Error("error", err))
 		return err
 	}
 
+	app.logger.Log(log.LevelInfo, "starting daemon")
 	// start the daemon
 	if err := d.Start(ctx); err != nil {
-		debugFile.WriteString(fmt.Sprintf("Error starting daemon: %v\n", err))
+		app.logger.Log(log.LevelError, "Error starting daemon: %v\n", log.Error("error", err))
 		return err
 	}
-	debugFile.WriteString("Daemon exited normally\n")
+
+	app.logger.Log(log.LevelInfo, "daemon exited normally")
 	return nil
 }
 
