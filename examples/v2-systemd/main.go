@@ -1,29 +1,41 @@
+// build +linux
 package main
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
 )
 
+type application struct {
+	logger log.Logger
+}
+
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	if err := run(ctx); err != nil {
-		// log.Fatalf("Error: %v\n", err)
-		fmt.Println("Error: ", err)
+	logger := log.NewLogger(log.LevelDebug, log.NewHandler())
+
+	app := application{
+		logger: logger,
 	}
-	fmt.Println("Exiting...")
+
+	if err := run(ctx, app); err != nil {
+		logger.Log(log.LevelError, "error running the daemon", log.Error("error", err))
+		os.Exit(1)
+	}
+	logger.Log(log.LevelInfo, "daemon exited normally")
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, app application) error {
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
+		rxd.WithServiceLogger(app.logger),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)

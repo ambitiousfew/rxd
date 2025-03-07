@@ -1,10 +1,10 @@
+//go:build windows
+
 package main
 
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -12,59 +12,61 @@ import (
 	"github.com/ambitiousfew/rxd/sysctl"
 )
 
+// This name must match the name used to
+// create the service with the `sc create` command.
+const SCMDaemonName = "v2-daemon"
+
+type application struct {
+	daemonName string
+	logger     log.Logger
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := run(ctx); err != nil {
-		// log.Fatalf("Error: %v\n", err)
-		fmt.Println("Error: ", err)
+	logger := log.NewLogger(log.LevelDebug, log.NewHandler())
+
+	app := application{
+		daemonName: SCMDaemonName,
+		logger:     logger,
 	}
-	fmt.Println("Exiting...")
+
+	if err := run(ctx, app); err != nil {
+		logger.Log(log.LevelError, "error running the daemon", log.Error("error", err))
+	}
+	logger.Log(log.LevelInfo, "daemon exited normally")
 }
 
-func run(ctx context.Context) error {
-	debugFilePath := filepath.Join("X:", "code", "dev", "go", "rxd", "examples", "v2-windows", "rxd-debug.log")
-	debugFile, err := os.Create(debugFilePath)
-	if err != nil {
-		return err
-	}
-	defer debugFile.Close()
+func run(ctx context.Context, app application) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			debugFile.WriteString(fmt.Sprintf("Panic: %v\n", r))
+			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
 
-	agent, err := sysctl.NewWindowsSCMAgent("v2-daemon")
-	if err != nil {
-		debugFile.WriteString(fmt.Sprintf("Error creating agent: %v\n", err))
-		return err
-	}
-
+	agent, err := sysctl.NewWindowsSCMAgent(app.daemonName)
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
+		rxd.WithServiceLogger(app.logger),
 		rxd.WithDaemonAgent(agent),
 	}
 
-	d := rxd.NewDaemon("v2-daemon", dopts...)
+	d := rxd.NewDaemon(app.daemonName, dopts...)
 
 	err = d.AddService(rxd.Service{
 		Name:   "v2-service",
 		Runner: &vsService{},
 	})
 	if err != nil {
-		debugFile.WriteString(fmt.Sprintf("Error adding service: %v\n", err))
 		return err
 	}
 
 	// start the daemon
 	if err := d.Start(ctx); err != nil {
-		debugFile.WriteString(fmt.Sprintf("Error starting daemon: %v\n", err))
 		return err
 	}
-	debugFile.WriteString("Daemon exited normally\n")
 	return nil
 }
 

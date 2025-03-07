@@ -9,9 +9,10 @@ import (
 )
 
 type defaultHandler struct {
-	out io.Writer
-	mu  sync.RWMutex
-
+	stdout   io.Writer
+	stderr   io.Writer
+	outMu    sync.RWMutex
+	errMu    sync.RWMutex
 	disabled bool
 	msgfmt   string
 	timefmt  string
@@ -19,8 +20,10 @@ type defaultHandler struct {
 
 func NewHandler(opts ...HandlerOption) LogHandler {
 	h := &defaultHandler{
-		out:      os.Stdout,
-		mu:       sync.RWMutex{},
+		stdout:   os.Stdout,
+		stderr:   os.Stderr,
+		outMu:    sync.RWMutex{},
+		errMu:    sync.RWMutex{},
 		msgfmt:   "{time} [{level}] {message}",
 		timefmt:  time.RFC3339,
 		disabled: false,
@@ -53,7 +56,23 @@ func (h *defaultHandler) Handle(level Level, message string, fields []Field) {
 
 	out := b.String()
 
-	h.mu.Lock()
-	h.out.Write([]byte(out + "\n"))
-	h.mu.Unlock()
+	if level < LevelNotice {
+		// anything warning(4) and lower goes to stderr
+		h.writeErr(out)
+	} else {
+		// everything goes out to stdout
+		h.writeOut(out)
+	}
+}
+
+func (h *defaultHandler) writeOut(out string) {
+	h.outMu.Lock()
+	defer h.outMu.Unlock()
+	h.stdout.Write([]byte(out + "\n"))
+}
+
+func (h *defaultHandler) writeErr(out string) {
+	h.errMu.Lock()
+	defer h.errMu.Unlock()
+	h.stderr.Write([]byte(out + "\n"))
 }

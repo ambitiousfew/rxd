@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// 1st run
-	handler := log.NewHandler(log.WithWriter(os.Stdout))
+	handler := log.NewHandler(log.WithWriters(os.Stdout, os.Stderr))
 	logger := log.NewLogger(log.LevelInfo, handler)
 
 	// 2nd run

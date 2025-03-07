@@ -1,0 +1,28 @@
+2025-03-06 16:10:47 DEBUG: creating intracom topic topic=_rxd.states rxd=v2-daemon
+2025-03-06 16:10:47 INFO: starting service states watcher rxd=v2-daemon
+2025-03-06 16:10:47 INFO: starting 1 services rxd=v2-daemon
+2025-03-06 16:10:47 INFO: starting service service_name=v2-service rxd=v2-daemon
+2025-03-06 16:10:47 DEBUG: starting states watcher topic=_rxd.states
+2025-03-06 16:10:47 NOTICE: received agent signal rxd=v2-daemon signal=starting
+2025-03-06 16:10:47 DEBUG: states transition update service_name=v2-service state=init
+2025-03-06 16:10:50 DEBUG: states transition update service_name=v2-service state=idle
+2025-03-06 16:10:51 DEBUG: states transition update service_name=v2-service state=run
+2025-03-06 16:10:52 DEBUG: states transition update service_name=v2-service state=stop
+2025-03-06 16:10:54 DEBUG: states transition update service_name=v2-service state=init
+2025-03-06 16:10:57 DEBUG: states transition update service_name=v2-service state=idle
+2025-03-06 16:10:58 DEBUG: states transition update service_name=v2-service state=run
+2025-03-06 16:10:59 DEBUG: states transition update service_name=v2-service state=stop
+2025-03-06 16:11:00 DEBUG: states transition update service_name=v2-service state=init
+2025-03-06 16:11:03 DEBUG: states transition update service_name=v2-service state=idle
+2025-03-06 16:11:04 DEBUG: states transition update service_name=v2-service state=run
+2025-03-06 16:11:05 NOTICE: received agent signal rxd=v2-daemon signal=stopping
+2025-03-06 16:11:06 INFO: service has been stopped service_name=v2-service rxd=v2-daemon
+2025-03-06 16:11:06 DEBUG: closing states watcher rxd=v2-daemon
+2025-03-06 16:11:06 DEBUG: states transition update service_name=v2-service state=exit
+2025-03-06 16:11:06 DEBUG: states transition update service_name=v2-service state=exit
+2025-03-06 16:11:06 DEBUG: states watcher completed
+2025-03-06 16:11:06 DEBUG: states watcher closed rxd=v2-daemon
+2025-03-06 16:11:06 DEBUG: closing intracom rxd=v2-daemon
+2025-03-06 16:11:06 DEBUG: intracom closed rxd=v2-daemon
+2025-03-06 16:11:06 DEBUG: closing services log channel rxd=v2-daemon
+2025-03-06 16:11:06 DEBUG: services log channel closed rxd=v2-daemon
