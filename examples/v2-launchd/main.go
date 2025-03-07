@@ -3,48 +3,75 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := run(ctx); err != nil {
-		// log.Fatalf("Error: %v\n", err)
-		fmt.Println("Error: ", err)
+	logHandler := log.NewHandler(log.WithWriter(os.Stdout))
+
+	serviceLogger := log.NewLogger(log.LevelDebug, logHandler)
+
+	app := application{
+		logger: serviceLogger,
 	}
-	fmt.Println("Exiting...")
+
+	if err := run(ctx, app); err != nil {
+		cancel()
+		fmt.Println(err)
+		serviceLogger.Log(log.LevelError, "Error: %v\n", log.Error("error", err))
+		os.Exit(1)
+	}
+	serviceLogger.Log(log.LevelInfo, "exited normally")
 }
 
-func run(ctx context.Context) error {
-	// create a new daemon
+type application struct {
+	logger log.Logger
+}
+
+func run(parent context.Context, app application) (err error) {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
+	defer func() {
+		if r := recover(); r != nil {
+			app.logger.Log(log.LevelError, "Panic: %v\n", log.Any("panic", r))
+		}
+	}()
+
+	agent := sysctl.NewLaunchdAgent()
+
 	dopts := []rxd.DaemonOption{
-		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
-		rxd.WithRPC(rxd.RPCConfig{
-			Addr: "127.0.0.1",
-			Port: 8080,
-		}),
+		rxd.WithServiceLogger(app.logger),
+		rxd.WithSystemAgent(agent),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
 
-	err := d.AddService(rxd.Service{
+	err = d.AddService(rxd.Service{
 		Name:   "v2-service",
 		Runner: &vsService{},
 	})
 	if err != nil {
+		app.logger.Log(log.LevelError, "Error adding service: %v\n", log.Error("error", err))
 		return err
 	}
 
+	app.logger.Log(log.LevelInfo, "starting daemon")
 	// start the daemon
 	if err := d.Start(ctx); err != nil {
+		app.logger.Log(log.LevelError, "Error starting daemon: %v\n", log.Error("error", err))
 		return err
 	}
 
+	app.logger.Log(log.LevelInfo, "daemon exited normally")
 	return nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
@@ -33,9 +32,8 @@ func main() {
 	apiSvc := rxd.NewService("helloworld-api", helloWorld, rxd.WithManager(manager))
 
 	// daemon options
-	dopts := []rxd.DaemonOption{
-		rxd.WithSignals(os.Interrupt, syscall.SIGINT, syscall.SIGTERM),
-	}
+	dopts := []rxd.DaemonOption{}
+
 	// Create a new daemon instance with a name and options
 	daemon := rxd.NewDaemon(DaemonName, dopts...)
 

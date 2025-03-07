@@ -1,7 +1,6 @@
 package rxd
 
 import (
-	"os"
 	"sync"
 
 	"github.com/ambitiousfew/rxd/log"
@@ -10,7 +9,7 @@ import (
 
 type DaemonOption func(*daemon)
 
-func WithDaemonAgent(agent sysctl.Agent) DaemonOption {
+func WithSystemAgent(agent sysctl.Agent) DaemonOption {
 	return func(d *daemon) {
 		if agent == nil {
 			agent = sysctl.NewDefaultSystemAgent()
@@ -41,14 +40,6 @@ func WithLogWorkerCount(count int) DaemonOption {
 func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.serviceLogger = logger
-	}
-}
-
-// WithSignals sets the OS signals that the daemon should listen for. If no signals are provided, the daemon
-// will listen for SIGINT and SIGTERM by default.
-func WithSignals(signals ...os.Signal) DaemonOption {
-	return func(d *daemon) {
-		d.signals = signals
 	}
 }
 

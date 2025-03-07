@@ -5,12 +5,10 @@ import (
 	"io"
 	"net/http"
 	gorpc "net/rpc"
-	"os"
 	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/ambitiousfew/rxd/intracom"
@@ -26,20 +24,18 @@ type Daemon interface {
 }
 
 type daemon struct {
-	name            string                            // name of the daemon will be used in logging
-	signals         []os.Signal                       // OS signals you want your daemon to listen for
-	services        map[string]Service                // map of service name to struct carrying the service runner and name.
-	serviceRelays   map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
-	agent           sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
-	prestart        Pipeline                          // prestart pipeline to run before starting the daemon services
-	ic              *intracom.Intracom                // intracom registry for the daemon to communicate with services
-	reportAliveSecs uint64                            // system service manager alive report timeout in seconds aka watchdog timeout
-	logWorkerCount  int                               // number of concurrent log workers used to receive and write service logs (default: 2)
-	serviceLogger   log.Logger                        // logger used by user services
-	internalLogger  log.Logger                        // logger for the internal daemon, debugging
-	started         atomic.Bool                       // flag to indicate if the daemon has been started
-	rpcEnabled      bool                              // flag to indicate if the daemon has rpc enabled
-	rpcConfig       RPCConfig                         // rpc configuration for the daemon
+	name           string                            // name of the daemon will be used in logging
+	services       map[string]Service                // map of service name to struct carrying the service runner and name.
+	serviceRelays  map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
+	agent          sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
+	prestart       Pipeline                          // prestart pipeline to run before starting the daemon services
+	ic             *intracom.Intracom                // intracom registry for the daemon to communicate with services
+	logWorkerCount int                               // number of concurrent log workers used to receive and write service logs (default: 2)
+	serviceLogger  log.Logger                        // logger used by user services
+	internalLogger log.Logger                        // logger for the internal daemon, debugging
+	started        atomic.Bool                       // flag to indicate if the daemon has been started
+	rpcEnabled     bool                              // flag to indicate if the daemon has rpc enabled
+	rpcConfig      RPCConfig                         // rpc configuration for the daemon
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
@@ -63,7 +59,6 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 	// construct the daemon with reasonable default values
 	d := &daemon{
 		name:          name,
-		signals:       []os.Signal{syscall.SIGINT, syscall.SIGTERM},
 		services:      make(map[string]Service),
 		serviceRelays: make(map[string]chan rpc.CommandSignal),
 		agent:         defaultAgent,
@@ -72,10 +67,9 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 			RestartDelay:   5 * time.Second,
 			Stages:         []Stage{},
 		},
-		ic:              intracom.New("rxd-intracom"),
-		reportAliveSecs: 0,
-		logWorkerCount:  2,
-		serviceLogger:   defaultLogger,
+		ic:             intracom.New("rxd-intracom"),
+		logWorkerCount: 2,
+		serviceLogger:  defaultLogger,
 		// by default the internal daemon logger is disabled.
 		internalLogger: internalLogger,
 		started:        atomic.Bool{},
@@ -109,6 +103,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// call the platform agent Run method
 	go func() {
+		d.internalLogger.Log(log.LevelDebug, "starting platform agent", log.String("name", d.name))
 		err := d.agent.Run(parent)
 		if err != nil {
 			d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
@@ -273,6 +268,12 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// Continue to block until all services have exited.
 	wg.Wait()
+
+	err = d.agent.Close()
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error closing system service manager", log.Error("error", err), nameField)
+	}
+
 	// ALL SERVICE MANAGERS HAVE EXITED THEIR LIFECYCLES
 	//   CLEANUP AND SHUTDOWN
 

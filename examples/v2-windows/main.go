@@ -9,7 +9,6 @@ import (
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 // This name must match the name used to
@@ -63,6 +62,7 @@ func run(ctx context.Context, app application) (err error) {
 		return err
 	}
 
+	app.logger.Log(log.LevelInfo, "starting daemon")
 	// start the daemon
 	if err := d.Start(ctx); err != nil {
 		return err

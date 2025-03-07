@@ -86,6 +86,7 @@ func NewDefaultSystemAgent(opts ...DefaultOption) Agent {
 	agent := defaultAgent{
 		signals: []os.Signal{
 			os.Interrupt,
+			syscall.SIGINT,
 			syscall.SIGTERM,
 		},
 		logger:  noopLogger{},
@@ -130,13 +131,6 @@ func (a defaultAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
 		signalC := make(chan os.Signal, 1)
 		signal.Notify(signalC, a.signals...)
 		defer signal.Stop(signalC)
-
-		select {
-		case <-ctx.Done():
-			return // exit
-		case ch <- SignalStarting:
-			// inform caller we are starting the watcher
-		}
 
 		for {
 			select {
