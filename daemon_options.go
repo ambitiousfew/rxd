@@ -14,7 +14,6 @@ func WithSystemAgent(agent sysctl.Agent) DaemonOption {
 		if agent == nil {
 			agent = sysctl.NewDefaultSystemAgent()
 		}
-
 		d.agent = agent
 	}
 }

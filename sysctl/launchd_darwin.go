@@ -23,6 +23,7 @@ func NewLaunchdAgent(opt ...LaunchdOption) *launchdAgent {
 			syscall.SIGTERM,
 			syscall.SIGHUP,
 		},
+		logger:  noopLogger{},
 		running: atomic.Bool{},
 	}
 

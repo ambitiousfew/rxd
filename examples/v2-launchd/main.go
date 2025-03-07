@@ -19,19 +19,19 @@ func main() {
 
 	logHandler := log.NewHandler(log.WithWriters(os.Stdout, os.Stderr))
 
-	serviceLogger := log.NewLogger(log.LevelDebug, logHandler)
+	logger := log.NewLogger(log.LevelDebug, logHandler)
 
 	app := application{
-		logger: serviceLogger,
+		logger: logger,
 	}
 
 	if err := run(ctx, app); err != nil {
 		cancel()
 		fmt.Println(err)
-		serviceLogger.Log(log.LevelError, "Error: %v\n", log.Error("error", err))
+		logger.Log(log.LevelError, "Error: %v\n", log.Error("error", err))
 		os.Exit(1)
 	}
-	serviceLogger.Log(log.LevelInfo, "exited normally")
+	logger.Log(log.LevelInfo, "exited normally")
 }
 
 type application struct {
