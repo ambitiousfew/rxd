@@ -9,6 +9,7 @@ import (
 
 	"github.com/ambitiousfew/rxd"
 	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 // This name must match the name used to
@@ -49,7 +50,7 @@ func run(ctx context.Context, app application) (err error) {
 	dopts := []rxd.DaemonOption{
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
 		rxd.WithServiceLogger(app.logger),
-		rxd.WithDaemonAgent(agent),
+		rxd.WithSystemAgent(agent),
 	}
 
 	d := rxd.NewDaemon(app.daemonName, dopts...)

@@ -54,7 +54,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 	})
 
 	// construct a default system agent with a default internal logger
-	defaultAgent := sysctl.NewDefaultSystemAgent(sysctl.WithLogger(internalLogger))
+	defaultAgent := sysctl.NewDefaultSystemAgent(sysctl.WithCustomLogger(internalLogger))
 
 	// construct the daemon with reasonable default values
 	d := &daemon{

@@ -1,3 +1,5 @@
+//go:build darwin
+
 package main
 
 import (
@@ -15,7 +17,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logHandler := log.NewHandler(log.WithWriter(os.Stdout))
+	logHandler := log.NewHandler(log.WithWriters(os.Stdout, os.Stderr))
 
 	serviceLogger := log.NewLogger(log.LevelDebug, logHandler)
 
