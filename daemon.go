@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ambitiousfew/rxd/config"
 	"github.com/ambitiousfew/rxd/intracom"
 	"github.com/ambitiousfew/rxd/log"
 	"github.com/ambitiousfew/rxd/pkg/rpc"
@@ -25,6 +26,7 @@ type Daemon interface {
 
 type daemon struct {
 	name           string                            // name of the daemon will be used in logging
+	configuration  config.ReadLoader                 // configuration reader and loader for the daemon
 	services       map[string]Service                // map of service name to struct carrying the service runner and name.
 	serviceRelays  map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
 	agent          sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
@@ -73,6 +75,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		// by default the internal daemon logger is disabled.
 		internalLogger: internalLogger,
 		started:        atomic.Bool{},
+		configuration:  noopConfigReadLoader{},
 	}
 
 	// apply any optional overrides to the daemon
@@ -95,6 +98,11 @@ func (d *daemon) Start(parent context.Context) error {
 
 	if d.ic == nil {
 		return ErrNoIntracomBus
+	}
+
+	err := d.configuration.Read(parent)
+	if err != nil {
+		return err
 	}
 
 	// daemon child context from parent
@@ -197,6 +205,16 @@ func (d *daemon) Start(parent context.Context) error {
 	d.internalLogger.Log(log.LevelInfo, "starting service states watcher", nameField)
 	statesDoneC := d.statesWatcher(statesTopic, stateUpdateC)
 
+	// --- Service Configuration Watcher ---
+	configUpdateTopic, err := intracom.CreateTopic[int64](d.ic, intracom.TopicConfig{
+		Name:        internalConfigUpdate,
+		ErrIfExists: true,
+	})
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err), nameField)
+		return err
+	}
+
 	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services", nameField)
 	var wg sync.WaitGroup // daemon wait group
 
@@ -221,41 +239,76 @@ func (d *daemon) Start(parent context.Context) error {
 			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", svc.Name), nameField)
 
 			relayC := d.serviceRelays[svc.Name]
+			consumerName := svc.Name + "-manager"
 
-			ds := DaemonService{
-				Name:     svc.Name,
-				Runner:   svc.Runner,
-				CommandC: relayC,
-				logC:     logC,
-				ic:       d.ic,
+			configSub, err := intracom.CreateSubscription(daemonCtx, d.ic, internalConfigUpdate, 0, intracom.SubscriberConfig[int64]{
+				ConsumerGroup: consumerName,
+				ErrIfExists:   false,
+				BufferSize:    1,
+				BufferPolicy:  intracom.BufferPolicyDropNewest[int64]{},
+			})
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error creating intracom subscription", log.Error("error", err), nameField)
+				return
+			}
+			defer intracom.RemoveSubscription(d.ic, internalConfigUpdate, consumerName, configSub)
+
+			dstate := DaemonState{
+				configLoader: d.configuration,
+				logC:         logC,
+				ic:           d.ic,
+				configC:      configSub,
+			}
+
+			msvc := ManagedService{
+				Name:            svc.Name,
+				Runner:          svc.Runner,
+				ServiceLoaderFn: svc.Loader,
+				CommandC:        relayC,
 			}
 
 			// run the service according to the manager policy
-			service.Manager.Manage(daemonCtx, ds, updateStateC)
+			service.Manager.Manage(daemonCtx, dstate, msvc, updateStateC)
 
 		}(service, stateUpdateC)
 	}
 
+	configUpdateC := configUpdateTopic.PublishChannel()
 	// daemon agent watches for signals and acts accordingly
 	// blocks until the daemon context is cancelled or a signal (interrupt or terminate) is received
 	for signal := range d.agent.WatchForSignals(daemonCtx) {
 		d.internalLogger.Log(log.LevelNotice, "received agent signal", nameField, log.String("signal", signal.String()))
 		switch signal {
 		case sysctl.SignalReloading:
+			d.internalLogger.Log(log.LevelDebug, "reloading configuration", nameField, log.String("signal", signal.String()))
 			// TODO: perform actual reload operation
+			err := d.configuration.Read(daemonCtx)
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error reloading configuration", log.Error("error", err), nameField)
+				continue
+			}
+
 			err = d.agent.Notify(sysctl.NotifyReloaded)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of reload", log.Error("error", err), nameField)
 			}
+
+			select {
+			case <-daemonCtx.Done():
+				break
+			case configUpdateC <- time.Now().Unix():
+				// sent the current time as a signal to all services who care.
+			}
+
 		case sysctl.SignalStarting:
 			err = d.agent.Notify(sysctl.NotifyRunning)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of starting", log.Error("error", err), nameField)
 			}
 		case sysctl.SignalStopping, sysctl.SignalRestarting:
 			err = d.agent.Notify(sysctl.NotifyStopping)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of stopping", log.Error("error", err), nameField)
 			}
 			daemonCancel()
 
@@ -430,3 +483,8 @@ func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string
 	}
 	return nil
 }
+
+type noopConfigReadLoader struct{}
+
+func (noopConfigReadLoader) Read(context.Context) error                  { return nil }
+func (noopConfigReadLoader) Load(context.Context, config.LoaderFn) error { return nil }

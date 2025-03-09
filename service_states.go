@@ -71,3 +71,7 @@ func internalAllStatesConsumer(consumer string) string {
 func internalStatesConsumer(action ServiceAction, target State, consumer string) string {
 	return strings.Join([]string{internalServiceStates, action.String(), target.String(), consumer}, ".")
 }
+
+func internalConfigConsumer(consumer string) string {
+	return strings.Join([]string{internalConfigUpdate, consumer}, ".")
+}

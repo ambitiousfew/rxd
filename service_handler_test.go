@@ -9,10 +9,14 @@ import (
 
 type mockServiceManager struct{}
 
-func (h mockServiceManager) Manage(ctx context.Context, ds DaemonService, updateC chan<- StateUpdate) {
+func (h mockServiceManager) LoadPolicy() ConfigPolicy {
+	return ConfigPolicyDoNothing
+}
+
+func (h mockServiceManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService, updateC chan<- StateUpdate) {
 	// func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) {
 
-	sctx, cancel := NewServiceContextWithCancel(ctx, ds)
+	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
 
 	defer func() {
@@ -27,7 +31,7 @@ func (h mockServiceManager) Manage(ctx context.Context, ds DaemonService, update
 
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
-		updateC <- StateUpdate{Name: ds.Name, State: state}
+		updateC <- StateUpdate{Name: ms.Name, State: state}
 
 		if hasStopped {
 			// not entering Exit after stop was true, reset hasStopped
@@ -41,7 +45,7 @@ func (h mockServiceManager) Manage(ctx context.Context, ds DaemonService, update
 		default:
 			switch state {
 			case StateInit:
-				err := ds.Runner.Init(sctx)
+				err := ms.Runner.Init(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateInit
@@ -50,18 +54,18 @@ func (h mockServiceManager) Manage(ctx context.Context, ds DaemonService, update
 				hasStopped = false
 
 			case StateIdle:
-				err := ds.Runner.Idle(sctx)
+				err := ms.Runner.Idle(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
 				}
 			case StateRun:
-				err := ds.Runner.Run(sctx)
+				err := ms.Runner.Run(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 			case StateStop:
-				err := ds.Runner.Stop(sctx)
+				err := ms.Runner.Stop(sctx)
 				if err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
@@ -76,11 +80,11 @@ func (h mockServiceManager) Manage(ctx context.Context, ds DaemonService, update
 
 	if !hasStopped {
 		// we are only wanting to ensure stop is run if it hasn't been run already then exit.
-		err := ds.Runner.Stop(sctx)
+		err := ms.Runner.Stop(sctx)
 		if err != nil {
 			sctx.Log(log.LevelError, err.Error())
 		}
 	}
 	// push final state to the daemon states watcher.
-	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+	updateC <- StateUpdate{Name: ms.Name, State: StateExit}
 }

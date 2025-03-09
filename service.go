@@ -1,8 +1,10 @@
 package rxd
 
 import (
+	"context"
 	"time"
 
+	"github.com/ambitiousfew/rxd/config"
 	"github.com/ambitiousfew/rxd/intracom"
 	"github.com/ambitiousfew/rxd/pkg/rpc"
 )
@@ -20,19 +22,25 @@ type ServiceRunner interface {
 type Service struct {
 	Name    string
 	Runner  ServiceRunner
+	Loader  config.LoaderFn
 	Manager ServiceManager
 }
 
 // DaemonService is a struct that contains the Name of the service, the ServiceRunner
 // this struct is what is passed into a Handler for the  handler to decide how to
 // interact with the service using the ServiceRunner.
-type DaemonService struct {
-	Name     string
-	Runner   ServiceRunner
-	CommandC <-chan rpc.CommandSignal
+type ManagedService struct {
+	Name            string
+	Runner          ServiceRunner
+	CommandC        <-chan rpc.CommandSignal
+	ServiceLoaderFn config.LoaderFn
+}
 
-	logC chan<- DaemonLog
-	ic   *intracom.Intracom
+type DaemonState struct {
+	configLoader config.Loader
+	configC      <-chan int64
+	logC         chan<- DaemonLog
+	ic           *intracom.Intracom
 }
 
 func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {
@@ -48,7 +56,9 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 				// re-inits from stop to init will delay by 5 seconds.
 				StateInit: 5 * time.Second,
 			},
+			ConfigPolicy: ConfigPolicyStopFirst,
 		},
+		Loader: noopConfigLoadFn,
 	}
 
 	for _, opt := range opts {
@@ -56,4 +66,8 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 	}
 
 	return ds
+}
+
+func noopConfigLoadFn(ctx context.Context, fields map[string]any) error {
+	return nil
 }

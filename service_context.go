@@ -39,21 +39,21 @@ type serviceContext struct {
 
 // newServiceWithCancel produces a new cancellable ServiceContext with the given name and fields.
 // func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Topic[ServiceStates]) (ServiceContext, context.CancelFunc) {
-func NewServiceContextWithCancel(parent context.Context, service DaemonService) (ServiceContext, context.CancelFunc) {
+func NewServiceContextWithCancel(parent context.Context, service string, state DaemonState) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 
 	fields := []log.Field{}
-	if service.Name != "" {
-		fields = append(fields, log.String("service", service.Name))
+	if service != "" {
+		fields = append(fields, log.String("service", service))
 	}
 
 	return &serviceContext{
 		Context: ctx,
-		name:    service.Name,
-		fqcn:    service.Name,
+		name:    service,
+		fqcn:    service,
 		fields:  fields,
-		logC:    service.logC,
-		ic:      service.ic,
+		logC:    state.logC,
+		ic:      state.ic,
 	}, cancel
 }
 

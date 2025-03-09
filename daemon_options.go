@@ -3,11 +3,18 @@ package rxd
 import (
 	"sync"
 
+	"github.com/ambitiousfew/rxd/config"
 	"github.com/ambitiousfew/rxd/log"
 	"github.com/ambitiousfew/rxd/sysctl"
 )
 
 type DaemonOption func(*daemon)
+
+func WithConfigurationLoader(conf config.ReadLoader) DaemonOption {
+	return func(d *daemon) {
+		d.configuration = conf
+	}
+}
 
 func WithSystemAgent(agent sysctl.Agent) DaemonOption {
 	return func(d *daemon) {

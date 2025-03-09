@@ -1,8 +1,25 @@
 package rxd
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/ambitiousfew/rxd/config"
+)
+
+type noopConfigLoader struct{}
+
+func (noopConfigLoader) Load(ctx context.Context, loader config.LoaderFn) error {
+	return loader(ctx, map[string]any{})
+}
 
 type ManagerOption func(m *RunContinuousManager)
+
+func WithConfigLoaderPolicy(policy ConfigPolicy) ManagerOption {
+	return func(h *RunContinuousManager) {
+		h.ConfigPolicy = policy
+	}
+}
 
 func WithInitDelay(delay time.Duration) ManagerOption {
 	return func(h *RunContinuousManager) {

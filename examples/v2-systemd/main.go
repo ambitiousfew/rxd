@@ -3,15 +3,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/config"
 	"github.com/ambitiousfew/rxd/log"
 )
 
 type application struct {
-	logger log.Logger
+	logger     log.Logger
+	configFile string
 }
 
 func main() {
@@ -32,17 +36,41 @@ func main() {
 }
 
 func run(ctx context.Context, app application) error {
+
+	configReadLoader := config.FromJSONFile("config.json")
+
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
 		rxd.WithServiceLogger(app.logger),
+		rxd.WithConfigurationLoader(configReadLoader),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
 
+	timer := time.NewTimer(0 * time.Second)
+	defer timer.Stop()
+
+	vs := &vsService{
+		timeout: timer,
+		myField: "not-spicy",
+		mu:      sync.RWMutex{},
+	}
+
 	err := d.AddService(rxd.Service{
 		Name:   "v2-service",
-		Runner: &vsService{},
+		Runner: vs,
+		Loader: func(ctx context.Context, fields map[string]any) error {
+			val, ok := fields["something_special"].(string)
+			if !ok || val != "extra-spicy" {
+				return errors.New("something_special is not valid")
+			}
+			vs.mu.Lock()
+			vs.myField = val
+			vs.mu.Unlock()
+
+			return nil
+		},
 	})
 	if err != nil {
 		return err
@@ -58,6 +86,9 @@ func run(ctx context.Context, app application) error {
 
 type vsService struct {
 	timeout *time.Timer
+
+	myField string
+	mu      sync.RWMutex
 }
 
 func (s *vsService) Init(sctx rxd.ServiceContext) error {
@@ -84,7 +115,9 @@ func (s *vsService) Idle(sctx rxd.ServiceContext) error {
 	case <-sctx.Done():
 		return nil
 	case <-s.timeout.C:
-		sctx.Log(log.LevelDebug, "service idle complete")
+		s.mu.RLock()
+		sctx.Log(log.LevelDebug, "service idle complete: "+s.myField)
+		s.mu.RUnlock()
 		return nil
 	}
 }
@@ -96,7 +129,9 @@ func (s *vsService) Run(sctx rxd.ServiceContext) error {
 	case <-sctx.Done():
 		return nil
 	case <-s.timeout.C:
-		sctx.Log(log.LevelDebug, "service run complete")
+		s.mu.RLock()
+		sctx.Log(log.LevelDebug, "service run complete: "+s.myField)
+		s.mu.RUnlock()
 		sctx.Log(log.LevelError, "logging an error for funsies")
 		return nil
 	}

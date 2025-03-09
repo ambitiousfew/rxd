@@ -7,4 +7,5 @@ const (
 	internalSignals        string = prefix + ".signals"
 	internalSignalsManager string = prefix + ".signals.manager"
 	internalCommandSignals string = prefix + ".command.signals"
+	internalConfigUpdate   string = prefix + ".config.update"
 )

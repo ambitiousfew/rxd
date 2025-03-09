@@ -83,19 +83,20 @@ func (s NotifyState) String() string {
 // not run any platform-specific system control agent for the daemon.
 // This is useful when running the daemon as a standalone process.
 func NewDefaultSystemAgent(opts ...DefaultOption) Agent {
-	agent := defaultAgent{
+	agent := &defaultAgent{
 		signals: []os.Signal{
 			os.Interrupt,
 			syscall.SIGINT,
 			syscall.SIGTERM,
+			syscall.SIGHUP,
 		},
 		logger:  noopLogger{},
 		notifyC: make(chan NotifyState),
-		running: new(atomic.Bool),
+		running: atomic.Bool{},
 	}
 
 	for _, opt := range opts {
-		opt(&agent)
+		opt(agent)
 	}
 	return agent
 }
@@ -107,11 +108,11 @@ func NewDefaultSystemAgent(opts ...DefaultOption) Agent {
 type defaultAgent struct {
 	signals []os.Signal
 	notifyC chan NotifyState
-	running *atomic.Bool
+	running atomic.Bool
 	logger  log.Logger
 }
 
-func (a defaultAgent) Run(ctx context.Context) error {
+func (a *defaultAgent) Run(ctx context.Context) error {
 	a.running.Swap(true)
 	defer a.running.Swap(false)
 
@@ -123,7 +124,7 @@ func (a defaultAgent) Run(ctx context.Context) error {
 	return nil
 }
 
-func (a defaultAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
+func (a *defaultAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
 	ch := make(chan SignalState)
 	go func() {
 		defer close(ch)
@@ -156,26 +157,26 @@ func (a defaultAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
 	return ch
 }
 
-func (a defaultAgent) SetLogger(logger log.Logger) {
+func (a *defaultAgent) SetLogger(logger log.Logger) {
 	a.logger = logger
 }
 
-func (n defaultAgent) Close() error {
-	if n.notifyC != nil {
-		close(n.notifyC)
-		n.notifyC = nil
+func (a *defaultAgent) Close() error {
+	if a.notifyC != nil {
+		close(a.notifyC)
+		a.notifyC = nil
 	}
 
 	return nil
 }
 
-func (n defaultAgent) Notify(state NotifyState) error {
-	if !n.running.Load() {
+func (a *defaultAgent) Notify(state NotifyState) error {
+	if !a.running.Load() {
 		return errors.New("agent is not running")
 	}
 
-	if n.notifyC != nil {
-		n.notifyC <- state
+	if a.notifyC != nil {
+		a.notifyC <- state
 	}
 
 	return nil

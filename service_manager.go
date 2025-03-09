@@ -10,9 +10,21 @@ import (
 	"github.com/ambitiousfew/rxd/pkg/rpc"
 )
 
+type ConfigPolicy uint8
+
+const (
+	// ConfigPolicyDoNothing will not call the config loader function and will not stop the service.
+	ConfigPolicyDoNothing ConfigPolicy = iota
+	// ConfigPolicyStopFirst will stop the service before calling the config loader function.
+	ConfigPolicyStopFirst
+	// ConfigPolicyDontStop will call the config loader function without stopping the service.
+	ConfigPolicyDontStop
+)
+
 // ServiceManager interface defines the methods that a service handler must implement
 type ServiceManager interface {
-	Manage(parent context.Context, dService DaemonService, updateC chan<- StateUpdate)
+	Manage(parent context.Context, dstate DaemonState, mService ManagedService, updateC chan<- StateUpdate)
+	LoadPolicy() ConfigPolicy
 }
 
 type ManagerStateTimeouts map[State]time.Duration
@@ -27,7 +39,7 @@ type RunContinuousManager struct {
 	StateTimeouts ManagerStateTimeouts
 	LogWarning    bool          // if true, log a warning if the service has been stopped for longer than WarnDuration.
 	WarnDuration  time.Duration // if the service has been stopped for longer than this duration, log a warning.
-
+	ConfigPolicy  ConfigPolicy  // ConfigPolicy defines the policy for the config loader.
 }
 
 func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
@@ -38,6 +50,8 @@ func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 		StateTimeouts: timeouts,
 		LogWarning:    false,
 		WarnDuration:  10 * time.Second,
+		// noop config loader
+		ConfigPolicy: ConfigPolicyStopFirst,
 	}
 
 	for _, opt := range opts {
@@ -45,6 +59,10 @@ func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 	}
 
 	return m
+}
+
+func (m RunContinuousManager) LoadPolicy() ConfigPolicy {
+	return ConfigPolicyStopFirst
 }
 
 func (m RunContinuousManager) nextState(currentState State, signal rpc.CommandSignal) (State, error) {
@@ -74,10 +92,10 @@ func (m RunContinuousManager) nextState(currentState State, signal rpc.CommandSi
 	}
 }
 
-func (m RunContinuousManager) runService(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) <-chan struct{} {
+func (m RunContinuousManager) runService(sctx ServiceContext, ds DaemonState, ms ManagedService, updateC chan<- StateUpdate) <-chan struct{} {
 	doneC := make(chan struct{})
 
-	go func(sctx ServiceContext, ds DaemonService) {
+	go func(sctx ServiceContext, ms ManagedService) {
 		defer close(doneC)
 
 		var state State = StateInit
@@ -97,30 +115,30 @@ func (m RunContinuousManager) runService(sctx ServiceContext, ds DaemonService, 
 				}
 
 				// push the current state to the daemon states watcher.
-				updateC <- StateUpdate{Name: ds.Name, State: state}
+				updateC <- StateUpdate{Name: ms.Name, State: state}
 
 				switch state {
 				case StateInit:
-					if err := ds.Runner.Init(sctx); err != nil {
+					if err := ms.Runner.Init(sctx); err != nil {
 						sctx.Log(log.LevelError, err.Error())
 						state = StateStop
 						continue
 					}
 					state = StateIdle
 				case StateIdle:
-					if err := ds.Runner.Idle(sctx); err != nil {
+					if err := ms.Runner.Idle(sctx); err != nil {
 						sctx.Log(log.LevelError, err.Error())
 						state = StateStop
 						continue
 					}
 					state = StateRun
 				case StateRun:
-					if err := ds.Runner.Run(sctx); err != nil {
+					if err := ms.Runner.Run(sctx); err != nil {
 						sctx.Log(log.LevelError, err.Error())
 					}
 					state = StateStop
 				case StateStop:
-					if err := ds.Runner.Stop(sctx); err != nil {
+					if err := ms.Runner.Stop(sctx); err != nil {
 						sctx.Log(log.LevelError, err.Error())
 					}
 					hasStopped = true
@@ -128,6 +146,8 @@ func (m RunContinuousManager) runService(sctx ServiceContext, ds DaemonService, 
 					state = StateInit
 				default:
 					state = StateExit
+					// log
+					sctx.Log(log.LevelError, "unknown state, exiting service")
 				}
 
 				// delay between each state transition
@@ -140,22 +160,22 @@ func (m RunContinuousManager) runService(sctx ServiceContext, ds DaemonService, 
 		}
 
 		if !hasStopped {
-			timedCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
+			timedCtx, timedCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer timedCancel()
 
 			stopCtx := sctx.WithParent(timedCtx)
 
-			sctx, cancel := NewServiceContextWithCancel(stopCtx, ds)
+			sctx, cancel := NewServiceContextWithCancel(stopCtx, ms.Name, ds)
 			defer cancel()
 
-			if err := ds.Runner.Stop(sctx); err != nil {
+			if err := ms.Runner.Stop(sctx); err != nil {
 				sctx.Log(log.LevelError, err.Error())
 			}
 		}
 
-		updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+		updateC <- StateUpdate{Name: ms.Name, State: StateExit}
 
-	}(sctx, ds)
+	}(sctx, ms)
 
 	return doneC
 }
@@ -188,7 +208,7 @@ func friendlyTimeDiff(elapsed time.Duration) string {
 // RunContinuousManager runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
-func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonService, updateC chan<- StateUpdate) {
+func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService, updateC chan<- StateUpdate) {
 	warningTimer := time.NewTimer(m.WarnDuration)
 	warningTimer.Stop()
 
@@ -205,7 +225,7 @@ func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonService, upda
 			select {
 			case <-ctx.Done(): // daemon wants to shut down
 				return
-			case cmd := <-ds.CommandC:
+			case cmd := <-ms.CommandC:
 				mu.RLock()
 				nextState, err := m.nextState(state, cmd)
 				mu.RUnlock()
@@ -233,9 +253,11 @@ func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonService, upda
 
 	var stoppedAt *time.Time
 
-	sctx, cancel := NewServiceContextWithCancel(ctx, ds)
+	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
-	doneC := m.runService(sctx, ds, updateC)
+
+	var lastUpdate int64
+	doneC := m.runService(sctx, ds, ms, updateC)
 
 loop:
 	for {
@@ -244,6 +266,55 @@ loop:
 		case <-ctx.Done():
 			cancel()
 			break loop
+		case ts, open := <-ds.configC:
+			if !open {
+				break loop
+			}
+			lastUpdate = ts
+
+			if lastUpdate == 0 {
+				// skip if the ts is 0 (intracom subscriber initial message)
+				continue
+			}
+
+			sctx.Log(log.LevelDebug, "config update received", log.Int("timestamp", ts))
+
+			if ts < lastUpdate {
+				// skip if the config is older than the last update.
+				continue
+			}
+			lastUpdate = ts
+
+			switch m.ConfigPolicy {
+			// do nothing
+			case ConfigPolicyStopFirst:
+				cancel()
+				select {
+				case <-ctx.Done():
+					break loop
+				case <-doneC:
+					// wait for service to exit before reloading the config.
+				}
+
+			default:
+				continue // skip, do nothing if any other option.
+			}
+
+			// reload the config now
+			err := ds.configLoader.Load(ctx, ms.ServiceLoaderFn)
+			if err != nil {
+				sctx.Log(log.LevelError, err.Error())
+			}
+
+			switch m.ConfigPolicy {
+			case ConfigPolicyStopFirst:
+				// start the stopped service back up.
+				sctx, cancel = NewServiceContextWithCancel(ctx, ms.Name, ds)
+				doneC = m.runService(sctx, ds, ms, updateC)
+			default:
+				// do nothing for the others.
+			}
+
 		case <-warningTimer.C:
 			if stoppedAt == nil {
 				// stopped wasnt set
@@ -269,8 +340,8 @@ loop:
 
 			switch cmd.Signal {
 			case rpc.CommandSignalStart:
-				sctx, cancel = NewServiceContextWithCancel(ctx, ds)
-				doneC = m.runService(sctx, ds, updateC)
+				sctx, cancel = NewServiceContextWithCancel(ctx, ms.Name, ds)
+				doneC = m.runService(sctx, ds, ms, updateC)
 				stoppedAt = nil
 				// do nothing, the service is already running.
 			case rpc.CommandSignalStop:
@@ -297,8 +368,8 @@ loop:
 				case <-doneC: // wait for the service to stop before restarting.
 				}
 				// recreate the service context.
-				sctx, cancel = NewServiceContextWithCancel(ctx, ds)
-				doneC = m.runService(sctx, ds, updateC)
+				sctx, cancel = NewServiceContextWithCancel(ctx, ms.Name, ds)
+				doneC = m.runService(sctx, ds, ms, updateC)
 				stoppedAt = nil
 
 			case rpc.CommandSignalReload:
@@ -341,8 +412,12 @@ func NewRunUntilSuccessManager(defaultDelay, startupDelay time.Duration) RunUnti
 	return m
 }
 
-func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, updateC chan<- StateUpdate) {
-	sctx, cancel := NewServiceContextWithCancel(ctx, ds)
+func (m RunUntilSuccessManager) LoadPolicy() ConfigPolicy {
+	return ConfigPolicyDoNothing
+}
+
+func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService, updateC chan<- StateUpdate) {
+	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
 
 	defer func() {
@@ -363,7 +438,7 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 		state = StateExit
 	case <-ticker.C:
 		// startup delay has passed, we can start the service runner loop.
-		if err := ds.Runner.Init(sctx); err != nil {
+		if err := ms.Runner.Init(sctx); err != nil {
 			sctx.Log(log.LevelError, err.Error())
 			state = StateStop
 		}
@@ -373,7 +448,7 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 
 	for state != StateExit {
 		// relay the current state we are about to enter to the daemon's states watcher.
-		updateC <- StateUpdate{Name: ds.Name, State: state}
+		updateC <- StateUpdate{Name: ms.Name, State: state}
 
 		select {
 		case <-sctx.Done():
@@ -388,7 +463,7 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 
 			switch state {
 			case StateInit:
-				if err := ds.Runner.Init(sctx); err != nil {
+				if err := ms.Runner.Init(sctx); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
 					continue
@@ -396,7 +471,7 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 				state = StateIdle
 
 			case StateIdle:
-				if err := ds.Runner.Idle(sctx); err != nil {
+				if err := ms.Runner.Idle(sctx); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
 					continue
@@ -404,7 +479,7 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 				state = StateRun
 
 			case StateRun:
-				if err := ds.Runner.Run(sctx); err != nil {
+				if err := ms.Runner.Run(sctx); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
 					continue
@@ -412,7 +487,7 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 				// run exited successfully, we can exit the loop.
 				state = StateExit
 			case StateStop:
-				if err := ds.Runner.Stop(sctx); err != nil {
+				if err := ms.Runner.Stop(sctx); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 				state = StateInit
@@ -424,12 +499,12 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonService, up
 
 	if !hasStopped {
 		// ensure that if any lifecycle ran after stop, we run stop again (for cleanup).
-		if err := ds.Runner.Stop(sctx); err != nil {
+		if err := ms.Runner.Stop(sctx); err != nil {
 			sctx.Log(log.LevelError, err.Error())
 		}
 	}
 
 	// push final state to the daemon states watcher.
-	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+	updateC <- StateUpdate{Name: ms.Name, State: StateExit}
 
 }
