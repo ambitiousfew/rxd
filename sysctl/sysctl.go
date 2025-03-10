@@ -139,13 +139,11 @@ func (a *defaultAgent) WatchForSignals(ctx context.Context) <-chan SignalState {
 				return
 			case sig := <-signalC:
 				a.logger.Log(log.LevelDebug, "received signal: "+sig.String())
-
 				switch sig {
 				case os.Interrupt, syscall.SIGTERM:
 					ch <- SignalStopping
 					return // exit
 				case syscall.SIGHUP:
-
 					ch <- SignalReloading
 				default:
 					continue

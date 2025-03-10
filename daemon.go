@@ -316,16 +316,10 @@ func (d *daemon) Start(parent context.Context) error {
 			d.internalLogger.Log(log.LevelNotice, "received ignored signal", log.String("signal", signal.String()), nameField)
 			continue
 		}
-
 	}
 
 	// Continue to block until all services have exited.
 	wg.Wait()
-
-	err = d.agent.Close()
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error closing system service manager", log.Error("error", err), nameField)
-	}
 
 	// ALL SERVICE MANAGERS HAVE EXITED THEIR LIFECYCLES
 	//   CLEANUP AND SHUTDOWN
@@ -368,6 +362,11 @@ func (d *daemon) Start(parent context.Context) error {
 	err = d.agent.Notify(sysctl.NotifyStopped)
 	if err != nil {
 		d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+	}
+
+	err = d.agent.Close()
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error closing system service manager", log.Error("error", err), nameField)
 	}
 
 	return nil
