@@ -286,9 +286,11 @@ loop:
 				// wait for service to exit before reloading the config.
 			}
 
+			fields := ds.loader.Load(ctx)
+
 			sctx, cancel = NewServiceContextWithCancel(ctx, ms.Name, ds)
 			if reloader, ok := ms.Runner.(ServiceReloader); ok {
-				if err := reloader.Reload(sctx, nil); err != nil {
+				if err := reloader.Reload(sctx, fields); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 			}

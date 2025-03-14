@@ -42,7 +42,7 @@ func run(ctx context.Context, app application) error {
 	dopts := []rxd.DaemonOption{
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
 		rxd.WithServiceLogger(app.logger),
-		rxd.WithConfigurationLoader(configReadLoader),
+		rxd.WithConfigLoader(configReadLoader),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
@@ -114,6 +114,10 @@ func (s *vsService) Reload(sctx rxd.ServiceContext, fields map[string]any) error
 	s.timeout.Reset(3 * time.Second)
 
 	sctx.Log(log.LevelNotice, "service is being reloaded")
+	for k, v := range fields {
+		sctx.Log(log.LevelDebug, "field: "+k, log.Any("value", v))
+	}
+
 	select {
 	case <-sctx.Done():
 	case <-s.timeout.C:

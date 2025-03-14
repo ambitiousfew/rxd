@@ -38,6 +38,7 @@ type daemon struct {
 	started        atomic.Bool                       // flag to indicate if the daemon has been started
 	rpcEnabled     bool                              // flag to indicate if the daemon has rpc enabled
 	rpcConfig      RPCConfig                         // rpc configuration for the daemon
+	loggingC       chan DaemonLog
 }
 
 // NewDaemon creates and return an instance of the reactive daemon
@@ -76,6 +77,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		internalLogger: internalLogger,
 		started:        atomic.Bool{},
 		configuration:  noopConfigReadLoader{},
+		loggingC:       make(chan DaemonLog, 50),
 	}
 
 	// apply any optional overrides to the daemon
@@ -118,16 +120,15 @@ func (d *daemon) Start(parent context.Context) error {
 		}
 	}()
 
-	logC := make(chan DaemonLog, 50)
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
-	loggerDoneC := d.serviceLogWatcher(logC)
+	loggerDoneC := d.serviceLogWatcher(d.loggingC)
 
 	// --- Prestart Pipeline ---
 	// run all prestart checks (if any) in order
 	errC := d.prestart.Run(daemonCtx)
 	for err := range errC {
-		logC <- err
+		d.loggingC <- err
 	}
 
 	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates))
@@ -164,64 +165,11 @@ func (d *daemon) Start(parent context.Context) error {
 
 	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services")
 	var wg sync.WaitGroup // daemon wait group
-
 	// --- Launch Daemon Service(s) ---
 	// launch all services in their own routine.
 	for _, service := range d.services {
 		wg.Add(1)
-		// each service is handled in its own routine (enclosing scope)
-		go func(svc Service, updateStateC chan<- StateUpdate) {
-			defer func() {
-				// recover from any panics in the service runner
-				// no service should be able to crash the daemon.
-				if r := recover(); r != nil {
-					d.serviceLogger.Log(log.LevelError, "recovered from panic", log.String("service", svc.Name), log.Any("error", r))
-					d.internalLogger.Log(log.LevelError, "recovered from panic", log.String("service_name", svc.Name), log.Any("error", r))
-				}
-				updateStateC <- StateUpdate{Name: svc.Name, State: StateExit}
-				d.internalLogger.Log(log.LevelInfo, "service has been stopped", log.String("service_name", svc.Name))
-				wg.Done()
-			}()
-
-			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", svc.Name))
-
-			relayC := d.serviceRelays[svc.Name]
-			consumerName := svc.Name + "-manager"
-
-			var configSub <-chan int64
-			// if the service runner implements the ServiceReloader interface, subscribe to the config update topic
-			if _, ok := svc.Runner.(ServiceReloader); ok {
-				configSub, err = intracom.CreateSubscription(daemonCtx, d.ic, internalConfigUpdate, 0, intracom.SubscriberConfig[int64]{
-					ConsumerGroup: consumerName,
-					ErrIfExists:   false,
-					BufferSize:    1,
-					BufferPolicy:  intracom.BufferPolicyDropNewest[int64]{},
-				})
-				if err != nil {
-					d.internalLogger.Log(log.LevelError, "error creating intracom subscription", log.Error("error", err))
-					return
-				}
-				defer intracom.RemoveSubscription(d.ic, internalConfigUpdate, consumerName, configSub)
-			}
-
-			dstate := DaemonState{
-				loader:  d.configuration,
-				logC:    logC,
-				ic:      d.ic,
-				configC: configSub,
-				updateC: stateUpdateC,
-			}
-
-			msvc := ManagedService{
-				Name:     svc.Name,
-				Runner:   svc.Runner,
-				CommandC: relayC,
-			}
-
-			// run the service according to the manager policy
-			service.Manager.Manage(daemonCtx, dstate, msvc)
-
-		}(service, stateUpdateC)
+		go d.startService(daemonCtx, &wg, service, stateUpdateC)
 	}
 
 	configUpdateC := configUpdateTopic.PublishChannel()
@@ -239,16 +187,16 @@ func (d *daemon) Start(parent context.Context) error {
 				continue
 			}
 
-			err = d.agent.Notify(sysctl.NotifyReloaded)
-			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager of reload", log.Error("error", err))
-			}
-
 			select {
 			case <-daemonCtx.Done():
 				break
 			case configUpdateC <- time.Now().Unix():
 				// sent the current time as a signal to all services who care.
+			}
+
+			err = d.agent.Notify(sysctl.NotifyReloaded)
+			if err != nil {
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of reload", log.Error("error", err))
 			}
 
 		case sysctl.SignalStarting:
@@ -297,8 +245,8 @@ func (d *daemon) Start(parent context.Context) error {
 
 	d.internalLogger.Log(log.LevelInfo, "closing services log channel")
 	// close the services log channel to signal the log watcher to finish
-	close(logC)   // signal close the log channel
-	<-loggerDoneC // wait for log watcher to finish
+	close(d.loggingC) // signal close the log channel
+	<-loggerDoneC     // wait for log watcher to finish
 
 	// if the internal logger is an io.Closer, close it.
 	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
@@ -374,6 +322,58 @@ func (d *daemon) addService(service Service) error {
 	// d.managers[service.Name] = service.Manager
 
 	return nil
+}
+
+func (d *daemon) startService(ctx context.Context, wg *sync.WaitGroup, service Service, updateStateC chan<- StateUpdate) {
+	defer func() {
+		// recover from any panics in the service runner
+		// no service should be able to crash the daemon.
+		if r := recover(); r != nil {
+			d.serviceLogger.Log(log.LevelError, "recovered from panic", log.String("service", service.Name), log.Any("error", r))
+			d.internalLogger.Log(log.LevelError, "recovered from panic", log.String("service_name", service.Name), log.Any("error", r))
+		}
+		updateStateC <- StateUpdate{Name: service.Name, State: StateExit}
+		d.internalLogger.Log(log.LevelInfo, "service has been stopped", log.String("service_name", service.Name))
+		wg.Done()
+	}()
+
+	relayC := d.serviceRelays[service.Name]
+	consumerName := service.Name + "-manager"
+
+	var configSub <-chan int64
+	var err error
+	// if the service runner implements the ServiceReloader interface, subscribe to the config update topic
+	if _, ok := service.Runner.(ServiceReloader); ok {
+		configSub, err = intracom.CreateSubscription(ctx, d.ic, internalConfigUpdate, 0, intracom.SubscriberConfig[int64]{
+			ConsumerGroup: consumerName,
+			ErrIfExists:   false,
+			BufferSize:    1,
+			BufferPolicy:  intracom.BufferPolicyDropNewest[int64]{},
+		})
+		if err != nil {
+			d.internalLogger.Log(log.LevelError, "error creating intracom subscription", log.Error("error", err))
+			return
+		}
+		defer intracom.RemoveSubscription(d.ic, internalConfigUpdate, consumerName, configSub)
+	}
+
+	dstate := DaemonState{
+		loader:  d.configuration,
+		logC:    d.loggingC,
+		ic:      d.ic,
+		configC: configSub,
+		updateC: updateStateC,
+	}
+
+	msvc := ManagedService{
+		Name:     service.Name,
+		Runner:   service.Runner,
+		CommandC: relayC,
+	}
+
+	d.internalLogger.Log(log.LevelInfo, "manager starting service", log.String("service_name", service.Name))
+	// run the service according to the manager policy
+	service.Manager.Manage(ctx, dstate, msvc)
 }
 
 func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
@@ -492,5 +492,5 @@ func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string
 
 type noopConfigReadLoader struct{}
 
-func (noopConfigReadLoader) Read(context.Context) error                  { return nil }
-func (noopConfigReadLoader) Load(context.Context, config.LoaderFn) error { return nil }
+func (noopConfigReadLoader) Read(context.Context) error          { return nil }
+func (noopConfigReadLoader) Load(context.Context) map[string]any { return nil }

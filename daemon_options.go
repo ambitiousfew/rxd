@@ -10,7 +10,7 @@ import (
 
 type DaemonOption func(*daemon)
 
-func WithConfigurationLoader(conf config.ReadLoader) DaemonOption {
+func WithConfigLoader(conf config.ReadLoader) DaemonOption {
 	return func(d *daemon) {
 		d.configuration = conf
 	}

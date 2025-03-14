@@ -11,7 +11,7 @@ type Reader interface {
 }
 
 type Loader interface {
-	Load(ctx context.Context, loader LoaderFn) error
+	Load(ctx context.Context) map[string]any
 }
 
 type LoaderFn func(ctx context.Context, fields map[string]any) error
@@ -58,9 +58,14 @@ func (f *fileConfig) Read(ctx context.Context) error {
 
 // Load would be called by the service manager so the service managers would hold
 // a user defined loader func to run per given service.
-func (f *fileConfig) Load(ctx context.Context, loader LoaderFn) error {
+func (f *fileConfig) Load(ctx context.Context) map[string]any {
 	// load the configuration into the provided interface
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return loader(ctx, f.fields)
+
+	fields := make(map[string]any, len(f.fields))
+	for k, v := range f.fields {
+		fields[k] = v
+	}
+	return fields
 }

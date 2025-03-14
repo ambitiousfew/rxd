@@ -1,119 +1,40 @@
-2025-03-13 22:37:41 DEBUG: creating intracom topic topic=_rxd.states
-2025-03-13 22:37:41 INFO: starting service states watcher
-2025-03-13 22:37:41 INFO: starting 1 services
-2025-03-13 22:37:41 DEBUG: starting platform agent name=v2-daemon
-2025-03-13 22:37:41 DEBUG: starting states watcher topic=_rxd.states
-2025-03-13 22:37:41 INFO: starting service service_name=v2-service
-2025-03-13 22:37:42 DEBUG: states transition update service_name=v2-service state=run
-2025-03-13 22:37:50 NOTICE: received agent signal signal=stopping
-2025-03-13 22:37:50 INFO: service has been stopped service_name=v2-service
-2025-03-13 22:37:50 INFO: closing states watcher
-2025-03-13 22:37:50 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:37:50 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:37:50 DEBUG: states watcher completed
-2025-03-13 22:37:50 INFO: closing intracom
-2025-03-13 22:37:50 INFO: closing services log channel
-2025-03-13 22:37:50 INFO: closing platform agent
-2025-03-13 22:37:50 INFO: daemon successfully exited
-2025-03-13 22:40:32 DEBUG: creating intracom topic topic=_rxd.states
-2025-03-13 22:40:32 INFO: starting service states watcher
-2025-03-13 22:40:32 INFO: starting 1 services
-2025-03-13 22:40:32 DEBUG: starting states watcher topic=_rxd.states
-2025-03-13 22:40:32 DEBUG: starting platform agent name=v2-daemon
-2025-03-13 22:40:32 INFO: starting service service_name=v2-service
-2025-03-13 22:40:32 DEBUG: states transition update service_name=v2-service state=run
-2025-03-13 22:40:33 NOTICE: received agent signal signal=stopping
-2025-03-13 22:40:33 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:40:33 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:40:33 INFO: service has been stopped service_name=v2-service
-2025-03-13 22:40:33 INFO: closing states watcher
-2025-03-13 22:40:33 DEBUG: states watcher completed
-2025-03-13 22:40:33 INFO: closing intracom
-2025-03-13 22:40:33 INFO: closing services log channel
-2025-03-13 22:40:33 INFO: closing platform agent
-2025-03-13 22:40:33 INFO: daemon successfully exited
-2025-03-13 22:41:02 DEBUG: creating intracom topic topic=_rxd.states
-2025-03-13 22:41:02 INFO: starting service states watcher
-2025-03-13 22:41:02 INFO: starting 1 services
-2025-03-13 22:41:02 DEBUG: starting states watcher topic=_rxd.states
-2025-03-13 22:41:02 INFO: starting service service_name=v2-service
-2025-03-13 22:41:02 DEBUG: starting platform agent name=v2-daemon
-2025-03-13 22:41:02 DEBUG: states transition update service_name=v2-service state=run
-2025-03-13 22:41:03 NOTICE: received agent signal signal=stopping
-2025-03-13 22:41:03 INFO: service has been stopped service_name=v2-service
-2025-03-13 22:41:03 INFO: closing states watcher
-2025-03-13 22:41:03 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:41:03 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:41:03 DEBUG: states watcher completed
-2025-03-13 22:41:03 INFO: closing intracom
-2025-03-13 22:41:03 INFO: closing services log channel
-2025-03-13 22:41:03 INFO: closing platform agent
-2025-03-13 22:41:03 INFO: daemon successfully exited
-2025-03-13 22:41:24 DEBUG: creating intracom topic topic=_rxd.states
-2025-03-13 22:41:24 INFO: starting service states watcher
-2025-03-13 22:41:24 INFO: starting 1 services
-2025-03-13 22:41:24 DEBUG: starting platform agent name=v2-daemon
-2025-03-13 22:41:24 INFO: starting service service_name=v2-service
-2025-03-13 22:41:24 DEBUG: starting states watcher topic=_rxd.states
-2025-03-13 22:41:25 DEBUG: states transition update service_name=v2-service state=run
-2025-03-13 22:41:29 NOTICE: received agent signal signal=stopping
-2025-03-13 22:41:29 INFO: service has been stopped service_name=v2-service
-2025-03-13 22:41:29 INFO: closing states watcher
-2025-03-13 22:41:29 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:41:29 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:41:29 DEBUG: states watcher completed
-2025-03-13 22:41:29 INFO: closing intracom
-2025-03-13 22:41:29 INFO: closing services log channel
-2025-03-13 22:41:29 INFO: closing platform agent
-2025-03-13 22:41:29 INFO: daemon successfully exited
-2025-03-13 22:42:54 DEBUG: creating intracom topic topic=_rxd.states
-2025-03-13 22:42:54 INFO: starting service states watcher
-2025-03-13 22:42:54 INFO: starting 1 services
-2025-03-13 22:42:54 DEBUG: starting platform agent name=v2-daemon
-2025-03-13 22:42:54 INFO: starting service service_name=v2-service
-2025-03-13 22:42:54 DEBUG: starting states watcher topic=_rxd.states
-2025-03-13 22:42:54 DEBUG: states transition update service_name=v2-service state=run
-2025-03-13 22:43:20 NOTICE: received agent signal signal=stopping
-2025-03-13 22:43:20 INFO: service has been stopped service_name=v2-service
-2025-03-13 22:43:20 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:43:20 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:43:20 INFO: closing states watcher
-2025-03-13 22:43:20 DEBUG: states watcher completed
-2025-03-13 22:43:20 INFO: closing intracom
-2025-03-13 22:43:20 INFO: closing services log channel
-2025-03-13 22:43:20 INFO: closing platform agent
-2025-03-13 22:43:20 INFO: daemon successfully exited
-2025-03-13 22:45:00 DEBUG: creating intracom topic topic=_rxd.states
-2025-03-13 22:45:00 INFO: starting service states watcher
-2025-03-13 22:45:00 INFO: starting 1 services
-2025-03-13 22:45:00 DEBUG: starting platform agent name=v2-daemon
-2025-03-13 22:45:00 INFO: starting service service_name=v2-service
-2025-03-13 22:45:00 DEBUG: starting states watcher topic=_rxd.states
-2025-03-13 22:45:00 DEBUG: states transition update service_name=v2-service state=run
-2025-03-13 22:45:10 NOTICE: received agent signal signal=stopping
-2025-03-13 22:45:10 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:45:10 DEBUG: states transition update service_name=v2-service state=exit
-2025-03-13 22:45:10 INFO: service has been stopped service_name=v2-service
-2025-03-13 22:45:10 INFO: closing states watcher
-2025-03-13 22:45:10 DEBUG: states watcher completed
-2025-03-13 22:45:10 INFO: closing intracom
-2025-03-13 22:45:10 INFO: closing services log channel
-2025-03-13 22:45:10 INFO: closing platform agent
-2025-03-13 22:45:10 INFO: daemon successfully exited
-2025-03-13 22:51:05 DEBUG: creating intracom topic rxd=v2-daemon topic=_rxd.states
-2025-03-13 22:51:05 INFO: starting service states watcher rxd=v2-daemon
-2025-03-13 22:51:05 INFO: starting 1 services rxd=v2-daemon
-2025-03-13 22:51:05 DEBUG: starting states watcher rxd=v2-daemon topic=_rxd.states
-2025-03-13 22:51:05 DEBUG: starting platform agent rxd=v2-daemon name=v2-daemon
-2025-03-13 22:51:05 INFO: starting service rxd=v2-daemon service_name=v2-service
-2025-03-13 22:51:05 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=run
-2025-03-13 22:51:30 NOTICE: received agent signal rxd=v2-daemon signal=stopping
-2025-03-13 22:51:30 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
-2025-03-13 22:51:30 INFO: service has been stopped rxd=v2-daemon service_name=v2-service
-2025-03-13 22:51:30 INFO: closing states watcher rxd=v2-daemon
-2025-03-13 22:51:30 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
-2025-03-13 22:51:30 DEBUG: states watcher completed rxd=v2-daemon
-2025-03-13 22:51:30 INFO: closing intracom rxd=v2-daemon
-2025-03-13 22:51:30 INFO: closing services log channel rxd=v2-daemon
-2025-03-13 22:51:30 INFO: closing platform agent rxd=v2-daemon
-2025-03-13 22:51:30 INFO: daemon successfully exited rxd=v2-daemon
+2025-03-13 23:27:33 DEBUG: creating intracom topic rxd=v2-daemon topic=_rxd.states
+2025-03-13 23:27:33 INFO: starting service states watcher rxd=v2-daemon
+2025-03-13 23:27:33 INFO: starting 1 services rxd=v2-daemon
+2025-03-13 23:27:33 DEBUG: starting states watcher rxd=v2-daemon topic=_rxd.states
+2025-03-13 23:27:33 INFO: manager starting service rxd=v2-daemon service_name=v2-service
+2025-03-13 23:27:33 DEBUG: starting platform agent rxd=v2-daemon
+2025-03-13 23:27:33 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=run
+2025-03-13 23:27:42 NOTICE: received agent signal rxd=v2-daemon signal=reloading
+2025-03-13 23:27:42 DEBUG: reloading configuration rxd=v2-daemon signal=reloading
+2025-03-13 23:27:51 NOTICE: received agent signal rxd=v2-daemon signal=stopping
+2025-03-13 23:27:51 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
+2025-03-13 23:27:51 INFO: service has been stopped rxd=v2-daemon service_name=v2-service
+2025-03-13 23:27:51 INFO: closing states watcher rxd=v2-daemon
+2025-03-13 23:27:51 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
+2025-03-13 23:27:51 DEBUG: states watcher completed rxd=v2-daemon
+2025-03-13 23:27:51 INFO: closing intracom rxd=v2-daemon
+2025-03-13 23:27:51 INFO: closing services log channel rxd=v2-daemon
+2025-03-13 23:27:51 INFO: closing platform agent rxd=v2-daemon
+2025-03-13 23:27:51 INFO: daemon successfully exited rxd=v2-daemon
+2025-03-13 23:44:33 DEBUG: creating intracom topic rxd=v2-daemon topic=_rxd.states
+2025-03-13 23:44:33 INFO: starting service states watcher rxd=v2-daemon
+2025-03-13 23:44:33 INFO: starting 1 services rxd=v2-daemon
+2025-03-13 23:44:33 DEBUG: starting platform agent rxd=v2-daemon
+2025-03-13 23:44:33 DEBUG: starting states watcher rxd=v2-daemon topic=_rxd.states
+2025-03-13 23:44:33 INFO: manager starting service rxd=v2-daemon service_name=v2-service
+2025-03-13 23:44:33 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=run
+2025-03-13 23:44:41 NOTICE: received agent signal rxd=v2-daemon signal=reloading
+2025-03-13 23:44:41 DEBUG: reloading configuration rxd=v2-daemon signal=reloading
+2025-03-13 23:44:41 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
+2025-03-13 23:44:44 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=run
+2025-03-13 23:44:51 NOTICE: received agent signal rxd=v2-daemon signal=stopping
+2025-03-13 23:44:51 INFO: service has been stopped rxd=v2-daemon service_name=v2-service
+2025-03-13 23:44:51 INFO: closing states watcher rxd=v2-daemon
+2025-03-13 23:44:51 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
+2025-03-13 23:44:51 DEBUG: states transition update rxd=v2-daemon service_name=v2-service state=exit
+2025-03-13 23:44:51 DEBUG: states watcher completed rxd=v2-daemon
+2025-03-13 23:44:51 INFO: closing intracom rxd=v2-daemon
+2025-03-13 23:44:51 INFO: closing services log channel rxd=v2-daemon
+2025-03-13 23:44:51 INFO: closing platform agent rxd=v2-daemon
+2025-03-13 23:44:51 INFO: daemon successfully exited rxd=v2-daemon
