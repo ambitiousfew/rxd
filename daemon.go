@@ -53,7 +53,7 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		limit:    10 * 1024 * 1024, // 10MB (if enabled)
 		file:     nil,
 		mu:       sync.RWMutex{},
-	})
+	}).With(log.String("rxd", name))
 
 	// construct a default system agent with a default internal logger
 	defaultAgent := sysctl.NewDefaultSystemAgent(sysctl.WithCustomLogger(internalLogger))
@@ -111,14 +111,13 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// call the platform agent Run method
 	go func() {
-		d.internalLogger.Log(log.LevelDebug, "starting platform agent", log.String("name", d.name))
+		d.internalLogger.Log(log.LevelDebug, "starting platform agent")
 		err := d.agent.Run(parent)
 		if err != nil {
 			d.internalLogger.Log(log.LevelError, "error running platform agent", log.Error("error", err))
 		}
 	}()
 
-	nameField := log.String("rxd", d.name)
 	logC := make(chan DaemonLog, 50)
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
@@ -131,78 +130,26 @@ func (d *daemon) Start(parent context.Context) error {
 		logC <- err
 	}
 
-	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates), nameField)
+	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates))
 	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{
 		Name:        internalServiceStates,
 		ErrIfExists: true,
 	})
 
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err), nameField)
+		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err))
 		return err
 	}
 
 	// --- Setup the RPC Server (if option was enabled) ---
-	var server *http.Server
-	var cmdTopic intracom.Topic[RPCCommandRequest]
-
-	if d.rpcEnabled {
-		mux := http.NewServeMux()
-		rpcServer := gorpc.NewServer()
-
-		cmdTopic, err = intracom.CreateTopic[RPCCommandRequest](d.ic, intracom.TopicConfig{
-			Name:        internalCommandSignals,
-			ErrIfExists: true,
-		})
-
-		if err != nil {
-			d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err), nameField)
-		}
-
-		// copy the services map to a new map
-		for name := range d.services {
-			d.serviceRelays[name] = make(chan rpc.CommandSignal)
-		}
-
-		rpcCmdHandler, err := NewCommandHandler(CommandHandlerConfig{
-			Services:            d.serviceRelays,
-			CommandRequestTopic: cmdTopic,
-			Logger:              d.serviceLogger,
-		})
-		if err != nil {
-			return err
-		}
-		defer rpcCmdHandler.close()
-
-		err = rpcServer.Register(rpcCmdHandler)
-		if err != nil {
-			// couldnt register the rpc handler, log the error and continue without rpc
-			d.internalLogger.Log(log.LevelError, "error registering rpc handler", nameField)
-		} else {
-			// rpc handlers registered successfully, try to start the rpc server
-			addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
-			mux.Handle("/rpc", rpcServer)
-			server = &http.Server{
-				Addr:    addr,
-				Handler: mux,
-			}
-
-			go func(s *http.Server) {
-				d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr, nameField)
-				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					d.internalLogger.Log(log.LevelError, "error starting rpc server", nameField)
-					return
-				}
-				d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully", nameField)
-			}(server)
-		}
-	}
+	var rpcServer *http.Server
+	err = d.startRPCServer(rpcServer)
 
 	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
 
 	// --- Service States Watcher ---
 	// states watcher routine needs to be closed once all services have exited.
-	d.internalLogger.Log(log.LevelInfo, "starting service states watcher", nameField)
+	d.internalLogger.Log(log.LevelInfo, "starting service states watcher")
 	statesDoneC := d.statesWatcher(statesTopic, stateUpdateC)
 
 	// --- Service Configuration Watcher ---
@@ -211,11 +158,11 @@ func (d *daemon) Start(parent context.Context) error {
 		ErrIfExists: true,
 	})
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err), nameField)
+		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err))
 		return err
 	}
 
-	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services", nameField)
+	d.internalLogger.Log(log.LevelInfo, "starting "+strconv.Itoa(len(d.services))+" services")
 	var wg sync.WaitGroup // daemon wait group
 
 	// --- Launch Daemon Service(s) ---
@@ -229,46 +176,50 @@ func (d *daemon) Start(parent context.Context) error {
 				// no service should be able to crash the daemon.
 				if r := recover(); r != nil {
 					d.serviceLogger.Log(log.LevelError, "recovered from panic", log.String("service", svc.Name), log.Any("error", r))
-					d.internalLogger.Log(log.LevelError, "recovered from panic", log.String("service_name", svc.Name), log.Any("error", r), nameField)
+					d.internalLogger.Log(log.LevelError, "recovered from panic", log.String("service_name", svc.Name), log.Any("error", r))
 				}
 				updateStateC <- StateUpdate{Name: svc.Name, State: StateExit}
-				d.internalLogger.Log(log.LevelInfo, "service has been stopped", log.String("service_name", svc.Name), nameField)
+				d.internalLogger.Log(log.LevelInfo, "service has been stopped", log.String("service_name", svc.Name))
 				wg.Done()
 			}()
 
-			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", svc.Name), nameField)
+			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", svc.Name))
 
 			relayC := d.serviceRelays[svc.Name]
 			consumerName := svc.Name + "-manager"
 
-			configSub, err := intracom.CreateSubscription(daemonCtx, d.ic, internalConfigUpdate, 0, intracom.SubscriberConfig[int64]{
-				ConsumerGroup: consumerName,
-				ErrIfExists:   false,
-				BufferSize:    1,
-				BufferPolicy:  intracom.BufferPolicyDropNewest[int64]{},
-			})
-			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error creating intracom subscription", log.Error("error", err), nameField)
-				return
+			var configSub <-chan int64
+			// if the service runner implements the ServiceReloader interface, subscribe to the config update topic
+			if _, ok := svc.Runner.(ServiceReloader); ok {
+				configSub, err = intracom.CreateSubscription(daemonCtx, d.ic, internalConfigUpdate, 0, intracom.SubscriberConfig[int64]{
+					ConsumerGroup: consumerName,
+					ErrIfExists:   false,
+					BufferSize:    1,
+					BufferPolicy:  intracom.BufferPolicyDropNewest[int64]{},
+				})
+				if err != nil {
+					d.internalLogger.Log(log.LevelError, "error creating intracom subscription", log.Error("error", err))
+					return
+				}
+				defer intracom.RemoveSubscription(d.ic, internalConfigUpdate, consumerName, configSub)
 			}
-			defer intracom.RemoveSubscription(d.ic, internalConfigUpdate, consumerName, configSub)
 
 			dstate := DaemonState{
-				configLoader: d.configuration,
-				logC:         logC,
-				ic:           d.ic,
-				configC:      configSub,
+				loader:  d.configuration,
+				logC:    logC,
+				ic:      d.ic,
+				configC: configSub,
+				updateC: stateUpdateC,
 			}
 
 			msvc := ManagedService{
-				Name:            svc.Name,
-				Runner:          svc.Runner,
-				ServiceLoaderFn: svc.Loader,
-				CommandC:        relayC,
+				Name:     svc.Name,
+				Runner:   svc.Runner,
+				CommandC: relayC,
 			}
 
 			// run the service according to the manager policy
-			service.Manager.Manage(daemonCtx, dstate, msvc, updateStateC)
+			service.Manager.Manage(daemonCtx, dstate, msvc)
 
 		}(service, stateUpdateC)
 	}
@@ -277,20 +228,20 @@ func (d *daemon) Start(parent context.Context) error {
 	// daemon agent watches for signals and acts accordingly
 	// blocks until the daemon context is cancelled or a signal (interrupt or terminate) is received
 	for signal := range d.agent.WatchForSignals(daemonCtx) {
-		d.internalLogger.Log(log.LevelNotice, "received agent signal", nameField, log.String("signal", signal.String()))
+		d.internalLogger.Log(log.LevelNotice, "received agent signal", log.String("signal", signal.String()))
 		switch signal {
 		case sysctl.SignalReloading:
-			d.internalLogger.Log(log.LevelDebug, "reloading configuration", nameField, log.String("signal", signal.String()))
+			d.internalLogger.Log(log.LevelDebug, "reloading configuration", log.String("signal", signal.String()))
 			// TODO: perform actual reload operation
 			err := d.configuration.Read(daemonCtx)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error reloading configuration", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error reloading configuration", log.Error("error", err))
 				continue
 			}
 
 			err = d.agent.Notify(sysctl.NotifyReloaded)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager of reload", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of reload", log.Error("error", err))
 			}
 
 			select {
@@ -303,17 +254,17 @@ func (d *daemon) Start(parent context.Context) error {
 		case sysctl.SignalStarting:
 			err = d.agent.Notify(sysctl.NotifyRunning)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager of starting", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of starting", log.Error("error", err))
 			}
 		case sysctl.SignalStopping, sysctl.SignalRestarting:
 			err = d.agent.Notify(sysctl.NotifyStopping)
 			if err != nil {
-				d.internalLogger.Log(log.LevelError, "error notifying system service manager of stopping", log.Error("error", err), nameField)
+				d.internalLogger.Log(log.LevelError, "error notifying system service manager of stopping", log.Error("error", err))
 			}
 			daemonCancel()
 
 		default:
-			d.internalLogger.Log(log.LevelNotice, "received ignored signal", log.String("signal", signal.String()), nameField)
+			d.internalLogger.Log(log.LevelNotice, "received ignored signal", log.String("signal", signal.String()))
 			continue
 		}
 	}
@@ -325,33 +276,29 @@ func (d *daemon) Start(parent context.Context) error {
 	//   CLEANUP AND SHUTDOWN
 
 	// --- Clean up RPC Server it was created ---
-	if server != nil {
+	if rpcServer != nil {
 		timedctx, timedcancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer timedcancel()
-		if err := server.Shutdown(timedctx); err != nil {
+		if err := rpcServer.Shutdown(timedctx); err != nil {
 			return err
 		}
 	}
 
 	// no services should be reporting their states anymore
-	d.internalLogger.Log(log.LevelDebug, "closing states watcher", nameField)
+	d.internalLogger.Log(log.LevelInfo, "closing states watcher")
 	close(stateUpdateC) // close the states update channel
 	<-statesDoneC       // wait for states watcher (routine) to exit
-	d.internalLogger.Log(log.LevelDebug, "states watcher closed", nameField)
 
-	d.internalLogger.Log(log.LevelDebug, "closing intracom", nameField)
+	d.internalLogger.Log(log.LevelInfo, "closing intracom")
 	err = intracom.Close(d.ic)
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error closing intracom", log.Error("error", err), nameField)
-	} else {
-		d.internalLogger.Log(log.LevelDebug, "intracom closed", nameField)
+		d.internalLogger.Log(log.LevelError, "error closing intracom", log.Error("error", err))
 	}
 
-	d.internalLogger.Log(log.LevelDebug, "closing services log channel", nameField)
+	d.internalLogger.Log(log.LevelInfo, "closing services log channel")
 	// close the services log channel to signal the log watcher to finish
 	close(logC)   // signal close the log channel
 	<-loggerDoneC // wait for log watcher to finish
-	d.internalLogger.Log(log.LevelDebug, "services log channel closed", nameField)
 
 	// if the internal logger is an io.Closer, close it.
 	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
@@ -361,14 +308,16 @@ func (d *daemon) Start(parent context.Context) error {
 	// finally notify the system service manager that the daemon has stopped
 	err = d.agent.Notify(sysctl.NotifyStopped)
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err), nameField)
+		d.internalLogger.Log(log.LevelError, "error notifying system service manager", log.Error("error", err))
 	}
 
+	d.internalLogger.Log(log.LevelInfo, "closing platform agent")
 	err = d.agent.Close()
 	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error closing system service manager", log.Error("error", err), nameField)
+		d.internalLogger.Log(log.LevelError, "error closing system service manager", log.Error("error", err))
 	}
 
+	d.internalLogger.Log(log.LevelInfo, "daemon successfully exited")
 	return nil
 }
 
@@ -445,6 +394,7 @@ func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
 
 	return doneC
 }
+
 func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateUpdatesC <-chan StateUpdate) <-chan struct{} {
 	doneC := make(chan struct{})
 
@@ -471,6 +421,63 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 	}()
 
 	return doneC
+}
+
+func (d *daemon) startRPCServer(server *http.Server) error {
+	if d.rpcEnabled {
+		mux := http.NewServeMux()
+		rpcServer := gorpc.NewServer()
+
+		cmdTopic, err := intracom.CreateTopic[RPCCommandRequest](d.ic, intracom.TopicConfig{
+			Name:        internalCommandSignals,
+			ErrIfExists: true,
+		})
+
+		if err != nil {
+			d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err))
+			return err
+		}
+
+		// copy the services map to a new map
+		for name := range d.services {
+			d.serviceRelays[name] = make(chan rpc.CommandSignal)
+		}
+
+		rpcCmdHandler, err := NewCommandHandler(CommandHandlerConfig{
+			Services:            d.serviceRelays,
+			CommandRequestTopic: cmdTopic,
+			Logger:              d.serviceLogger,
+		})
+		if err != nil {
+			return err
+		}
+		defer rpcCmdHandler.close()
+
+		err = rpcServer.Register(rpcCmdHandler)
+		if err != nil {
+			// couldnt register the rpc handler, log the error and continue without rpc
+			d.internalLogger.Log(log.LevelError, "error registering rpc handler")
+		} else {
+			// rpc handlers registered successfully, try to start the rpc server
+			addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
+			mux.Handle("/rpc", rpcServer)
+			server = &http.Server{
+				Addr:    addr,
+				Handler: mux,
+			}
+
+			go func(s *http.Server) {
+				d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr)
+				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					d.internalLogger.Log(log.LevelError, "error starting rpc server")
+					return
+				}
+				d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully")
+			}(server)
+		}
+	}
+
+	return nil
 }
 
 func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string) error {

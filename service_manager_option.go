@@ -15,12 +15,6 @@ func (noopConfigLoader) Load(ctx context.Context, loader config.LoaderFn) error 
 
 type ManagerOption func(m *RunContinuousManager)
 
-func WithConfigLoaderPolicy(policy ConfigPolicy) ManagerOption {
-	return func(h *RunContinuousManager) {
-		h.ConfigPolicy = policy
-	}
-}
-
 func WithInitDelay(delay time.Duration) ManagerOption {
 	return func(h *RunContinuousManager) {
 		h.StartupDelay = delay

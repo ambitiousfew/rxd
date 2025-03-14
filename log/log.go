@@ -12,6 +12,7 @@ type LogHandler interface {
 
 type Logger interface {
 	Log(level Level, message string, fields ...Field)
+	With(fields ...Field) Logger
 	SetLevel(level Level)
 }
 

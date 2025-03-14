@@ -25,21 +25,29 @@ func NewLogger(level Level, handler LogHandler) Logger {
 func (l *logger) Log(level Level, message string, fields ...Field) {
 	l.mu.RLock()
 	ignore := *l.level < level
-	l.mu.RUnlock()
+	defer l.mu.RUnlock()
 	if ignore {
 		// if the logger level is less than level passed, we don't log
 		return
 	}
+	allFields := make([]Field, len(l.fields)+len(fields))
+	copy(allFields, append(l.fields, fields...))
 
-	l.handler.Handle(level, message, fields)
+	l.handler.Handle(level, message, allFields)
 }
 
 func (l *logger) With(fields ...Field) Logger {
+	l.mu.RLock()
+	level := *l.level
+	fieldsCopy := make([]Field, len(l.fields)+len(fields))
+	copy(fieldsCopy, append(l.fields, fields...))
+	l.mu.RUnlock()
+
 	return &logger{
-		level:   l.level,
-		fields:  append(l.fields, fields...),
+		level:   &level,
+		fields:  fieldsCopy,
 		handler: l.handler,
-		mu:      l.mu,
+		mu:      new(sync.RWMutex),
 	}
 }
 

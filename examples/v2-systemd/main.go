@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"os"
 	"sync"
 	"time"
@@ -22,7 +21,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	logger := log.NewLogger(log.LevelDebug, log.NewHandler())
+	logger := log.NewLogger(log.LevelDebug, log.NewHandler()).With(log.String("daemon", "v2-systemd"))
 
 	app := application{
 		logger: logger,
@@ -48,7 +47,7 @@ func run(ctx context.Context, app application) error {
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
 
-	timer := time.NewTimer(0 * time.Second)
+	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
 
 	vs := &vsService{
@@ -60,17 +59,6 @@ func run(ctx context.Context, app application) error {
 	err := d.AddService(rxd.Service{
 		Name:   "v2-service",
 		Runner: vs,
-		Loader: func(ctx context.Context, fields map[string]any) error {
-			val, ok := fields["something_special"].(string)
-			if !ok || val != "extra-spicy" {
-				return errors.New("something_special is not valid")
-			}
-			vs.mu.Lock()
-			vs.myField = val
-			vs.mu.Unlock()
-
-			return nil
-		},
 	})
 	if err != nil {
 		return err
@@ -91,42 +79,56 @@ type vsService struct {
 	mu      sync.RWMutex
 }
 
-func (s *vsService) Init(sctx rxd.ServiceContext) error {
-	sctx.Log(log.LevelInfo, "service init")
-	if s.timeout == nil {
-		s.timeout = time.NewTimer(3 * time.Second)
-	} else {
-		s.timeout.Reset(3 * time.Second)
-	}
+// func (s *vsService) Init(sctx rxd.ServiceContext) error {
+// 	sctx.Log(log.LevelInfo, "service init")
+// 	if s.timeout == nil {
+// 		s.timeout = time.NewTimer(3 * time.Second)
+// 	} else {
+// 		s.timeout.Reset(3 * time.Second)
+// 	}
 
+// 	select {
+// 	case <-sctx.Done():
+// 		return nil
+// 	case <-s.timeout.C:
+// 		sctx.Log(log.LevelDebug, "service init complete")
+// 		return nil
+// 	}
+// }
+
+// func (s *vsService) Idle(sctx rxd.ServiceContext) error {
+// 	s.timeout.Reset(1 * time.Second)
+// 	sctx.Log(log.LevelInfo, "service idle")
+// 	select {
+// 	case <-sctx.Done():
+// 		return nil
+// 	case <-s.timeout.C:
+// 		s.mu.RLock()
+// 		sctx.Log(log.LevelDebug, "service idle complete: "+s.myField)
+// 		s.mu.RUnlock()
+// 		return nil
+// 	}
+// }
+
+func (s *vsService) Reload(sctx rxd.ServiceContext, fields map[string]any) error {
+	s.timeout.Reset(3 * time.Second)
+
+	sctx.Log(log.LevelNotice, "service is being reloaded")
 	select {
 	case <-sctx.Done():
-		return nil
 	case <-s.timeout.C:
-		sctx.Log(log.LevelDebug, "service init complete")
-		return nil
+		sctx.Log(log.LevelNotice, "service is done reloading")
 	}
-}
 
-func (s *vsService) Idle(sctx rxd.ServiceContext) error {
-	s.timeout.Reset(1 * time.Second)
-	sctx.Log(log.LevelInfo, "service idle")
-	select {
-	case <-sctx.Done():
-		return nil
-	case <-s.timeout.C:
-		s.mu.RLock()
-		sctx.Log(log.LevelDebug, "service idle complete: "+s.myField)
-		s.mu.RUnlock()
-		return nil
-	}
+	return nil
 }
 
 func (s *vsService) Run(sctx rxd.ServiceContext) error {
-	s.timeout.Reset(1 * time.Second)
+	s.timeout.Reset(30 * time.Second)
 	sctx.Log(log.LevelInfo, "service run")
 	select {
 	case <-sctx.Done():
+		sctx.Log(log.LevelDebug, "service run receiving context done, exiting")
 		return nil
 	case <-s.timeout.C:
 		s.mu.RLock()
@@ -137,16 +139,16 @@ func (s *vsService) Run(sctx rxd.ServiceContext) error {
 	}
 }
 
-func (s *vsService) Stop(sctx rxd.ServiceContext) error {
-	s.timeout.Reset(1 * time.Second)
-	sctx.Log(log.LevelInfo, "service stop")
+// func (s *vsService) Stop(sctx rxd.ServiceContext) error {
+// 	s.timeout.Reset(1 * time.Second)
+// 	sctx.Log(log.LevelInfo, "service stop")
 
-	select {
-	case <-sctx.Done():
-		return nil
-	case <-s.timeout.C:
-		sctx.Log(log.LevelDebug, "service stop complete")
-		return nil
-	}
+// 	select {
+// 	case <-sctx.Done():
+// 		return nil
+// 	case <-s.timeout.C:
+// 		sctx.Log(log.LevelDebug, "service stop complete")
+// 		return nil
+// 	}
 
-}
+// }

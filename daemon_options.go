@@ -67,7 +67,7 @@ func WithInternalLogging(filepath string, level log.Level) DaemonOption {
 			limit:    10 * 1024 * 1024, // 10MB
 			file:     nil,
 			mu:       sync.RWMutex{},
-		})
+		}).With(log.String("rxd", d.name))
 	}
 }
 

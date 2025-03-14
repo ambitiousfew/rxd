@@ -1,7 +1,6 @@
 package rxd
 
 import (
-	"context"
 	"time"
 
 	"github.com/ambitiousfew/rxd/config"
@@ -9,12 +8,32 @@ import (
 	"github.com/ambitiousfew/rxd/pkg/rpc"
 )
 
-type ServiceRunner interface {
+type ServiceInitializer interface {
 	Init(ServiceContext) error
+}
+
+type ServiceIdler interface {
 	Idle(ServiceContext) error
+}
+
+type ServiceRunner interface {
 	Run(ServiceContext) error
+}
+
+type ServiceStopper interface {
 	Stop(ServiceContext) error
 }
+
+type ServiceReloader interface {
+	Reload(ServiceContext ServiceContext, fields map[string]any) error
+}
+
+// type ServiceRunner interface {
+// 	Init(ServiceContext) error
+// 	Idle(ServiceContext) error
+// 	Run(ServiceContext) error
+// 	Stop(ServiceContext) error
+// }
 
 // Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.
 // This struct is what the caller uses to add a new service to the daemon.
@@ -22,7 +41,6 @@ type ServiceRunner interface {
 type Service struct {
 	Name    string
 	Runner  ServiceRunner
-	Loader  config.LoaderFn
 	Manager ServiceManager
 }
 
@@ -30,17 +48,21 @@ type Service struct {
 // this struct is what is passed into a Handler for the  handler to decide how to
 // interact with the service using the ServiceRunner.
 type ManagedService struct {
-	Name            string
-	Runner          ServiceRunner
-	CommandC        <-chan rpc.CommandSignal
-	ServiceLoaderFn config.LoaderFn
+	Name     string
+	Runner   ServiceRunner
+	CommandC <-chan rpc.CommandSignal
 }
 
 type DaemonState struct {
-	configLoader config.Loader
-	configC      <-chan int64
-	logC         chan<- DaemonLog
-	ic           *intracom.Intracom
+	configC <-chan int64
+	logC    chan<- DaemonLog
+	updateC chan<- StateUpdate
+	loader  config.Loader
+	ic      *intracom.Intracom
+}
+
+func (ds DaemonState) NotifyState(serviceName string, state State) {
+	ds.updateC <- StateUpdate{Name: serviceName, State: state}
 }
 
 func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {
@@ -56,9 +78,7 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 				// re-inits from stop to init will delay by 5 seconds.
 				StateInit: 5 * time.Second,
 			},
-			ConfigPolicy: ConfigPolicyStopFirst,
 		},
-		Loader: noopConfigLoadFn,
 	}
 
 	for _, opt := range opts {
@@ -66,8 +86,4 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 	}
 
 	return ds
-}
-
-func noopConfigLoadFn(ctx context.Context, fields map[string]any) error {
-	return nil
 }
