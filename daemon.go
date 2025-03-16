@@ -317,10 +317,6 @@ func (d *daemon) addService(service Service) error {
 
 	// add the service to the daemon services
 	d.services[service.Name] = service
-
-	// add the handler to a similar map of service name to handlers
-	// d.managers[service.Name] = service.Manager
-
 	return nil
 }
 
@@ -338,12 +334,12 @@ func (d *daemon) startService(ctx context.Context, wg *sync.WaitGroup, service S
 	}()
 
 	relayC := d.serviceRelays[service.Name]
-	consumerName := service.Name + "-manager"
+	consumerName := "_manager-" + service.Name
 
 	var configSub <-chan int64
 	var err error
 	// if the service runner implements the ServiceReloader interface, subscribe to the config update topic
-	if _, ok := service.Runner.(ServiceReloader); ok {
+	if _, ok := service.Runner.(ServiceLoader); ok {
 		configSub, err = intracom.CreateSubscription(ctx, d.ic, internalConfigUpdate, 0, intracom.SubscriberConfig[int64]{
 			ConsumerGroup: consumerName,
 			ErrIfExists:   false,
@@ -363,6 +359,7 @@ func (d *daemon) startService(ctx context.Context, wg *sync.WaitGroup, service S
 		ic:      d.ic,
 		configC: configSub,
 		updateC: updateStateC,
+		logger:  d.internalLogger,
 	}
 
 	msvc := ManagedService{

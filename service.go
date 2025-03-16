@@ -5,6 +5,7 @@ import (
 
 	"github.com/ambitiousfew/rxd/config"
 	"github.com/ambitiousfew/rxd/intracom"
+	"github.com/ambitiousfew/rxd/log"
 	"github.com/ambitiousfew/rxd/pkg/rpc"
 )
 
@@ -24,8 +25,8 @@ type ServiceStopper interface {
 	Stop(ServiceContext) error
 }
 
-type ServiceReloader interface {
-	Reload(ServiceContext ServiceContext, fields map[string]any) error
+type ServiceLoader interface {
+	Load(ServiceContext ServiceContext, fields map[string]any) error
 }
 
 // type ServiceRunner interface {
@@ -54,15 +55,24 @@ type ManagedService struct {
 }
 
 type DaemonState struct {
-	configC <-chan int64
-	logC    chan<- DaemonLog
-	updateC chan<- StateUpdate
-	loader  config.Loader
-	ic      *intracom.Intracom
+	configC <-chan int64       // configC used by service managers to receive sighup signals
+	logC    chan<- DaemonLog   // logC used by service context
+	updateC chan<- StateUpdate // channel to send state updates to the daemon
+	loader  config.Loader      // config loader for the daemon
+	ic      *intracom.Intracom // daemon intracom instance used by all services
+	logger  log.Logger         // internal daemon logger
 }
 
 func (ds DaemonState) NotifyState(serviceName string, state State) {
 	ds.updateC <- StateUpdate{Name: serviceName, State: state}
+}
+
+func (ds DaemonState) Logger(key, value string) log.Logger {
+	return ds.logger.With(log.String(key, value))
+}
+
+func (ds DaemonState) LoadSignal() <-chan int64 {
+	return ds.configC
 }
 
 func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {

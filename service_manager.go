@@ -202,6 +202,10 @@ func friendlyTimeDiff(elapsed time.Duration) string {
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
 func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService) {
+	logger := ds.Logger("manager", ms.Name)
+
+	logger.Log(log.LevelDebug, "service manager started")
+
 	warningTimer := time.NewTimer(m.WarnDuration)
 	warningTimer.Stop()
 
@@ -249,6 +253,8 @@ func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonState, ms Man
 	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
 
+	configC := ds.LoadSignal()
+
 	var lastUpdate int64
 	doneC := m.runService(sctx, ds, ms)
 
@@ -259,7 +265,7 @@ loop:
 		case <-ctx.Done():
 			cancel()
 			break loop
-		case ts, open := <-ds.configC:
+		case ts, open := <-configC:
 			// config reload broadcast received
 			if !open {
 				break loop
@@ -271,7 +277,7 @@ loop:
 				continue
 			}
 
-			sctx.Log(log.LevelDebug, "config reload update received", log.Int("timestamp", ts))
+			logger.Log(log.LevelDebug, "config reload update received", log.Int("timestamp", ts))
 			if ts < lastUpdate {
 				// skip if the config is older than the last update.
 				continue
@@ -289,8 +295,8 @@ loop:
 			fields := ds.loader.Load(ctx)
 
 			sctx, cancel = NewServiceContextWithCancel(ctx, ms.Name, ds)
-			if reloader, ok := ms.Runner.(ServiceReloader); ok {
-				if err := reloader.Reload(sctx, fields); err != nil {
+			if reloader, ok := ms.Runner.(ServiceLoader); ok {
+				if err := reloader.Load(sctx, fields); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 			}
@@ -304,7 +310,7 @@ loop:
 			}
 
 			timeDiff := time.Since(*stoppedAt)
-			sctx.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
+			logger.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
 			if m.LogWarning {
 				warningTimer.Reset(m.WarnDuration)
 			}
@@ -357,13 +363,13 @@ loop:
 
 			case rpc.CommandSignalReload:
 				// do nothing, the service is already reloading.
-				sctx.Log(log.LevelDebug, "service is reloading....")
+				logger.Log(log.LevelDebug, "service is reloading....")
 			}
 
 		case <-doneC:
 			doneC = nil // can always read from closed channel, disable it
 			// do nothing, we are done.
-			sctx.Log(log.LevelWarning, "service has been stopped")
+			logger.Log(log.LevelWarning, "service has been stopped")
 			stoppedAt = &now
 			if m.LogWarning {
 				warningTimer.Reset(m.WarnDuration)
@@ -404,6 +410,8 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonState, ms M
 			sctx.Log(log.LevelError, fmt.Sprintf("recovered from a panic: %v", r))
 		}
 	}()
+
+	// if the service is reloadable
 
 	ticker := time.NewTicker(m.StartupDelay)
 	defer ticker.Stop()
