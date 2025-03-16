@@ -2,6 +2,7 @@ package rxd
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	gorpc "net/rpc"
@@ -143,11 +144,23 @@ func (d *daemon) Start(parent context.Context) error {
 	}
 
 	// --- Setup the RPC Server (if option was enabled) ---
-	var rpcServer *http.Server
-	err = d.startRPCServer(rpcServer)
+	cmdTopic, err := intracom.CreateTopic[RPCCommandRequest](d.ic, intracom.TopicConfig{
+		Name:        internalCommandSignals,
+		ErrIfExists: true,
+	})
+
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err))
+		return err
+	}
+
+	rpcServer, err := d.startRPCServer(cmdTopic)
+	if err != nil {
+		d.internalLogger.Log(log.LevelError, "error starting rpc server", log.Error("error", err))
+		return err
+	}
 
 	stateUpdateC := make(chan StateUpdate, len(d.services)*4)
-
 	// --- Service States Watcher ---
 	// states watcher routine needs to be closed once all services have exited.
 	d.internalLogger.Log(log.LevelInfo, "starting service states watcher")
@@ -420,61 +433,56 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 	return doneC
 }
 
-func (d *daemon) startRPCServer(server *http.Server) error {
-	if d.rpcEnabled {
-		mux := http.NewServeMux()
-		rpcServer := gorpc.NewServer()
-
-		cmdTopic, err := intracom.CreateTopic[RPCCommandRequest](d.ic, intracom.TopicConfig{
-			Name:        internalCommandSignals,
-			ErrIfExists: true,
-		})
-
-		if err != nil {
-			d.internalLogger.Log(log.LevelError, "error creating intracom topic", log.Error("error", err))
-			return err
-		}
-
-		// copy the services map to a new map
-		for name := range d.services {
-			d.serviceRelays[name] = make(chan rpc.CommandSignal)
-		}
-
-		rpcCmdHandler, err := NewCommandHandler(CommandHandlerConfig{
-			Services:            d.serviceRelays,
-			CommandRequestTopic: cmdTopic,
-			Logger:              d.serviceLogger,
-		})
-		if err != nil {
-			return err
-		}
-		defer rpcCmdHandler.close()
-
-		err = rpcServer.Register(rpcCmdHandler)
-		if err != nil {
-			// couldnt register the rpc handler, log the error and continue without rpc
-			d.internalLogger.Log(log.LevelError, "error registering rpc handler")
-		} else {
-			// rpc handlers registered successfully, try to start the rpc server
-			addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
-			mux.Handle("/rpc", rpcServer)
-			server = &http.Server{
-				Addr:    addr,
-				Handler: mux,
-			}
-
-			go func(s *http.Server) {
-				d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr)
-				if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-					d.internalLogger.Log(log.LevelError, "error starting rpc server")
-					return
-				}
-				d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully")
-			}(server)
-		}
+func (d *daemon) startRPCServer(commandTopic intracom.Topic[RPCCommandRequest]) (*http.Server, error) {
+	var server *http.Server
+	if !d.rpcEnabled {
+		return server, nil
 	}
 
-	return nil
+	mux := http.NewServeMux()
+	rpcServer := gorpc.NewServer()
+
+	// copy the services map to a new map
+	for name := range d.services {
+		d.serviceRelays[name] = make(chan rpc.CommandSignal)
+	}
+
+	rpcCmdHandler, err := NewCommandHandler(CommandHandlerConfig{
+		Services:            d.serviceRelays,
+		CommandRequestTopic: commandTopic,
+		Logger:              d.serviceLogger,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer rpcCmdHandler.close()
+
+	err = rpcServer.Register(rpcCmdHandler)
+	if err != nil {
+		// couldnt register the rpc handler, log the error and continue without rpc
+		d.internalLogger.Log(log.LevelError, "error registering rpc handler")
+		return server, errors.New("error registering rpc handler")
+	} else {
+		// rpc handlers registered successfully, try to start the rpc server
+		addr := d.rpcConfig.Addr + ":" + strconv.Itoa(int(d.rpcConfig.Port))
+		mux.Handle("/rpc", rpcServer)
+		server = &http.Server{
+			Addr:    addr,
+			Handler: mux,
+		}
+
+		go func(s *http.Server) {
+			// launch RPC command server
+			d.internalLogger.Log(log.LevelInfo, "starting rpc server at "+s.Addr)
+			if err := s.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				d.internalLogger.Log(log.LevelError, "error starting rpc server")
+				return
+			}
+			d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully")
+		}(server)
+	}
+
+	return server, nil
 }
 
 func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string) error {
