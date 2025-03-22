@@ -5,13 +5,13 @@ import (
 )
 
 type logger struct {
-	handler LogHandler
+	handler Handler
 	fields  []Field
 	level   *Level
 	mu      *sync.RWMutex
 }
 
-func NewLogger(level Level, handler LogHandler) Logger {
+func NewLogger(level Level, handler Handler) Logger {
 	var lvl Level = level
 	return &logger{
 		handler: handler,

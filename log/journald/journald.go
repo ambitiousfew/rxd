@@ -20,7 +20,7 @@ type journaldHandler struct {
 	errMu          sync.RWMutex // mutex for stderr writer
 }
 
-func NewHandler(opts ...Option) log.LogHandler {
+func NewHandler(opts ...Option) log.Handler {
 	h := &journaldHandler{
 		severityPrefix: false,
 		lvlMu:          sync.RWMutex{},

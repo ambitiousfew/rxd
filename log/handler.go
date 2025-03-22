@@ -18,7 +18,7 @@ type defaultHandler struct {
 	timefmt  string
 }
 
-func NewHandler(opts ...HandlerOption) LogHandler {
+func NewHandler(opts ...HandlerOption) Handler {
 	h := &defaultHandler{
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,

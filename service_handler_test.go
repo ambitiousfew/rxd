@@ -2,7 +2,6 @@ package rxd
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ambitiousfew/rxd/log"
 )
@@ -10,17 +9,8 @@ import (
 type mockServiceManager struct{}
 
 func (h mockServiceManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService) {
-	// func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) {
-
 	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
-
-	defer func() {
-		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
-		if r := recover(); r != nil {
-			sctx.Log(log.LevelError, fmt.Sprintf("recovered from a panic: %v", r))
-		}
-	}()
 
 	var state State = StateInit
 	var hasStopped bool

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-type LogHandler interface {
+type Handler interface {
 	Handle(level Level, message string, fields []Field)
 }
 
@@ -19,7 +19,7 @@ type Logger interface {
 const (
 	// LevelEmergency (0) Rarely used by user applications but import for critical services
 	// examples include: when the system is unusable, system-wide outaged, situations that require immediate attention and human intervention
-	LevelEmergency = iota // 0
+	LevelEmergency Level = iota // 0
 	// LevelAlert (1) less commonly used but used in applications where immediate attention is required
 	// examples include: security applications (breach detected), loss of connectivity, or failure of a key component thats leads to downtime.
 	LevelAlert

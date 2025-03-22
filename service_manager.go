@@ -17,26 +17,35 @@ type ServiceManager interface {
 
 type ManagerStateTimeouts map[State]time.Duration
 
+type LogWarningPolicy uint8
+
+const (
+	LogWarningPolicyBoth         LogWarningPolicy = iota // Log warnings to both the internal and service loggers (default)
+	LogWarningPolicyInternalOnly                         // Log warnings only to the internal logger
+	LogWarningPolicyServiceOnly                          // Log warnings only to the service logger
+	LogWarningPolicyNone
+)
+
 // RunContinuousManager is a service handler that does its best to run the service
 // moving the service to the next desired state returned from each lifecycle
 // The handle will override the state transition if the context is cancelled
 // and force the service to Exit.
 type RunContinuousManager struct {
-	DefaultDelay  time.Duration
-	StartupDelay  time.Duration
-	StateTimeouts ManagerStateTimeouts
-	LogWarning    bool          // if true, log a warning if the service has been stopped for longer than WarnDuration.
-	WarnDuration  time.Duration // if the service has been stopped for longer than this duration, log a warning.
+	DefaultDelay     time.Duration
+	StartupDelay     time.Duration
+	StateTimeouts    ManagerStateTimeouts
+	LogWarningPolicy LogWarningPolicy // Log warnings to the internal logger, service logger or both or none.
+	WarnDuration     time.Duration    // if the service has been stopped for longer than this duration, log a warning.
 }
 
 func NewDefaultManager(opts ...ManagerOption) RunContinuousManager {
 	timeouts := make(ManagerStateTimeouts)
 	m := RunContinuousManager{
-		DefaultDelay:  100 * time.Millisecond,
-		StartupDelay:  100 * time.Millisecond,
-		StateTimeouts: timeouts,
-		LogWarning:    false,
-		WarnDuration:  10 * time.Second,
+		DefaultDelay:     100 * time.Millisecond,
+		StartupDelay:     100 * time.Millisecond,
+		StateTimeouts:    timeouts,
+		LogWarningPolicy: LogWarningPolicyBoth,
+		WarnDuration:     10 * time.Second,
 	}
 
 	for _, opt := range opts {
@@ -78,6 +87,30 @@ func (m RunContinuousManager) runService(sctx ServiceContext, ds DaemonState, ms
 
 	go func(sctx ServiceContext, ms ManagedService) {
 		defer close(doneC)
+
+		logger := ds.Logger().With(log.String("manager", ms.Name))
+
+		defer func() {
+			// do not let panics from the user defined service runner crash the manager or daemon.
+			// log the panic and continue trying to run the service.
+			if r := recover(); r != nil {
+				level := log.LevelCritical
+				msg := fmt.Sprintf("recovered from a panic: %v", r)
+
+				switch m.LogWarningPolicy {
+				case LogWarningPolicyInternalOnly:
+					// only log to the internal logger
+					logger.Log(level, msg)
+				case LogWarningPolicyServiceOnly:
+					// only log to the service logger
+					sctx.Log(level, msg)
+				case LogWarningPolicyBoth:
+					// log to both loggers
+					sctx.Log(level, msg)
+					logger.Log(level, msg)
+				}
+			}
+		}()
 
 		var state State = StateInit
 		var hasStopped bool
@@ -178,31 +211,11 @@ type CommandRequest struct {
 	Err    error
 }
 
-// friendlyTimeDiff formats a time difference in a human-readable way
-func friendlyTimeDiff(elapsed time.Duration) string {
-	switch {
-	case elapsed < time.Minute:
-		return fmt.Sprintf("%d seconds ago", int(elapsed.Seconds()))
-	case elapsed < time.Hour:
-		return fmt.Sprintf("%d minutes ago", int(elapsed.Minutes()))
-	case elapsed < 24*time.Hour:
-		return fmt.Sprintf("%d hours ago", int(elapsed.Hours()))
-	case elapsed < 7*24*time.Hour:
-		return fmt.Sprintf("%d days ago", int(elapsed.Hours()/24))
-	case elapsed < 30*24*time.Hour:
-		return fmt.Sprintf("%d weeks ago", int(elapsed.Hours()/168)) // 168 hours in a week
-	case elapsed < 365*24*time.Hour:
-		return fmt.Sprintf("%d months ago", int(elapsed.Hours()/730)) // Approximate months
-	default:
-		return fmt.Sprintf("%d years ago", int(elapsed.Hours()/8760)) // Approximate years
-	}
-}
-
 // RunContinuousManager runs the service continuously until the context is cancelled.
 // service contains the service runner that will be executed.
 // which is then handled by the daemon.
 func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService) {
-	logger := ds.Logger("manager", ms.Name)
+	logger := ds.Logger().With(log.String("run-continuous-manager", ms.Name))
 
 	logger.Log(log.LevelDebug, "service manager started")
 
@@ -310,8 +323,21 @@ loop:
 			}
 
 			timeDiff := time.Since(*stoppedAt)
-			logger.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
-			if m.LogWarning {
+			switch m.LogWarningPolicy {
+			case LogWarningPolicyInternalOnly:
+				// only log to the internal logger
+				logger.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
+			case LogWarningPolicyServiceOnly:
+				// only log to the service logger
+				sctx.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
+			case LogWarningPolicyBoth:
+				// log to both loggers
+				logger.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
+				sctx.Log(log.LevelWarning, "service has been stopped for over a minute", log.String("duration", friendlyTimeDiff(timeDiff)))
+			}
+
+			// reset the timer for the next warning timer tick.
+			if m.LogWarningPolicy > LogWarningPolicyNone {
 				warningTimer.Reset(m.WarnDuration)
 			}
 
@@ -342,13 +368,13 @@ loop:
 				}
 
 				stoppedAt = &now
-				if m.LogWarning {
+				if m.LogWarningPolicy > LogWarningPolicyNone {
 					warningTimer.Reset(m.WarnDuration)
 				}
 			case rpc.CommandSignalRestart:
 				cancel()
 				stoppedAt = &now
-				if m.LogWarning {
+				if m.LogWarningPolicy > LogWarningPolicyNone {
 					warningTimer.Reset(m.WarnDuration)
 				}
 				select {
@@ -371,7 +397,7 @@ loop:
 			// do nothing, we are done.
 			logger.Log(log.LevelWarning, "service has been stopped")
 			stoppedAt = &now
-			if m.LogWarning {
+			if m.LogWarningPolicy > LogWarningPolicyNone {
 				warningTimer.Reset(m.WarnDuration)
 			}
 		}
@@ -401,13 +427,16 @@ func NewRunUntilSuccessManager(defaultDelay, startupDelay time.Duration) RunUnti
 }
 
 func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonState, ms ManagedService) {
+	logger := ds.Logger().With(log.String("run-until-success-manager", ms.Name))
+	logger.Log(log.LevelDebug, "service manager started")
+
 	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
 
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
-			sctx.Log(log.LevelError, fmt.Sprintf("recovered from a panic: %v", r))
+			sctx.Log(log.LevelCritical, fmt.Sprintf("recovered from a panic: %v", r))
 		}
 	}()
 
@@ -496,4 +525,24 @@ func (m RunUntilSuccessManager) Manage(ctx context.Context, ds DaemonState, ms M
 	// push final state to the daemon states watcher.
 	ds.NotifyState(ms.Name, StateExit)
 
+}
+
+// friendlyTimeDiff formats a time difference in a human-readable way
+func friendlyTimeDiff(elapsed time.Duration) string {
+	switch {
+	case elapsed < time.Minute:
+		return fmt.Sprintf("%d seconds ago", int(elapsed.Seconds()))
+	case elapsed < time.Hour:
+		return fmt.Sprintf("%d minutes ago", int(elapsed.Minutes()))
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(elapsed.Hours()))
+	case elapsed < 7*24*time.Hour:
+		return fmt.Sprintf("%d days ago", int(elapsed.Hours()/24))
+	case elapsed < 30*24*time.Hour:
+		return fmt.Sprintf("%d weeks ago", int(elapsed.Hours()/168)) // 168 hours in a week
+	case elapsed < 365*24*time.Hour:
+		return fmt.Sprintf("%d months ago", int(elapsed.Hours()/730)) // Approximate months
+	default:
+		return fmt.Sprintf("%d years ago", int(elapsed.Hours()/8760)) // Approximate years
+	}
 }

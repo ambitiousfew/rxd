@@ -9,7 +9,7 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-func TestDaemon_StartAService(t *testing.T) {
+func TestDaemon_StartService(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -33,6 +33,21 @@ func TestDaemon_StartAService(t *testing.T) {
 		t.Fatalf("error starting daemon: %s", err)
 	}
 
+	if !strings.Contains(svcTestLogger.Output(), "mockService.Init") {
+		t.Fatalf("expected service init message in internal logger")
+	}
+
+	if !strings.Contains(svcTestLogger.Output(), "mockService.Idle") {
+		t.Fatalf("expected service idle message in service logger")
+	}
+
+	if !strings.Contains(svcTestLogger.Output(), "mockService.Run") {
+		t.Fatalf("expected service run message in service logger")
+	}
+
+	if !strings.Contains(svcTestLogger.Output(), "mockService.Stop") {
+		t.Fatalf("expected service stop message in service logger")
+	}
 }
 
 func TestDaemon_AddService(t *testing.T) {
@@ -58,8 +73,18 @@ func TestDaemon_AddServices(t *testing.T) {
 	}
 }
 
-func TestDaemon_PanicService(t *testing.T) {
+func TestDaemon_AddUnnamedService(t *testing.T) {
+	d := NewDaemon("test-daemon")
 
+	// unnamed service causes an error during AddService
+	s := NewService("", newMockService(100*time.Millisecond))
+	err := d.AddService(s)
+	if err == nil {
+		t.Fatalf("expected error adding unnamed service, got: %v", err)
+	}
+}
+
+func TestDaemon_PanicService(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -82,12 +107,11 @@ func TestDaemon_PanicService(t *testing.T) {
 		t.Fatalf("expected no error starting daemon: %s", err)
 	}
 
-	if !strings.Contains(svcTestLogger.Output(), "intentional panic") {
+	if !strings.Contains(internalTestLogger.Output(), "intentional panic") {
 		t.Fatalf("expected panic message in service logger")
 	}
 
-	if !strings.Contains(internalTestLogger.Output(), "intentional panic") {
-		t.Fatalf("expected panic message in internal logger")
+	if !strings.Contains(svcTestLogger.Output(), "intentional panic") {
+		t.Fatalf("expected panic message in service logger")
 	}
-
 }

@@ -33,7 +33,14 @@ func WithTransitionTimeouts(t ManagerStateTimeouts) ManagerOption {
 // if the service is still in a stopped state.
 func WithWarnDuration(d time.Duration) ManagerOption {
 	return func(h *RunContinuousManager) {
-		h.LogWarning = true
 		h.WarnDuration = d
+	}
+}
+
+// WithWarnDuration sets the duration after which a warning is logged
+// if the service is still in a stopped state.
+func WithLogWarningPolicy(policy LogWarningPolicy) ManagerOption {
+	return func(h *RunContinuousManager) {
+		h.LogWarningPolicy = policy
 	}
 }

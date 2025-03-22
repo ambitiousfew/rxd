@@ -67,8 +67,8 @@ func (ds DaemonState) NotifyState(serviceName string, state State) {
 	ds.updateC <- StateUpdate{Name: serviceName, State: state}
 }
 
-func (ds DaemonState) Logger(key, value string) log.Logger {
-	return ds.logger.With(log.String(key, value))
+func (ds DaemonState) Logger() log.Logger {
+	return ds.logger
 }
 
 func (ds DaemonState) LoadSignal() <-chan int64 {
@@ -88,6 +88,8 @@ func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Servic
 				// re-inits from stop to init will delay by 5 seconds.
 				StateInit: 5 * time.Second,
 			},
+			LogWarningPolicy: LogWarningPolicyBoth,
+			WarnDuration:     0,
 		},
 	}
 
