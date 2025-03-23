@@ -12,7 +12,9 @@ type DaemonOption func(*daemon)
 
 func WithConfigLoader(conf config.ReadLoader) DaemonOption {
 	return func(d *daemon) {
-		d.configuration = conf
+		if conf != nil {
+			d.configuration = conf
+		}
 	}
 }
 
@@ -27,25 +29,33 @@ func WithSystemAgent(agent sysctl.Agent) DaemonOption {
 
 func WithPrestart(conf PrestartConfig, stages ...Stage) DaemonOption {
 	return func(d *daemon) {
-		d.prestart = NewPrestartPipeline(conf, stages...)
+		if len(stages) > 0 {
+			d.prestart = NewPrestartPipeline(conf, stages...)
+		}
 	}
 }
 
 func WithCustomPrestartPipeline(prestart Pipeline) DaemonOption {
 	return func(d *daemon) {
-		d.prestart = prestart
+		if prestart != nil {
+			d.prestart = prestart
+		}
 	}
 }
 
 func WithLogWorkerCount(count int) DaemonOption {
 	return func(d *daemon) {
-		d.logWorkerCount = count
+		if count > 0 {
+			d.logWorkerCount = count
+		}
 	}
 }
 
 func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
-		d.serviceLogger = logger
+		if logger != nil {
+			d.serviceLogger = logger
+		}
 	}
 }
 
@@ -53,7 +63,9 @@ func WithServiceLogger(logger log.Logger) DaemonOption {
 // by default, the daemon will use a noop logger since this logger is used for rxd internals.
 func WithInternalLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
-		d.internalLogger = logger
+		if logger != nil {
+			d.internalLogger = logger
+		}
 	}
 }
 

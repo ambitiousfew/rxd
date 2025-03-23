@@ -115,3 +115,44 @@ func TestDaemon_PanicService(t *testing.T) {
 		t.Fatalf("expected panic message in service logger")
 	}
 }
+
+func TestDaemon_Options(t *testing.T) {
+	opts := []DaemonOption{
+		WithConfigLoader(nil),
+		WithInternalLogger(nil),
+		WithServiceLogger(nil),
+		WithSystemAgent(nil),
+		WithLogWorkerCount(0),
+		WithCustomPrestartPipeline(nil),
+	}
+
+	d := NewDaemon("test-daemon", opts...)
+	testDaemon, ok := d.(*daemon)
+	if !ok {
+		t.Fatalf("expected daemon type")
+	}
+
+	if testDaemon.agent == nil {
+		t.Fatalf("expected non-nil agent")
+	}
+
+	if testDaemon.configuration == nil {
+		t.Fatalf("expected non-nil configuration")
+	}
+
+	if testDaemon.serviceLogger == nil {
+		t.Fatalf("expected non-nil service logger")
+	}
+
+	if testDaemon.internalLogger == nil {
+		t.Fatalf("expected non-nil internal logger")
+	}
+
+	if testDaemon.logWorkerCount == 0 {
+		t.Fatalf("expected non-zero log worker count")
+	}
+
+	if testDaemon.prestart == nil {
+		t.Fatalf("expected non-nil prestart pipeline")
+	}
+}

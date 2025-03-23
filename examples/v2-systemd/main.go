@@ -35,14 +35,16 @@ func main() {
 }
 
 func run(ctx context.Context, app application) error {
-
-	configReadLoader := config.FromJSONFile("config.json")
+	config, err := config.FromFile("config.json")
+	if err != nil {
+		return err
+	}
 
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
 		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
 		rxd.WithServiceLogger(app.logger),
-		rxd.WithConfigLoader(configReadLoader),
+		rxd.WithConfigLoader(config),
 	}
 
 	d := rxd.NewDaemon("v2-daemon", dopts...)
@@ -56,7 +58,7 @@ func run(ctx context.Context, app application) error {
 		mu:      sync.RWMutex{},
 	}
 
-	err := d.AddService(rxd.Service{
+	err = d.AddService(rxd.Service{
 		Name:   "v2-service",
 		Runner: vs,
 	})

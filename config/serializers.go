@@ -7,6 +7,10 @@ type Serializer interface {
 	Deserialize(map[string]any, any) error
 }
 
+func NewJSONSerializer() Serializer {
+	return jsonSerializer{}
+}
+
 type jsonSerializer struct{}
 
 func (j jsonSerializer) Serialize(b []byte) (map[string]any, error) {

@@ -2,28 +2,51 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"time"
 
 	"github.com/ambitiousfew/rxd"
+	"github.com/ambitiousfew/rxd/config"
 	"github.com/ambitiousfew/rxd/log"
 )
+
+type application struct {
+	logger log.Logger
+	config config.ReadLoader
+}
 
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	if err := run(ctx); err != nil {
-		// log.Fatalf("Error: %v\n", err)
-		fmt.Println("Error: ", err)
+	handler := log.NewHandler(log.WithWriters(os.Stdout, os.Stderr))
+
+	logger := log.NewLogger(log.LevelDebug, handler).With(log.String("daemon", "v2"))
+
+	config, err := config.FromFile("config.json")
+	if err != nil {
+		logger.Log(log.LevelError, "error loading config", log.Error("error", err))
 	}
-	fmt.Println("Exiting...")
+
+	app := application{
+		logger: logger,
+		config: config,
+	}
+
+	if err := run(ctx, app); err != nil {
+		logger.Log(log.LevelError, "error running the daemon", log.Error("error", err))
+		os.Exit(1)
+	}
+
+	logger.Log(log.LevelInfo, "exited normally")
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, app application) error {
 	// create a new daemon
 	dopts := []rxd.DaemonOption{
-		rxd.WithInternalLogging("rxd.log", log.LevelDebug),
+		rxd.WithInternalLogger(app.logger),
+		rxd.WithServiceLogger(app.logger),
+		rxd.WithConfigLoader(app.config),
 		rxd.WithRPC(rxd.RPCConfig{
 			Addr: "127.0.0.1",
 			Port: 8080,
@@ -50,6 +73,26 @@ func run(ctx context.Context) error {
 
 type vsService struct {
 	timeout *time.Timer
+	host    string
+	port    int
+}
+
+func (s *vsService) Load(sctx rxd.ServiceContext, fields map[string]any) error {
+	sctx.Log(log.LevelInfo, "service loading")
+
+	if host, ok := fields["service_host"].(string); ok {
+		s.host = host
+	} else {
+		sctx.Log(log.LevelError, "host not found in config")
+	}
+
+	if port, ok := fields["service_port"].(float64); ok {
+		s.port = int(port)
+	} else {
+		sctx.Log(log.LevelError, "port not found in config")
+	}
+
+	return nil
 }
 
 func (s *vsService) Init(sctx rxd.ServiceContext) error {
@@ -84,6 +127,7 @@ func (s *vsService) Idle(sctx rxd.ServiceContext) error {
 func (s *vsService) Run(sctx rxd.ServiceContext) error {
 	s.timeout.Reset(1 * time.Second)
 	sctx.Log(log.LevelInfo, "service run")
+	sctx.Log(log.LevelDebug, "current config", log.String("host", s.host), log.Int("port", s.port))
 	select {
 	case <-sctx.Done():
 		return nil
