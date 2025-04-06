@@ -31,7 +31,6 @@ type daemon struct {
 	services       map[string]Service                // map of service name to struct carrying the service runner and name.
 	serviceRelays  map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
 	agent          sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
-	prestart       Pipeline                          // prestart pipeline to run before starting the daemon services
 	ic             *intracom.Intracom                // intracom registry for the daemon to communicate with services
 	logWorkerCount int                               // number of concurrent log workers used to receive and write service logs (default: 2)
 	serviceLogger  log.Logger                        // logger used by user services
@@ -62,15 +61,10 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 
 	// construct the daemon with reasonable default values
 	d := &daemon{
-		name:          name,
-		services:      make(map[string]Service),
-		serviceRelays: make(map[string]chan rpc.CommandSignal),
-		agent:         defaultAgent,
-		prestart: &prestartPipeline{
-			RestartOnError: true,
-			RestartDelay:   5 * time.Second,
-			Stages:         []Stage{},
-		},
+		name:           name,
+		services:       make(map[string]Service),
+		serviceRelays:  make(map[string]chan rpc.CommandSignal),
+		agent:          defaultAgent,
 		ic:             intracom.New("rxd-intracom"),
 		logWorkerCount: 2,
 		serviceLogger:  defaultLogger,
@@ -124,13 +118,6 @@ func (d *daemon) Start(parent context.Context) error {
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
 	loggerDoneC := d.serviceLogWatcher(d.loggingC)
-
-	// --- Prestart Pipeline ---
-	// run all prestart checks (if any) in order
-	errC := d.prestart.Run(daemonCtx)
-	for err := range errC {
-		d.loggingC <- err
-	}
 
 	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates))
 	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{

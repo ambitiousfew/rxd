@@ -27,22 +27,6 @@ func WithSystemAgent(agent sysctl.Agent) DaemonOption {
 	}
 }
 
-func WithPrestart(conf PrestartConfig, stages ...Stage) DaemonOption {
-	return func(d *daemon) {
-		if len(stages) > 0 {
-			d.prestart = NewPrestartPipeline(conf, stages...)
-		}
-	}
-}
-
-func WithCustomPrestartPipeline(prestart Pipeline) DaemonOption {
-	return func(d *daemon) {
-		if prestart != nil {
-			d.prestart = prestart
-		}
-	}
-}
-
 func WithLogWorkerCount(count int) DaemonOption {
 	return func(d *daemon) {
 		if count > 0 {

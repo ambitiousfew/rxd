@@ -123,7 +123,6 @@ func TestDaemon_Options(t *testing.T) {
 		WithServiceLogger(nil),
 		WithSystemAgent(nil),
 		WithLogWorkerCount(0),
-		WithCustomPrestartPipeline(nil),
 	}
 
 	d := NewDaemon("test-daemon", opts...)
@@ -150,9 +149,5 @@ func TestDaemon_Options(t *testing.T) {
 
 	if testDaemon.logWorkerCount == 0 {
 		t.Fatalf("expected non-zero log worker count")
-	}
-
-	if testDaemon.prestart == nil {
-		t.Fatalf("expected non-nil prestart pipeline")
 	}
 }

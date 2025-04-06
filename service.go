@@ -29,13 +29,6 @@ type ServiceLoader interface {
 	Load(ServiceContext ServiceContext, fields map[string]any) error
 }
 
-// type ServiceRunner interface {
-// 	Init(ServiceContext) error
-// 	Idle(ServiceContext) error
-// 	Run(ServiceContext) error
-// 	Stop(ServiceContext) error
-// }
-
 // Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.
 // This struct is what the caller uses to add a new service to the daemon.
 // The daemon performs checks and translates this struct into a Service struct before starting it.

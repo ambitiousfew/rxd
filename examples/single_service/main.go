@@ -50,28 +50,9 @@ func main() {
 		ready.Store(true)
 	}()
 
-	prestartConf := rxd.PrestartConfig{
-		RestartOnError: true,             // if any stage errors, restart the pipeline from the beginning
-		RestartDelay:   10 * time.Second, // delay between restarts
-	}
-
-	prestartStages := []rxd.Stage{
-		{
-			// some arbitrary stage to demonastrate how to use the prestart stages
-			Name: "timer-ready",
-			Func: func(ctx context.Context) error {
-				if ready.Load() {
-					return nil
-				}
-				return errors.New("timer is not ready")
-			},
-		},
-	}
-
 	// customizing daemon options
 	dopts := []rxd.DaemonOption{
 		// This adds a prestart pipeline that will run the stages (if any) in order and restart from the beginning if an error occurs.
-		rxd.WithPrestart(prestartConf, prestartStages...),
 		// This adds a service logger to the daemon so all services can log in the same logging format.
 		rxd.WithServiceLogger(logger),
 	}
