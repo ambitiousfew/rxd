@@ -280,6 +280,7 @@ loop:
 			break loop
 		case ts, open := <-configC:
 			// config reload broadcast received
+			// NOTE: only receive a signal if the service is a loader.
 			if !open {
 				break loop
 			}
@@ -305,11 +306,17 @@ loop:
 				// wait for service to exit before reloading the config.
 			}
 
-			fields := ds.loader.Load(ctx)
+			// re-load the config bytes
+			contents, err := ds.loader.Load(ctx)
+			if err != nil {
+				sctx.Log(log.LevelError, err.Error())
+				continue
+			}
 
 			sctx, cancel = NewServiceContextWithCancel(ctx, ms.Name, ds)
 			if reloader, ok := ms.Runner.(ServiceLoader); ok {
-				if err := reloader.Load(sctx, fields); err != nil {
+				// forward the re-read config bytes to the service to process.
+				if err := reloader.Load(sctx, contents); err != nil {
 					sctx.Log(log.LevelError, err.Error())
 				}
 			}

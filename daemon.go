@@ -484,5 +484,5 @@ func checkNilStructPointer(ival reflect.Value, itype reflect.Type, method string
 
 type noopConfigReadLoader struct{}
 
-func (noopConfigReadLoader) Read(context.Context) error          { return nil }
-func (noopConfigReadLoader) Load(context.Context) map[string]any { return nil }
+func (noopConfigReadLoader) Read(context.Context) error           { return nil }
+func (noopConfigReadLoader) Load(context.Context) ([]byte, error) { return nil, nil }

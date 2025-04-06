@@ -10,7 +10,7 @@ import (
 type noopConfigLoader struct{}
 
 func (noopConfigLoader) Load(ctx context.Context, loader config.LoaderFn) error {
-	return loader(ctx, map[string]any{})
+	return loader(ctx, nil)
 }
 
 type ManagerOption func(m *RunContinuousManager)

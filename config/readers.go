@@ -17,10 +17,10 @@ type file struct {
 }
 
 type readerConfig struct {
-	reader     io.Reader
-	serializer Serializer
-	fields     map[string]interface{}
-	mu         sync.RWMutex
+	reader  io.Reader
+	decoder Decoder
+	p       []byte
+	mu      sync.RWMutex
 }
 
 func (c *readerConfig) Read(ctx context.Context) error {
@@ -34,24 +34,29 @@ func (c *readerConfig) Read(ctx context.Context) error {
 		return errors.New("file contents were empty on read")
 	}
 
-	// parse the contents into the fields
-	fields, err := c.serializer.Serialize(contents)
-	if err != nil {
+	// decode the contents into the provided interface.
+	// this just validates the contents are in-fact valid.
+	if err := c.decoder.Decode(contents); err != nil {
 		return err
 	}
 
-	c.fields = fields
-
+	// store the contents of the last read
+	c.mu.Lock()
+	c.p = contents
+	c.mu.Unlock()
 	return nil
 }
 
-func (c *readerConfig) Load(ctx context.Context) map[string]interface{} {
+func (c *readerConfig) Load(ctx context.Context) ([]byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	fields := make(map[string]any, len(c.fields))
-	for k, v := range c.fields {
-		fields[k] = v
+	if len(c.p) == 0 {
+		return nil, errors.New("file contents were empty on read")
 	}
-	return fields
+
+	// return a copy contents of the last read
+	b := make([]byte, len(c.p))
+	copy(b, c.p)
+	return b, nil
 }

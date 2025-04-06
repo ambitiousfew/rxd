@@ -2,9 +2,7 @@ package config
 
 import (
 	"context"
-	"errors"
 	"io"
-	"path/filepath"
 	"sync"
 )
 
@@ -13,7 +11,7 @@ type Reader interface {
 }
 
 type Loader interface {
-	Load(ctx context.Context) map[string]any
+	Load(ctx context.Context) ([]byte, error)
 }
 
 type ReadLoader interface {
@@ -21,42 +19,37 @@ type ReadLoader interface {
 	Loader
 }
 
-type LoaderFn func(ctx context.Context, fields map[string]any) error
+type LoaderFn func(ctx context.Context, from []byte) error
 
-func FromReader(r io.Reader, serializer Serializer) ReadLoader {
+type DecoderFn[T any] func([]byte, *T) error
+
+func FromReader(r io.Reader, decoder Decoder) ReadLoader {
 	return &readerConfig{
-		reader:     r,
-		serializer: nil,
-		fields:     make(map[string]any),
-		mu:         sync.RWMutex{},
+		reader:  r,
+		decoder: decoder,
+		p:       nil,
+		mu:      sync.RWMutex{},
 	}
 }
 
-func FromFile(path string, opts ...FileOption) (ReadLoader, error) {
+func FromFile(path string, decoder Decoder) (ReadLoader, error) {
 	freader := &file{
 		filepath: path,
 	}
 
 	conf := &fileConfig{
-		file:       freader,
-		serializer: nil,
-		fields:     make(map[string]any),
-		mu:         sync.RWMutex{},
-	}
-
-	for _, opt := range opts {
-		opt(conf)
-	}
-
-	if conf.serializer == nil {
-		// try to pick the serializer based on the file extension
-		switch filepath.Ext(path) {
-		case ".json":
-			conf.serializer = jsonSerializer{}
-		default:
-			return nil, errors.New("unsupported file extension")
-		}
+		file:    freader,
+		decoder: decoder,
+		p:       nil,
+		mu:      sync.RWMutex{},
 	}
 
 	return conf, nil
+}
+
+func DecodeFromBytes(b []byte, decoder Decoder) error {
+	if err := decoder.Decode(b); err != nil {
+		return err
+	}
+	return nil
 }

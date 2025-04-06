@@ -26,7 +26,7 @@ type ServiceStopper interface {
 }
 
 type ServiceLoader interface {
-	Load(ServiceContext ServiceContext, fields map[string]any) error
+	Load(ServiceContext, []byte) error
 }
 
 // Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.

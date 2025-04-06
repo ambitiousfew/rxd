@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"time"
 
@@ -15,6 +17,31 @@ type application struct {
 	config config.ReadLoader
 }
 
+var MainConfigDecoderFn = func(p []byte, config *mainServiceConfig) error {
+	err := json.Unmarshal(p, config)
+	if err != nil {
+		return err
+	}
+
+	// Validate the config
+	if config.Host == "" {
+		return errors.New("host is required")
+	}
+
+	if config.Port <= 0 {
+		return errors.New("port must be greater than 0")
+	}
+	if config.Port > 65535 {
+		return errors.New("port must be less than 65535")
+	}
+
+	if config.Port < 1024 {
+		return errors.New("port must be greater than 1024")
+	}
+
+	return nil
+}
+
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -23,7 +50,8 @@ func main() {
 
 	logger := log.NewLogger(log.LevelDebug, handler).With(log.String("daemon", "v2"))
 
-	config, err := config.FromFile("config.json")
+	var v2Config mainServiceConfig
+	config, err := config.FromFile("config.json", &v2Config)
 	if err != nil {
 		logger.Log(log.LevelError, "error loading config", log.Error("error", err))
 	}
@@ -77,21 +105,30 @@ type vsService struct {
 	port    int
 }
 
-func (s *vsService) Load(sctx rxd.ServiceContext, fields map[string]any) error {
+type mainServiceConfig struct {
+	Host string `json:"broker_host"`
+	Port int    `json:"broker_port"`
+	// other fields...
+}
+
+func (c *mainServiceConfig) Decode(p []byte) error {
+	return json.Unmarshal(p, c)
+}
+
+func (s *vsService) Load(sctx rxd.ServiceContext, from []byte) error {
 	sctx.Log(log.LevelInfo, "service loading")
 
-	if host, ok := fields["service_host"].(string); ok {
-		s.host = host
-	} else {
-		sctx.Log(log.LevelError, "host not found in config")
+	// Load the config from the byte array
+	var svcConfig mainServiceConfig
+	err := config.DecodeFromBytes(from, &svcConfig)
+	if err != nil {
+		sctx.Log(log.LevelError, "error loading config", log.Error("error", err))
+		return nil
 	}
 
-	if port, ok := fields["service_port"].(float64); ok {
-		s.port = int(port)
-	} else {
-		sctx.Log(log.LevelError, "port not found in config")
-	}
-
+	s.host = svcConfig.Host
+	s.port = svcConfig.Port
+	sctx.Log(log.LevelDebug, "loaded config", log.String("host", s.host), log.Int("port", s.port))
 	return nil
 }
 

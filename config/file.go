@@ -8,10 +8,10 @@ import (
 )
 
 type fileConfig struct {
-	file       *file
-	serializer Serializer
-	fields     map[string]interface{}
-	mu         sync.RWMutex
+	file    *file
+	decoder Decoder
+	p       []byte
+	mu      sync.RWMutex
 }
 
 func (c *fileConfig) Read(ctx context.Context) error {
@@ -31,14 +31,15 @@ func (c *fileConfig) Read(ctx context.Context) error {
 		return errors.New("file contents were empty on read")
 	}
 
-	// parse the contents into the fields
-	fields, err := c.serializer.Serialize(contents)
-	if err != nil {
+	// decode the contents into the provided interface.
+	// this just validates the contents are in-fact valid.
+	if err := c.decoder.Decode(contents); err != nil {
 		return err
 	}
 
+	// store the contents of the last read
 	c.mu.Lock()
-	c.fields = fields
+	c.p = contents
 	c.mu.Unlock()
 
 	return nil
@@ -46,14 +47,17 @@ func (c *fileConfig) Read(ctx context.Context) error {
 
 // Load would be called by the service manager so the service managers would hold
 // a user defined loader func to run per given service.
-func (c *fileConfig) Load(ctx context.Context) map[string]any {
+func (c *fileConfig) Load(ctx context.Context) ([]byte, error) {
 	// load the configuration into the provided interface
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	fields := make(map[string]any, len(c.fields))
-	for k, v := range c.fields {
-		fields[k] = v
+	if len(c.p) == 0 {
+		return nil, errors.New("file contents were empty on read")
 	}
-	return fields
+
+	// return a copy contents of the last read
+	b := make([]byte, len(c.p))
+	copy(b, c.p)
+	return b, nil
 }

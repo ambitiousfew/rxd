@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"sync"
 	"time"
@@ -35,7 +36,8 @@ func main() {
 }
 
 func run(ctx context.Context, app application) error {
-	config, err := config.FromFile("config.json")
+	var v2Config vsServiceConfig
+	config, err := config.FromFile("config.json", &v2Config)
 	if err != nil {
 		return err
 	}
@@ -79,6 +81,17 @@ type vsService struct {
 
 	myField string
 	mu      sync.RWMutex
+}
+
+type vsServiceConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	// other fields...
+}
+
+func (c *vsServiceConfig) Decode(from []byte) error {
+	// Decode the config here
+	return json.Unmarshal(from, c)
 }
 
 // func (s *vsService) Init(sctx rxd.ServiceContext) error {
