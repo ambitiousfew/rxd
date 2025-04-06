@@ -25,22 +25,6 @@ type Daemon interface {
 	Start(ctx context.Context) error
 }
 
-type daemon struct {
-	name           string                            // name of the daemon will be used in logging
-	configuration  config.ReadLoader                 // configuration reader and loader for the daemon
-	services       map[string]Service                // map of service name to struct carrying the service runner and name.
-	serviceRelays  map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
-	agent          sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
-	ic             *intracom.Intracom                // intracom registry for the daemon to communicate with services
-	logWorkerCount int                               // number of concurrent log workers used to receive and write service logs (default: 2)
-	serviceLogger  log.Logger                        // logger used by user services
-	internalLogger log.Logger                        // logger for the internal daemon, debugging
-	started        atomic.Bool                       // flag to indicate if the daemon has been started
-	rpcEnabled     bool                              // flag to indicate if the daemon has rpc enabled
-	rpcConfig      RPCConfig                         // rpc configuration for the daemon
-	loggingC       chan DaemonLog
-}
-
 // NewDaemon creates and return an instance of the reactive daemon
 // NOTE: The service logger runs with a default stdout logger.
 // This can be optionally changed by passing the WithServiceLogger option in NewDaemon
@@ -81,6 +65,22 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 	}
 
 	return d
+}
+
+type daemon struct {
+	name           string                            // name of the daemon will be used in logging
+	configuration  config.ReadLoader                 // configuration reader and loader for the daemon
+	services       map[string]Service                // map of service name to struct carrying the service runner and name.
+	serviceRelays  map[string]chan rpc.CommandSignal // map of service name to channel to relay command signals to the service
+	agent          sysctl.Agent                      // daemon agent that interacts with the OS specific system service manager
+	ic             *intracom.Intracom                // intracom registry for the daemon to communicate with services
+	logWorkerCount int                               // number of concurrent log workers used to receive and write service logs (default: 2)
+	serviceLogger  log.Logger                        // logger used by user services
+	internalLogger log.Logger                        // logger for the internal daemon, debugging
+	started        atomic.Bool                       // flag to indicate if the daemon has been started
+	rpcEnabled     bool                              // flag to indicate if the daemon has rpc enabled
+	rpcConfig      RPCConfig                         // rpc configuration for the daemon
+	loggingC       chan DaemonLog
 }
 
 func (d *daemon) Start(parent context.Context) error {
@@ -169,7 +169,7 @@ func (d *daemon) Start(parent context.Context) error {
 	// launch all services in their own routine.
 	for _, service := range d.services {
 		wg.Add(1)
-		go d.startService(daemonCtx, &wg, service, stateUpdateC)
+		go d.startManager(daemonCtx, &wg, service, stateUpdateC)
 	}
 
 	configUpdateC := configUpdateTopic.PublishChannel()
@@ -320,7 +320,7 @@ func (d *daemon) addService(service Service) error {
 	return nil
 }
 
-func (d *daemon) startService(ctx context.Context, wg *sync.WaitGroup, service Service, updateStateC chan<- StateUpdate) {
+func (d *daemon) startManager(ctx context.Context, wg *sync.WaitGroup, service Service, updateStateC chan<- StateUpdate) {
 	defer func() {
 		// recover from any panics in the service runner
 		// no service should be able to crash the daemon.
