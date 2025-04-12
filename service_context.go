@@ -22,7 +22,6 @@ type ServiceContext interface {
 	context.Context
 	ServiceWatcher
 	ServiceLogger
-	// Name() string
 	WithFields(fields ...log.Field) ServiceContext
 	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
 	WithName(name string) (ServiceContext, context.CancelFunc)
@@ -56,10 +55,6 @@ func newServiceContextWithCancel(parent context.Context, name string, logger log
 	}, cancel
 }
 
-// func (sc *serviceContext) Name() string {
-// 	return sc.name
-// }
-
 // WithParent returns a new cancellable child ServiceContext with the given parent context.
 // The new child context will have the same name and fields as the original parent that created it.
 // However if the original parent context is cancelled, the child context will not be cancelled.
@@ -89,10 +84,10 @@ func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelF
 	return &newCtx, cancel
 }
 
+// Log logs a message with the given level and fields to the logger using the context and name of the given service.
 func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
 	allFields := make([]log.Field, 0, len(fields)+len(sc.fields))
-	allFields = append(allFields, fields...)
-
+	allFields = append(sc.fields, fields...)
 	sc.logger.Log(level, message, allFields...)
 }
 
