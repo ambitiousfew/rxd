@@ -22,10 +22,11 @@ type ServiceContext interface {
 	context.Context
 	ServiceWatcher
 	ServiceLogger
-	Name() string
+	// Name() string
 	WithFields(fields ...log.Field) ServiceContext
 	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
 	WithName(name string) (ServiceContext, context.CancelFunc)
+	IntracomRegistry() *intracom.Intracom
 }
 
 type serviceContext struct {
@@ -33,13 +34,11 @@ type serviceContext struct {
 	name   string // is the name of the service, can be used for logging/debugging or subscribing.
 	fqcn   string // useful for child contexts to have a unique name without having to modify service name when subscribing.
 	fields []log.Field
-	logC   chan<- DaemonLog
+	logger log.Logger
 	ic     *intracom.Intracom
 }
 
-// newServiceWithCancel produces a new cancellable ServiceContext with the given name and fields.
-// func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, icStates intracom.Topic[ServiceStates]) (ServiceContext, context.CancelFunc) {
-func newServiceContextWithCancel(parent context.Context, name string, logC chan<- DaemonLog, ic *intracom.Intracom) (ServiceContext, context.CancelFunc) {
+func newServiceContextWithCancel(parent context.Context, name string, logger log.Logger, ic *intracom.Intracom) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 
 	fields := []log.Field{}
@@ -52,10 +51,14 @@ func newServiceContextWithCancel(parent context.Context, name string, logC chan<
 		name:    name,
 		fqcn:    name,
 		fields:  fields,
-		logC:    logC,
+		logger:  logger,
 		ic:      ic,
 	}, cancel
 }
+
+// func (sc *serviceContext) Name() string {
+// 	return sc.name
+// }
 
 // WithParent returns a new cancellable child ServiceContext with the given parent context.
 // The new child context will have the same name and fields as the original parent that created it.
@@ -86,16 +89,11 @@ func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelF
 	return &newCtx, cancel
 }
 
-func (sc *serviceContext) Name() string {
-	return sc.name
-}
-
 func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
-	sc.logC <- DaemonLog{
-		Level:   level,
-		Message: message,
-		Fields:  append(fields, sc.fields...),
-	}
+	allFields := make([]log.Field, 0, len(fields)+len(sc.fields))
+	allFields = append(allFields, fields...)
+
+	sc.logger.Log(level, message, allFields...)
 }
 
 func (sc *serviceContext) Deadline() (deadline time.Time, ok bool) {
@@ -114,6 +112,11 @@ func (sc *serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
 }
 
+// IntracomRegistry returns the shared intracom registry used between all the services.
+func (sc *serviceContext) IntracomRegistry() *intracom.Intracom {
+	return sc.ic
+}
+
 func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
@@ -123,7 +126,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalStatesConsumer(action, target, sc.fqcn)
 
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
+		sub, err := intracom.CreateSubscription(ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
@@ -134,7 +137,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
+		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
 
 		for {
 			select {
@@ -190,7 +193,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalStatesConsumer(action, target, sc.fqcn)
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
+		sub, err := intracom.CreateSubscription(ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
@@ -201,7 +204,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
+		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
 		// defer sc.icStates.Unsubscribe(consumer, sub)
 
 		for {
@@ -253,7 +256,7 @@ func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSt
 		defer close(ch)
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalAllStatesConsumer(sc.fqcn)
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
+		sub, err := intracom.CreateSubscription(ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
@@ -264,7 +267,7 @@ func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSt
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
+		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
 
 		for {
 			select {

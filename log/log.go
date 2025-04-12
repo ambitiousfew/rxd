@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-type LogHandler interface {
+type Handler interface {
 	Handle(level Level, message string, fields []Field)
 }
 

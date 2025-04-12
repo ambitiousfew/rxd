@@ -156,10 +156,8 @@ func (d *daemon) Start(parent context.Context) error {
 		return err
 	}
 
-	logC := make(chan DaemonLog, 50)
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
-	loggerDoneC := d.serviceLogWatcher(logC)
 
 	// --- Daemon Signal Watcher ---
 	// listens for signals to stop the daemon such as OS signals or context done.
@@ -190,7 +188,8 @@ func (d *daemon) Start(parent context.Context) error {
 	// run all prestart checks in order
 	errC := d.prestart.Run(dctx)
 	for err := range errC {
-		logC <- err
+		// logC <- err
+		d.internalLogger.Log(log.LevelError, "error in prestart pipeline", log.String("error", err.Message), nameField)
 	}
 
 	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates), nameField)
@@ -230,7 +229,7 @@ func (d *daemon) Start(parent context.Context) error {
 		dwg.Add(1)
 		// each service is handled in its own routine.
 		go func(ctx context.Context, wg *sync.WaitGroup, ds DaemonService, manager ServiceManager, stateC chan<- StateUpdate) {
-			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, logC, d.ic)
+			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.serviceLogger, d.ic)
 
 			defer func() {
 				// recover from any panics in the service runner
@@ -248,8 +247,6 @@ func (d *daemon) Start(parent context.Context) error {
 			d.internalLogger.Log(log.LevelInfo, "starting service", log.String("service_name", ds.Name), nameField)
 			// run the service according to the manager policy
 			manager.Manage(sctx, ds, stateC)
-			// scancel()
-			// wg.Done()
 
 		}(dctx, &dwg, service, manager, stateUpdateC)
 	}
@@ -318,16 +315,11 @@ func (d *daemon) Start(parent context.Context) error {
 	d.internalLogger.Log(log.LevelDebug, "closing intracom", nameField)
 	// TODO: these logs should not be interleaved with the user service logs.
 	err = intracom.Close(d.ic)
-	// err = d.icStates.Close()
 	if err != nil {
 		d.internalLogger.Log(log.LevelError, "error closing intracom", log.Error("error", err), nameField)
 	} else {
 		d.internalLogger.Log(log.LevelDebug, "intracom closed", nameField)
 	}
-
-	d.internalLogger.Log(log.LevelDebug, "closing services log channel", nameField)
-	close(logC)   // signal close the log channel
-	<-loggerDoneC // wait for log watcher to finish
 
 	d.internalLogger.Log(log.LevelDebug, "services log channel closed", nameField)
 
@@ -396,24 +388,25 @@ func (d *daemon) addService(service Service) error {
 	return nil
 }
 
-func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
-	doneC := make(chan struct{})
+// func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
+// 	doneC := make(chan struct{})
 
-	go func() {
-		// semaphore to limit the number of concurrent log writes to the daemon logger.
-		sema := make(chan struct{}, d.logWorkerCount)
-		for entry := range logC {
-			sema <- struct{}{}
-			go func() {
-				d.serviceLogger.Log(entry.Level, entry.Message, entry.Fields...)
-				<-sema
-			}()
-		}
-		close(doneC)
-	}()
+// 	go func() {
+// 		// semaphore to limit the number of concurrent log writes to the daemon logger.
+// 		sema := make(chan struct{}, d.logWorkerCount)
+// 		for entry := range logC {
+// 			sema <- struct{}{}
+// 			go func() {
+// 				d.serviceLogger.Log(entry.Level, entry.Message, entry.Fields...)
+// 				<-sema
+// 			}()
+// 		}
+// 		close(doneC)
+// 	}()
 
-	return doneC
-}
+// 	return doneC
+// }
+
 func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateUpdatesC <-chan StateUpdate) <-chan struct{} {
 	doneC := make(chan struct{})
 
