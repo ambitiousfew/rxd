@@ -26,6 +26,7 @@ type ServiceContext interface {
 	WithFields(fields ...log.Field) ServiceContext
 	WithParent(ctx context.Context) ServiceContext
 	WithName(name string) (ServiceContext, context.CancelFunc)
+	IntracomRegistry() *intracom.Intracom
 }
 
 type serviceContext struct {
@@ -33,7 +34,7 @@ type serviceContext struct {
 	name   string // is the name of the service, can be used for logging/debugging or subscribing.
 	fqcn   string // useful for child contexts to have a unique name without having to modify service name when subscribing.
 	fields []log.Field
-	logC   chan<- DaemonLog
+	logger log.Logger
 	ic     *intracom.Intracom
 }
 
@@ -52,9 +53,13 @@ func NewServiceContextWithCancel(parent context.Context, service string, state D
 		name:    service,
 		fqcn:    service,
 		fields:  fields,
-		logC:    state.logC,
+		logger:  state.serviceLogger,
 		ic:      state.ic,
 	}, cancel
+}
+
+func (sc *serviceContext) IntracomRegistry() *intracom.Intracom {
+	return sc.ic
 }
 
 // WithParent returns a new cancellable child ServiceContext with the given parent context.
@@ -69,7 +74,7 @@ func (sc *serviceContext) WithParent(parent context.Context) ServiceContext {
 		name:    sc.name,
 		fqcn:    sc.fqcn,
 		fields:  sc.fields,
-		logC:    sc.logC,
+		logger:  sc.logger,
 		ic:      sc.ic,
 	}
 }
@@ -82,7 +87,7 @@ func (sc *serviceContext) WithFields(fields ...log.Field) ServiceContext {
 		name:    sc.name,
 		fqcn:    sc.fqcn,
 		fields:  append(sc.fields, fields...),
-		logC:    sc.logC,
+		logger:  sc.logger,
 		ic:      sc.ic,
 	}
 }
@@ -94,7 +99,7 @@ func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelF
 		name:    name,
 		fqcn:    sc.fqcn + "_" + name,
 		fields:  sc.fields,
-		logC:    sc.logC,
+		logger:  sc.logger,
 		ic:      sc.ic,
 	}, cancel
 }
@@ -104,11 +109,7 @@ func (sc *serviceContext) Name() string {
 }
 
 func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
-	sc.logC <- DaemonLog{
-		Level:   level,
-		Message: message,
-		Fields:  append(fields, sc.fields...),
-	}
+	sc.logger.Log(level, message, fields...)
 }
 
 func (sc *serviceContext) Deadline() (deadline time.Time, ok bool) {
@@ -136,7 +137,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalStatesConsumer(action, target, sc.fqcn)
 
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
+		sub, err := intracom.CreateSubscription(ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
@@ -147,7 +148,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
+		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
 
 		for {
 			select {
@@ -203,7 +204,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalStatesConsumer(action, target, sc.fqcn)
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
+		sub, err := intracom.CreateSubscription(ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
@@ -214,7 +215,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
+		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
 		// defer sc.icStates.Unsubscribe(consumer, sub)
 
 		for {
@@ -266,7 +267,7 @@ func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSt
 		defer close(ch)
 		// subscribe to the internal states on behalf of the service context given using its "full qualified consumer name" (fqcn).
 		consumer := internalAllStatesConsumer(sc.fqcn)
-		sub, err := intracom.CreateSubscription[ServiceStates](ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
+		sub, err := intracom.CreateSubscription(ctx, sc.ic, internalServiceStates, -1, intracom.SubscriberConfig[ServiceStates]{
 			ConsumerGroup: consumer,
 			ErrIfExists:   false,
 			BufferSize:    1,
@@ -277,7 +278,7 @@ func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSt
 			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
-		defer intracom.RemoveSubscription[ServiceStates](sc.ic, internalServiceStates, consumer, sub)
+		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
 
 		for {
 			select {

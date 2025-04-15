@@ -56,7 +56,6 @@ func NewDaemon(name string, options ...DaemonOption) Daemon {
 		internalLogger: internalLogger,
 		started:        atomic.Bool{},
 		configuration:  noopConfigReadLoader{},
-		loggingC:       make(chan DaemonLog, 50),
 	}
 
 	// apply any optional overrides to the daemon
@@ -80,7 +79,6 @@ type daemon struct {
 	started        atomic.Bool                       // flag to indicate if the daemon has been started
 	rpcEnabled     bool                              // flag to indicate if the daemon has rpc enabled
 	rpcConfig      RPCConfig                         // rpc configuration for the daemon
-	loggingC       chan DaemonLog
 }
 
 func (d *daemon) Start(parent context.Context) error {
@@ -117,7 +115,7 @@ func (d *daemon) Start(parent context.Context) error {
 
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
-	loggerDoneC := d.serviceLogWatcher(d.loggingC)
+	// loggerDoneC := d.serviceLogWatcher(d.loggingC)
 
 	d.internalLogger.Log(log.LevelDebug, "creating intracom topic", log.String("topic", internalServiceStates))
 	statesTopic, err := intracom.CreateTopic[ServiceStates](d.ic, intracom.TopicConfig{
@@ -245,8 +243,8 @@ func (d *daemon) Start(parent context.Context) error {
 
 	d.internalLogger.Log(log.LevelInfo, "closing services log channel")
 	// close the services log channel to signal the log watcher to finish
-	close(d.loggingC) // signal close the log channel
-	<-loggerDoneC     // wait for log watcher to finish
+	// close(d.loggingC) // signal close the log channel
+	// <-loggerDoneC     // wait for log watcher to finish
 
 	// if the internal logger is an io.Closer, close it.
 	if internalLogger, ok := d.internalLogger.(io.Closer); ok {
@@ -354,12 +352,12 @@ func (d *daemon) startManager(ctx context.Context, wg *sync.WaitGroup, service S
 	}
 
 	dstate := DaemonState{
-		loader:  d.configuration,
-		logC:    d.loggingC,
-		ic:      d.ic,
-		configC: configSub,
-		updateC: updateStateC,
-		logger:  d.internalLogger,
+		loader:         d.configuration,
+		ic:             d.ic,
+		configC:        configSub,
+		updateC:        updateStateC,
+		internalLogger: d.internalLogger,
+		serviceLogger:  d.serviceLogger.With(log.String("service", service.Name)),
 	}
 
 	msvc := ManagedService{
@@ -371,25 +369,6 @@ func (d *daemon) startManager(ctx context.Context, wg *sync.WaitGroup, service S
 	d.internalLogger.Log(log.LevelInfo, "manager starting service", log.String("service_name", service.Name))
 	// run the service according to the manager policy
 	service.Manager.Manage(ctx, dstate, msvc)
-}
-
-func (d *daemon) serviceLogWatcher(logC <-chan DaemonLog) <-chan struct{} {
-	doneC := make(chan struct{})
-
-	go func() {
-		// semaphore to limit the number of concurrent log writes to the daemon logger.
-		sema := make(chan struct{}, d.logWorkerCount)
-		for entry := range logC {
-			sema <- struct{}{}
-			go func() {
-				d.serviceLogger.Log(entry.Level, entry.Message, entry.Fields...)
-				<-sema
-			}()
-		}
-		close(doneC)
-	}()
-
-	return doneC
 }
 
 func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateUpdatesC <-chan StateUpdate) <-chan struct{} {

@@ -48,20 +48,22 @@ type ManagedService struct {
 }
 
 type DaemonState struct {
-	configC <-chan int64       // configC used by service managers to receive sighup signals
-	logC    chan<- DaemonLog   // logC used by service context
-	updateC chan<- StateUpdate // channel to send state updates to the daemon
-	loader  config.Loader      // config loader for the daemon
-	ic      *intracom.Intracom // daemon intracom instance used by all services
-	logger  log.Logger         // internal daemon logger
+	configC <-chan int64 // configC used by service managers to receive sighup signals
+	// logC    chan<- DaemonLog   // logC used by service context
+	updateC        chan<- StateUpdate // channel to send state updates to the daemon
+	loader         config.Loader      // config loader for the daemon
+	ic             *intracom.Intracom // daemon intracom instance used by all services
+	internalLogger log.Logger         // internal daemon logger
+	serviceLogger  log.Logger         // service logger
 }
 
 func (ds DaemonState) NotifyState(serviceName string, state State) {
 	ds.updateC <- StateUpdate{Name: serviceName, State: state}
 }
 
+// Logger returns the internal service logger for the daemon.
 func (ds DaemonState) Logger() log.Logger {
-	return ds.logger
+	return ds.serviceLogger
 }
 
 func (ds DaemonState) LoadSignal() <-chan int64 {

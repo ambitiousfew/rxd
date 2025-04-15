@@ -3,14 +3,12 @@ package rxd
 import (
 	"context"
 	"time"
-
-	"github.com/ambitiousfew/rxd/config"
 )
 
 type noopConfigLoader struct{}
 
-func (noopConfigLoader) Load(ctx context.Context, loader config.LoaderFn) error {
-	return loader(ctx, nil)
+func (noopConfigLoader) Load(ctx context.Context, contents []byte) error {
+	return nil
 }
 
 type ManagerOption func(m *RunContinuousManager)

@@ -23,19 +23,27 @@ var MainConfigDecoderFn = func(p []byte, config *mainServiceConfig) error {
 		return err
 	}
 
+	if config.DBPassword == "" {
+		return errors.New("db_password is required")
+	}
+
+	if config.DBUser == "" {
+		return errors.New("db_user is required")
+	}
+
 	// Validate the config
-	if config.Host == "" {
+	if config.BrokerHost == "" {
 		return errors.New("host is required")
 	}
 
-	if config.Port <= 0 {
+	if config.BrokerPort <= 0 {
 		return errors.New("port must be greater than 0")
 	}
-	if config.Port > 65535 {
+	if config.BrokerPort > 65535 {
 		return errors.New("port must be less than 65535")
 	}
 
-	if config.Port < 1024 {
+	if config.BrokerPort < 1024 {
 		return errors.New("port must be greater than 1024")
 	}
 
@@ -99,15 +107,11 @@ func run(ctx context.Context, app application) error {
 	return nil
 }
 
-type vsService struct {
-	timeout *time.Timer
-	host    string
-	port    int
-}
-
 type mainServiceConfig struct {
-	Host string `json:"broker_host"`
-	Port int    `json:"broker_port"`
+	DBPassword string `json:"db_password"`
+	DBUser     string `json:"db_user"`
+	BrokerHost string `json:"broker_host"`
+	BrokerPort int    `json:"broker_port"`
 	// other fields...
 }
 
@@ -115,19 +119,35 @@ func (c *mainServiceConfig) Decode(p []byte) error {
 	return json.Unmarshal(p, c)
 }
 
+type vsService struct {
+	timeout *time.Timer
+	host    string
+	port    int
+}
+
+type vsServiceConfig struct {
+	BrokerHost string `json:"broker_host"`
+	BrokerPort int    `json:"broker_port"`
+	// other fields...
+}
+
+func (c *vsServiceConfig) Decode(p []byte) error {
+	return json.Unmarshal(p, c)
+}
+
 func (s *vsService) Load(sctx rxd.ServiceContext, from []byte) error {
 	sctx.Log(log.LevelInfo, "service loading")
 
 	// Load the config from the byte array
-	var svcConfig mainServiceConfig
+	var svcConfig vsServiceConfig
 	err := config.DecodeFromBytes(from, &svcConfig)
 	if err != nil {
 		sctx.Log(log.LevelError, "error loading config", log.Error("error", err))
 		return nil
 	}
 
-	s.host = svcConfig.Host
-	s.port = svcConfig.Port
+	s.host = svcConfig.BrokerHost
+	s.port = svcConfig.BrokerPort
 	sctx.Log(log.LevelDebug, "loaded config", log.String("host", s.host), log.Int("port", s.port))
 	return nil
 }

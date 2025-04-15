@@ -8,22 +8,29 @@ import (
 	"sync"
 )
 
-func (f *file) NewReader() (io.ReadCloser, error) {
-	return os.Open(f.filepath)
+func FromReader(r io.Reader, validator Decoder) ReadLoader {
+	return &configReader{
+		reader:   r,
+		decoder:  validator,
+		contents: nil,
+		mu:       sync.RWMutex{},
+	}
 }
 
-type file struct {
-	filepath string
+type file string
+
+func (f file) NewReader() (io.ReadCloser, error) {
+	return os.Open(string(f))
 }
 
-type readerConfig struct {
-	reader  io.Reader
-	decoder Decoder
-	p       []byte
-	mu      sync.RWMutex
+type configReader struct {
+	reader   io.Reader
+	decoder  Decoder
+	contents []byte
+	mu       sync.RWMutex
 }
 
-func (c *readerConfig) Read(ctx context.Context) error {
+func (c *configReader) Read(ctx context.Context) error {
 	// read the contents of the entire reader
 	contents, err := io.ReadAll(c.reader)
 	if err != nil {
@@ -42,21 +49,21 @@ func (c *readerConfig) Read(ctx context.Context) error {
 
 	// store the contents of the last read
 	c.mu.Lock()
-	c.p = contents
+	c.contents = contents
 	c.mu.Unlock()
 	return nil
 }
 
-func (c *readerConfig) Load(ctx context.Context) ([]byte, error) {
+func (c *configReader) Load(ctx context.Context) ([]byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if len(c.p) == 0 {
+	if len(c.contents) == 0 {
 		return nil, errors.New("file contents were empty on read")
 	}
 
 	// return a copy contents of the last read
-	b := make([]byte, len(c.p))
-	copy(b, c.p)
+	b := make([]byte, len(c.contents))
+	copy(b, c.contents)
 	return b, nil
 }

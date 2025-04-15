@@ -1,4 +1,6 @@
 {
   "broker_host": "127.0.0.1",
-  "broker_port": 8080
+  "broker_port": 9000,
+  "db_user": "root",
+  "db_password": "password"
 }
