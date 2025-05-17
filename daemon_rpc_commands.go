@@ -1,6 +1,6 @@
 package rxd
 
-import "github.com/ambitiousfew/rxd/pkg/rpc"
+import "github.com/ambitiousfew/rxd/v2/pkg/rpc"
 
 type RPCCommandRequest struct {
 	Service string

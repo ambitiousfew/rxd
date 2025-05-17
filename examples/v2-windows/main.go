@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ambitiousfew/rxd"
-	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/sysctl"
+	rxd "github.com/ambitiousfew/rxd/v2"
+	"github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/sysctl"
 )
 
 // This name must match the name used to

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type journaldHandler struct {

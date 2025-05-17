@@ -3,7 +3,7 @@ package rxd
 import (
 	"context"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type mockServiceManager struct{}

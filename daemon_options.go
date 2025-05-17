@@ -3,9 +3,9 @@ package rxd
 import (
 	"sync"
 
-	"github.com/ambitiousfew/rxd/config"
-	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/sysctl"
+	"github.com/ambitiousfew/rxd/v2/config"
+	"github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/sysctl"
 )
 
 type DaemonOption func(*daemon)

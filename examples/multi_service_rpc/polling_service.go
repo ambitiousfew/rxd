@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ambitiousfew/rxd"
-	"github.com/ambitiousfew/rxd/log"
+	rxd "github.com/ambitiousfew/rxd/v2"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 // Ensure we meet the interface or error.

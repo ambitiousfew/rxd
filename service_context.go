@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/ambitiousfew/rxd/intracom"
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/intracom"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type ServiceLogger interface {

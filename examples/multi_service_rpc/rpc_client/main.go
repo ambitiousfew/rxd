@@ -8,8 +8,8 @@ import (
 
 	"os"
 
-	rxlog "github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/pkg/rpc"
+	rxlog "github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/pkg/rpc"
 )
 
 func main() {

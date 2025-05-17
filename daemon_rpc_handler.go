@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ambitiousfew/rxd/intracom"
-	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/pkg/rpc"
+	"github.com/ambitiousfew/rxd/v2/intracom"
+	"github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/pkg/rpc"
 )
 
 type RPCConfig struct {

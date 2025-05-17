@@ -1,6 +1,6 @@
 package sysctl
 
-import "github.com/ambitiousfew/rxd/log"
+import "github.com/ambitiousfew/rxd/v2/log"
 
 var _ log.Logger = noopLogger{}
 

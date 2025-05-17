@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/ambitiousfew/rxd"
-	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/log/journald"
+	rxd "github.com/ambitiousfew/rxd/v2"
+	"github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/log/journald"
 )
 
 const DaemonName = "single-service"

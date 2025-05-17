@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/pkg/rpc"
+	"github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/pkg/rpc"
 )
 
 // ServiceManager interface defines the methods that a service handler must implement

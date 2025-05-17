@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 var _ Agent = (*systemdAgent)(nil)

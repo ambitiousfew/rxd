@@ -1,6 +1,6 @@
 package intracom
 
-import "github.com/ambitiousfew/rxd/log"
+import "github.com/ambitiousfew/rxd/v2/log"
 
 type noopLogger struct{}
 

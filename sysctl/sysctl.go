@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type Agent interface {

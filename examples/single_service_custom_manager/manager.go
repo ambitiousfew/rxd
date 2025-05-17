@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/ambitiousfew/rxd"
-	"github.com/ambitiousfew/rxd/log"
+	rxd "github.com/ambitiousfew/rxd/v2"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 var _ rxd.ServiceManager = (*CustomManager)(nil)

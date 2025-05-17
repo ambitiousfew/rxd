@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/rpc"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type Client struct {

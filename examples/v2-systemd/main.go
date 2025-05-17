@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ambitiousfew/rxd"
-	"github.com/ambitiousfew/rxd/config"
-	"github.com/ambitiousfew/rxd/log"
+	rxd "github.com/ambitiousfew/rxd/v2"
+	"github.com/ambitiousfew/rxd/v2/config"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type application struct {

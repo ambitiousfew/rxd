@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/ambitiousfew/rxd/intracom"
+	"github.com/ambitiousfew/rxd/v2/intracom"
 )
 
 func main() {

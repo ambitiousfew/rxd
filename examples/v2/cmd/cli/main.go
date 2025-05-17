@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ambitiousfew/rxd/log"
-	"github.com/ambitiousfew/rxd/pkg/rpc"
+	"github.com/ambitiousfew/rxd/v2/log"
+	"github.com/ambitiousfew/rxd/v2/pkg/rpc"
 )
 
 func main() {

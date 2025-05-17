@@ -3,7 +3,7 @@ package sysctl
 import (
 	"os"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 type DefaultOption func(*defaultAgent)

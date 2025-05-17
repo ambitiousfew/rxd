@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ambitiousfew/rxd/log"
+	"github.com/ambitiousfew/rxd/v2/log"
 )
 
 func TestDaemon_StartService(t *testing.T) {
