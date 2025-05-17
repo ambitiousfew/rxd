@@ -8,12 +8,13 @@ import (
 	"sync"
 )
 
-func FromReader(r io.Reader, validator Decoder) ReadLoader {
+func FromReader[T Validator](r io.Reader) ReadLoader {
+	var validator T
 	return &configReader{
-		reader:   r,
-		decoder:  validator,
-		contents: nil,
-		mu:       sync.RWMutex{},
+		reader:    r,
+		validator: validator,
+		contents:  nil,
+		mu:        sync.RWMutex{},
 	}
 }
 
@@ -24,13 +25,13 @@ func (f file) NewReader() (io.ReadCloser, error) {
 }
 
 type configReader struct {
-	reader   io.Reader
-	decoder  Decoder
-	contents []byte
-	mu       sync.RWMutex
+	reader    io.Reader
+	validator Validator
+	contents  []byte
+	mu        sync.RWMutex
 }
 
-func (c *configReader) Read(ctx context.Context) error {
+func (c *configReader) Read(_ context.Context) error {
 	// read the contents of the entire reader
 	contents, err := io.ReadAll(c.reader)
 	if err != nil {
@@ -41,9 +42,8 @@ func (c *configReader) Read(ctx context.Context) error {
 		return errors.New("file contents were empty on read")
 	}
 
-	// decode the contents into the provided interface.
-	// this just validates the contents are in-fact valid.
-	if err := c.decoder.Decode(contents); err != nil {
+	// validate the bytes using the provided validator struct implementation
+	if err := c.validator.Validate(contents); err != nil {
 		return err
 	}
 
@@ -54,7 +54,7 @@ func (c *configReader) Read(ctx context.Context) error {
 	return nil
 }
 
-func (c *configReader) Load(ctx context.Context) ([]byte, error) {
+func (c *configReader) Load(_ context.Context) ([]byte, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 

@@ -9,9 +9,33 @@ import (
 	"sync"
 )
 
-type EnvEncoder func(vars map[string]string) ([]byte, error)
-type EnvDecoder func(contents []byte) (map[string]string, error)
+// EnvJSONEncoder is a function that encodes the environment variables into a JSON byte array.
+func EnvJSONEncoder(vars map[string]string) ([]byte, error) {
+	contents, err := json.Marshal(vars)
+	if err != nil {
+		return nil, err
+	}
 
+	return contents, nil
+}
+
+// EnvJSONDecoder is a function that decodes the JSON byte array into a map of environment variables.
+func EnvJSONDecoder(p []byte) (map[string]string, error) {
+	var vars map[string]string
+	err := json.Unmarshal(p, &vars)
+	if err != nil {
+		return nil, err
+	}
+
+	return vars, nil
+}
+
+// FromEnvironment is a function that creates a new environment variable read loader.
+// Read will read from the OS environment variables and Load will return the most recently read
+// environment variables as a byte array. The environment variables are encoded using the provided
+// encoder function. The prefix is used to filter the environment variables that are read.
+// If the prefix is set, only environment variables that start with the prefix will be read.
+// If trim is set, the prefix will be trimmed from the environment variable name before it is returned.
 func FromEnvironment(opts ...EnvOption) (ReadLoader, error) {
 	conf := &configEnv{
 		encoder:  EnvJSONEncoder,
@@ -35,7 +59,7 @@ type configEnv struct {
 	mu         sync.RWMutex
 }
 
-func (c *configEnv) Read(ctx context.Context) error {
+func (c *configEnv) Read(_ context.Context) error {
 	envVars := os.Environ()
 
 	vars := make(map[string]string)
@@ -76,7 +100,7 @@ func (c *configEnv) Read(ctx context.Context) error {
 
 // Load would be called by the service manager so the service managers would hold
 // a user defined loader func to run per given service.
-func (c *configEnv) Load(ctx context.Context) ([]byte, error) {
+func (c *configEnv) Load(_ context.Context) ([]byte, error) {
 	// load the configuration into the provided interface
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -89,22 +113,4 @@ func (c *configEnv) Load(ctx context.Context) ([]byte, error) {
 	b := make([]byte, len(c.contents))
 	copy(b, c.contents)
 	return b, nil
-}
-
-func EnvJSONEncoder(vars map[string]string) ([]byte, error) {
-	contents, err := json.Marshal(vars)
-	if err != nil {
-		return nil, err
-	}
-
-	return contents, nil
-}
-
-func EnvJSONDecoder(vars map[string]string) ([]byte, error) {
-	contents, err := json.Marshal(vars)
-	if err != nil {
-		return nil, err
-	}
-
-	return contents, nil
 }

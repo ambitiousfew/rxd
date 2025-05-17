@@ -58,15 +58,14 @@ func main() {
 
 	logger := log.NewLogger(log.LevelDebug, handler).With(log.String("daemon", "v2"))
 
-	var v2Config mainServiceConfig
-	config, err := config.FromFile("config.json", &v2Config)
+	mainConfig, err := config.FromFile[mainServiceConfig]("config.json")
 	if err != nil {
 		logger.Log(log.LevelError, "error loading config", log.Error("error", err))
 	}
 
 	app := application{
 		logger: logger,
-		config: config,
+		config: mainConfig,
 	}
 
 	if err := run(ctx, app); err != nil {
@@ -115,8 +114,32 @@ type mainServiceConfig struct {
 	// other fields...
 }
 
-func (c *mainServiceConfig) Decode(p []byte) error {
-	return json.Unmarshal(p, c)
+func (c mainServiceConfig) Validate(p []byte) error {
+	err := json.Unmarshal(p, &c)
+	if err != nil {
+		return err
+	}
+
+	// validate any missing, empty, or invalid fields
+	if c.DBPassword == "" {
+		return errors.New("db_password is required")
+	}
+	if c.DBUser == "" {
+		return errors.New("db_user is required")
+	}
+	if c.BrokerHost == "" {
+		return errors.New("broker_host is required")
+	}
+	if c.BrokerPort <= 0 {
+		return errors.New("broker_port must be greater than 0")
+	}
+	if c.BrokerPort > 65535 {
+		return errors.New("broker_port must be less than 65535")
+	}
+	if c.BrokerPort < 1024 {
+		return errors.New("broker_port must be greater than 1024")
+	}
+	return nil
 }
 
 type vsService struct {

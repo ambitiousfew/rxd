@@ -7,25 +7,28 @@ import (
 	"sync"
 )
 
-func FromFile(path string, validator Decoder) (ReadLoader, error) {
+// FromFile is a generic function requiring a type that implements the Validator interface.
+// It returns a ReadLoader that reads from a file and validates the contents using the provided validator.
+func FromFile[T Validator](path string) (ReadLoader, error) {
+	var validator T
 	conf := &configFile{
-		file:     file(path),
-		decoder:  validator,
-		contents: nil,
-		mu:       sync.RWMutex{},
+		file:      file(path),
+		validator: validator,
+		contents:  nil,
+		mu:        sync.RWMutex{},
 	}
 
 	return conf, nil
 }
 
 type configFile struct {
-	file     file
-	decoder  Decoder
-	contents []byte
-	mu       sync.RWMutex
+	file      file
+	validator Validator
+	contents  []byte
+	mu        sync.RWMutex
 }
 
-func (c *configFile) Read(ctx context.Context) error {
+func (c *configFile) Read(_ context.Context) error {
 	reader, err := c.file.NewReader()
 	if err != nil {
 		return err
@@ -42,9 +45,8 @@ func (c *configFile) Read(ctx context.Context) error {
 		return errors.New("file contents were empty on read")
 	}
 
-	// decode the contents into the provided interface.
-	// this just validates the contents are in-fact valid.
-	if err := c.decoder.Decode(contents); err != nil {
+	// validate the bytes using the provided validator struct implementation
+	if err := c.validator.Validate(contents); err != nil {
 		return err
 	}
 
@@ -58,7 +60,7 @@ func (c *configFile) Read(ctx context.Context) error {
 
 // Load would be called by the service manager so the service managers would hold
 // a user defined loader func to run per given service.
-func (c *configFile) Load(ctx context.Context) ([]byte, error) {
+func (c *configFile) Load(_ context.Context) ([]byte, error) {
 	// load the configuration into the provided interface
 	c.mu.RLock()
 	defer c.mu.RUnlock()

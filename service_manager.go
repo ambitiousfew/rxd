@@ -266,6 +266,20 @@ func (m RunContinuousManager) Manage(ctx context.Context, ds DaemonState, ms Man
 	sctx, cancel := NewServiceContextWithCancel(ctx, ms.Name, ds)
 	defer cancel()
 
+	// always attempt to invoke the service loader if its implemented by the service
+	// on the first run, all subsequent runs will be handled by receiving a reload signal.
+	if reloader, ok := ms.Runner.(ServiceLoader); ok {
+		contents, err := ds.loader.Load(ctx)
+		if err != nil {
+			sctx.Log(log.LevelError, err.Error())
+		} else {
+			// forward the re-read config bytes to the service to process.
+			if err := reloader.Load(sctx, contents); err != nil {
+				sctx.Log(log.LevelError, err.Error())
+			}
+		}
+	}
+
 	configC := ds.LoadSignal()
 
 	var lastUpdate int64

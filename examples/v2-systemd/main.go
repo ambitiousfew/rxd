@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"sync"
 	"time"
@@ -36,8 +37,8 @@ func main() {
 }
 
 func run(ctx context.Context, app application) error {
-	var v2Config vsServiceConfig
-	config, err := config.FromFile("config.json", &v2Config)
+
+	config, err := config.FromFile[*vsServiceConfig]("config.json")
 	if err != nil {
 		return err
 	}
@@ -92,6 +93,23 @@ type vsServiceConfig struct {
 func (c *vsServiceConfig) Decode(from []byte) error {
 	// Decode the config here
 	return json.Unmarshal(from, c)
+}
+
+func (c *vsServiceConfig) Validate(p []byte) error {
+	// Validate the config here
+	err := json.Unmarshal(p, c)
+	if err != nil {
+		return err
+	}
+	// validate any missing, empty, or invalid fields
+	if c.Host == "" {
+		return errors.New("host is required")
+	}
+	if c.Port <= 0 {
+		return errors.New("port must be greater than 0")
+	}
+
+	return nil
 }
 
 // func (s *vsService) Init(sctx rxd.ServiceContext) error {
