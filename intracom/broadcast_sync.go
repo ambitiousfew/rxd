@@ -63,7 +63,7 @@ func (b SyncBroadcaster[T]) Broadcast(requests <-chan any, broadcast chan T) {
 					subscribers[r.conf.ConsumerGroup] = newSub
 					// if you are a new subscriber, then we try to send the last message of topic.
 
-					if !haveReceived {
+					if haveReceived {
 						select {
 						case newSub.ch <- lastMessage:
 						default:

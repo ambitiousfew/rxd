@@ -11,6 +11,16 @@ import (
 
 type Option func(*Intracom)
 
+func WithLogger(logger log.Logger) Option {
+	return func(ic *Intracom) {
+		if logger != nil {
+			ic.logger = logger
+		} else {
+			ic.logger = noopLogger{}
+		}
+	}
+}
+
 // Intracom acts as a registry for all topic channels.
 // The Intracom struct is thread-safe and can be used concurrently.
 // Use the pure generic functions below to operate against the Intracom struct:
@@ -71,8 +81,18 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	}
 
 	if conf.ErrIfExists {
+		ic.logger.Log(log.LevelDebug, "could not create topic",
+			log.String("name", ic.name),
+			log.String("topic", conf.Name),
+			log.Bool("subscriber_aware", conf.SubscriberAware),
+			log.Error("error", ErrTopicAlreadyExists))
 		return nil, ErrTopic{Topic: conf.Name, Action: ActionCreatingTopic, Err: ErrTopicAlreadyExists}
 	}
+
+	ic.logger.Log(log.LevelDebug, "created intracom topic",
+		log.String("name", ic.name),
+		log.String("topic", conf.Name),
+		log.Bool("subscriber_aware", conf.SubscriberAware))
 
 	return topic, nil
 }
@@ -101,6 +121,8 @@ func RemoveTopic[T any](ic *Intracom, name string) error {
 	ic.mu.Lock()
 	delete(ic.topics, name)
 	ic.mu.Unlock()
+
+	ic.logger.Log(log.LevelDebug, "removed intracom topic", log.String("name", ic.name), log.String("topic", name))
 	return nil
 }
 
@@ -144,12 +166,22 @@ func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, 
 			// the caller has canceled the context, exit with error.
 			return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ctx.Err()}
 		case <-maxTimeout:
+			ic.logger.Log(log.LevelDebug, "could not create subscription to topic",
+				log.String("name", ic.name),
+				log.String("topic", topic),
+				log.String("consumer", conf.ConsumerGroup),
+				log.Error("error", ErrMaxTimeoutReached))
 			// exceeded the callers set max timeout, exit with error.
 			return nil, ErrMaxTimeoutReached
 		case <-retryTimeout.C:
 			if ic.closed.Load() {
 				return nil, ErrSubscribe{Action: ActionCreatingSubscription, Topic: topic, Consumer: conf.ConsumerGroup, Err: ErrIntracomClosed}
 			}
+
+			ic.logger.Log(log.LevelDebug, "checking for topic existence",
+				log.String("name", ic.name),
+				log.String("topic", topic),
+				log.String("consumer", conf.ConsumerGroup))
 
 			// check if the topic exists yet.
 			ic.mu.RLock()
@@ -188,6 +220,8 @@ func RemoveSubscription[T any](ic *Intracom, topic string, consumer string, ch <
 		return ErrSubscribe{Action: ActionRemovingSubscription, Topic: topic, Consumer: consumer, Err: ErrInvalidTopicType}
 	}
 
+	ic.logger.Log(log.LevelDebug, "removing subscription", log.String("name", ic.name), log.String("topic", topic), log.String("consumer", consumer))
+
 	return t.Unsubscribe(consumer, ch)
 }
 
@@ -201,6 +235,8 @@ func Close(ic *Intracom) error {
 		return ErrIntracom{Action: ActionClosingTopic, Err: ErrIntracomClosed}
 	}
 
+	ic.logger.Log(log.LevelDebug, "closing all intracom topics", log.String("name", ic.name))
+
 	ic.mu.Lock()
 	for name, topicAny := range ic.topics {
 		topic, ok := topicAny.(Topic[any])
@@ -208,6 +244,7 @@ func Close(ic *Intracom) error {
 			continue
 		}
 
+		ic.logger.Log(log.LevelDebug, "closing topic", log.String("name", ic.name), log.String("topic", name))
 		err := topic.Close()
 		if err != nil {
 			ic.logger.Log(log.LevelError, "error closing topic", log.String("topic", name), log.Error("error", err))
