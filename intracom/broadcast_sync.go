@@ -22,6 +22,7 @@ func (b SyncBroadcaster[T]) Broadcast(requests <-chan any, broadcast chan T) {
 	}
 
 	var lastMessage T
+	var haveReceived bool
 	for {
 		select {
 		case msg, ok := <-recv:
@@ -40,6 +41,7 @@ func (b SyncBroadcaster[T]) Broadcast(requests <-chan any, broadcast chan T) {
 
 			// store the previous broadcasted message.
 			lastMessage = msg
+			haveReceived = true
 
 		case request, open := <-requests:
 			if !open {
@@ -57,13 +59,16 @@ func (b SyncBroadcaster[T]) Broadcast(requests <-chan any, broadcast chan T) {
 				}
 
 				if !exists {
-					newSub := newSubscriber[T](r.conf)
+					newSub := newSubscriber(r.conf)
 					subscribers[r.conf.ConsumerGroup] = newSub
 					// if you are a new subscriber, then we try to send the last message of topic.
-					select {
-					case newSub.ch <- lastMessage:
-					default:
-						// if the channel is full or unbuffered, then we dont send last message.
+
+					if !haveReceived {
+						select {
+						case newSub.ch <- lastMessage:
+						default:
+							// if the channel is full or unbuffered, then we dont send last message.
+						}
 					}
 					r.responseC <- subscribeResponse[T]{ch: newSub.ch, err: nil}
 				} else {
