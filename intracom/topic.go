@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Topic is an interface that defines the behavior for a topic in the intracom system.
 type Topic[T any] interface {
 	Name() string                                                              // Name returns the unique name of the topic.
 	PublishChannel() chan<- T                                                  // PublishChannel returns the channel publishers use to send messages to the topic.
@@ -16,14 +17,20 @@ type Topic[T any] interface {
 	Close() error                                                              // Close will remove all consumer groups from the topic and close all channels.
 }
 
+// TopicOption is a functional option type for configuring topics.
+// It allows for setting various properties of a topic, such as the broadcaster.
 type TopicOption[T any] func(*topic[T])
 
+// WithBroadcaster sets the broadcaster for the topic.
+// This allows for custom broadcasting behavior, such as using a specific implementation of Broadcaster.
 func WithBroadcaster[T any](b Broadcaster[T]) TopicOption[T] {
 	return func(t *topic[T]) {
 		t.bc = b
 	}
 }
 
+// Subscription is a struct that defines a subscription to a topic.
+// It includes the topic name, consumer group, and a max wait timeout for topic existence checks.
 type Subscription struct {
 	Topic         string
 	ConsumerGroup string
@@ -31,21 +38,16 @@ type Subscription struct {
 	MaxWaitTimeout time.Duration
 }
 
+// TopicConfig defines the configuration for a topic in the intracom system.
+// It includes the topic name, whether to return an error if the topic already exists,
 type TopicConfig struct {
 	Name            string // unique name for the topic
 	ErrIfExists     bool   // return error if topic already exists
 	SubscriberAware bool   // if true, topic broadcaster wont broadcast if there are no subscribers.
 }
 
-type topic[T any] struct {
-	name     string
-	publishC chan T
-	requestC chan any
-	bc       Broadcaster[T]
-	closed   atomic.Bool
-	mu       sync.RWMutex
-}
-
+// NewTopic is a generic function that creates a new topic with the given configuration and options.
+// It initializes the topic with a publish channel and a request channel for subscription management.
 func NewTopic[T any](conf TopicConfig, opts ...TopicOption[T]) Topic[T] {
 	publishC := make(chan T)
 	requestC := make(chan any, 1)
@@ -69,6 +71,15 @@ func NewTopic[T any](conf TopicConfig, opts ...TopicOption[T]) Topic[T] {
 	go t.bc.Broadcast(requestC, publishC)
 
 	return t
+}
+
+type topic[T any] struct {
+	name     string
+	publishC chan T
+	requestC chan any
+	bc       Broadcaster[T]
+	closed   atomic.Bool
+	mu       sync.RWMutex
 }
 
 func (t *topic[T]) Name() string {

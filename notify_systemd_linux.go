@@ -12,12 +12,9 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-type systemdNotifier struct {
-	watchdog uint64
-	conn     *net.UnixConn
-	mu       *sync.RWMutex
-}
-
+// NewSystemdNotifier creates a new SystemNotifier that communicates with systemd via a Unix socket.
+// The socketName is the path to the systemd socket, and durationSecs is the watchdog timeout in seconds.
+// If socketName is empty, it returns a no-op notifier.
 func NewSystemdNotifier(socketName string, durationSecs uint64) (SystemNotifier, error) {
 	if socketName == "" {
 		// no socket name, no-op notifier
@@ -39,6 +36,12 @@ func NewSystemdNotifier(socketName string, durationSecs uint64) (SystemNotifier,
 		watchdog: durationSecs,
 		mu:       &sync.RWMutex{},
 	}, nil
+}
+
+type systemdNotifier struct {
+	watchdog uint64
+	conn     *net.UnixConn
+	mu       *sync.RWMutex
 }
 
 func (n systemdNotifier) Notify(state NotifyState) error {

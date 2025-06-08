@@ -31,6 +31,9 @@ func newSubscriber[T any](conf SubscriberConfig[T]) subscriber[T] {
 		}
 		bp.Timer.Stop()
 		bufferPolicy = bp
+	case nil:
+		// if no buffer policy is set, use the default one
+		bufferPolicy = BufferPolicyDropNone[T]{}
 	default:
 		bufferPolicy = bp
 	}

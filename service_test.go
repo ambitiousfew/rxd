@@ -70,7 +70,7 @@ func (m *testServiceLogger) Output() string {
 	return m.buf.String()
 }
 
-func (m *testServiceLogger) Handle(level log.Level, message string, fields []log.Field) {
+func (m *testServiceLogger) Handle(_ log.Level, message string, fields []log.Field) {
 	var fieldOut strings.Builder
 	for _, field := range fields {
 		fieldOut.WriteString(field.Key + "=" + field.Value + " ")

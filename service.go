@@ -2,6 +2,7 @@ package rxd
 
 import "time"
 
+// ServiceRunner is an interface that defines the lifecycle methods for a service.
 type ServiceRunner interface {
 	Init(ServiceContext) error
 	Idle(ServiceContext) error
@@ -9,23 +10,25 @@ type ServiceRunner interface {
 	Stop(ServiceContext) error
 }
 
-// Service is a struct that contains the Name of the service, the ServiceRunner and the ServiceHandler.
-// This struct is what the caller uses to add a new service to the daemon.
-// The daemon performs checks and translates this struct into a Service struct before starting it.
+// Service acts as a DTO that carries the Name of the service along
+// with the ServiceRunner implementation and an optional ServiceManager.
+// This is normally passed to the Daemon via AddService or AddServices methods.
 type Service struct {
 	Name    string
 	Runner  ServiceRunner
 	Manager ServiceManager
 }
 
-// DaemonService is a struct that contains the Name of the service, the ServiceRunner
-// this struct is what is passed into a Handler for the  handler to decide how to
-// interact with the service using the ServiceRunner.
+// DaemonService is a DTO passed to a service manager containing the Name of the service
+// along with the the ServiceRunner implementation for the manager to use.
+// Every service is wrapped in a Service Manager to handle the lifecycle of the service.
 type DaemonService struct {
 	Name   string
 	Runner ServiceRunner
 }
 
+// NewService creates a new Service DTO with the provided name, runner and options.
+// This DTO is used to register a service with the Daemon via AddService or AddServices methods.
 func NewService(name string, runner ServiceRunner, opts ...ServiceOption) Service {
 	ds := Service{
 		Name:   name,

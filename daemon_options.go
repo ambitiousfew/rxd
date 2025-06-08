@@ -7,26 +7,34 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
+// DaemonOption is a functional option type for configuring a Daemon.
 type DaemonOption func(*daemon)
 
+// WithPrestart sets the prestart pipeline configration and stages for the daemon.
+// The prestart pipeline will run before the daemon starts and can be used to perform
+// any necessary setup or checks before the main daemon logic begins.
 func WithPrestart(conf PrestartConfig, stages ...Stage) DaemonOption {
 	return func(d *daemon) {
 		d.prestart = NewPrestartPipeline(conf, stages...)
 	}
 }
 
+// WithCustomPrestartPipeline allows you to set a custom prestart pipeline for the daemon.
+// This is useful if you have a prestart pipeline that does not fit the standard configuration
 func WithCustomPrestartPipeline(prestart Pipeline) DaemonOption {
 	return func(d *daemon) {
 		d.prestart = prestart
 	}
 }
 
-func WithLogWorkerCount(count int) DaemonOption {
-	return func(d *daemon) {
-		d.logWorkerCount = count
-	}
-}
+// // WithLogWorkerCount sets the number of worker goroutines that will handle log messages.
+// func WithLogWorkerCount(count int) DaemonOption {
+// 	return func(d *daemon) {
+// 		d.logWorkerCount = count
+// 	}
+// }
 
+// WithServiceLogger sets a custom logger for the daemon to pass along for all services to use.
 func WithServiceLogger(logger log.Logger) DaemonOption {
 	return func(d *daemon) {
 		d.serviceLogger = logger

@@ -21,20 +21,29 @@ import (
 // Because I want rxd to be cross-platform, this is already a consideration
 // for the future. Currently its a big lift and current needs are only for linux.
 
+// SystemNotifier is an interface that allows a service to notify the system
+// control manager (e.g. systemd) of its state.
 type SystemNotifier interface {
 	Start(ctx context.Context, logger log.Logger) error
 	Notify(state NotifyState) error
 }
 
 const (
+	// NotifyStateStopped indicates the service has stopped.
 	NotifyStateStopped NotifyState = iota
+	// NotifyStateStopping indicates the service is stopping.
 	NotifyStateStopping
+	// NotifyStateRestarting indicates the service is restarting.
 	NotifyStateRestarting
+	// NotifyStateReloading indicates the service is reloading.
 	NotifyStateReloading
+	// NotifyStateReady indicates the service is ready.
 	NotifyStateReady
+	// NotifyStateAlive indicates the service is alive.
 	NotifyStateAlive
 )
 
+// NotifyState represents the state of a service for system notification.
 type NotifyState uint8
 
 func (s NotifyState) String() string {

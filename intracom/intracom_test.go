@@ -2,9 +2,12 @@ package intracom
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/ambitiousfew/rxd/log"
 )
 
 var (
@@ -359,13 +362,17 @@ func TestIntracom_SinglePublisherSingleSubscriber(t *testing.T) {
 	}
 }
 
+type Metrics map[string]any
+
 func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	ic := New("benchmark-intracom")
+	logger := log.NewLogger(log.LevelDebug, log.NewHandler(log.WithWriters(os.Stdout, os.Stdout)))
+
+	ic := New("benchmark-intracom", WithLogger(logger))
 	topicName := b.Name()
-	maxSubscriberWait := 500 * time.Millisecond
+	maxSubscriberWait := 0 * time.Millisecond // no wait for subscribers, they should be ready immediately
 
 	var wg sync.WaitGroup
 	wg.Add(3) // 1 publisher, 2 subscribers
@@ -376,11 +383,11 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		subscriberName := b.Name() + "-1"
 
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[int]{
-			ConsumerGroup: subscriberName,              // unique consumer group name
-			ErrIfExists:   true,                        // error if consumer group already exists
-			BufferSize:    1,                           // subscriber channel buffer size
-			BufferPolicy:  BufferPolicyDropNone[int]{}, // policy for handling buffer overflow
+		sub, err := CreateSubscription[Metrics](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[Metrics]{
+			ConsumerGroup: subscriberName,                  // unique consumer group name
+			ErrIfExists:   true,                            // error if consumer group already exists
+			BufferSize:    1,                               // subscriber channel buffer size
+			BufferPolicy:  BufferPolicyDropNone[Metrics]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -395,19 +402,23 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 
 		var total int
 
-		open := true
-		for open {
+	loop:
+		for {
 			select {
-			case _, open = <-sub:
+			case metric, open := <-sub:
 				if !open {
 					// prevent incrementing counter on closed channel
 					return
 				}
 
+				if metric == nil {
+					b.Errorf("received nil metric")
+				}
+
 				total++
 			case <-ctx.Done():
 				b.Errorf("timeout waiting for message")
-				open = false
+				break loop
 			}
 		}
 
@@ -423,11 +434,11 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 		subscriberName := b.Name() + "-2"
 
 		// create a subscription, waiting for topic to exist using maxWait
-		sub, err := CreateSubscription[int](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[int]{
-			ConsumerGroup: subscriberName,              // unique consumer group name
-			ErrIfExists:   true,                        // error if consumer group already exists
-			BufferSize:    1,                           // subscriber channel buffer size
-			BufferPolicy:  BufferPolicyDropNone[int]{}, // policy for handling buffer overflow
+		sub, err := CreateSubscription[Metrics](ctx, ic, topicName, maxSubscriberWait, SubscriberConfig[Metrics]{
+			ConsumerGroup: subscriberName,                  // unique consumer group name
+			ErrIfExists:   true,                            // error if consumer group already exists
+			BufferSize:    1,                               // subscriber channel buffer size
+			BufferPolicy:  BufferPolicyDropNone[Metrics]{}, // policy for handling buffer overflow
 		})
 
 		if err != nil {
@@ -442,19 +453,23 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 
 		var total int
 
-		open := true
-		for open {
+	loop:
+		for {
 			select {
-			case _, open = <-sub:
+			case metric, open := <-sub:
 				if !open {
 					// prevent incrementing counter on closed channel
 					return
 				}
 
+				if metric == nil {
+					b.Errorf("received nil metric")
+				}
+
 				total++
 			case <-ctx.Done():
 				b.Errorf("timeout waiting for message")
-				open = false
+				break loop
 			}
 		}
 
@@ -466,12 +481,19 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 	go func() {
 		// launch a publisher
 		defer wg.Done()
+
+		// delayed creation
+		select {
+		case <-ctx.Done(): // dont even send anything.
+		case <-time.After(500 * time.Millisecond): // give some time for subscribers to be ready
+		}
+
 		// slight delay so create subscription has to wait
-		testTopic, err := CreateTopic[int](ic, TopicConfig{
+		testTopic, err := CreateTopic[Metrics](ic, TopicConfig{
 			Name: topicName,
 			// Buffer:               1000,
 			ErrIfExists:     true,
-			SubscriberAware: true, // dont publish until you see 2 subscribers.
+			SubscriberAware: false, // dont publish until you see 2 subscribers.
 		})
 
 		if err != nil {
@@ -481,13 +503,19 @@ func BenchmarkIntracom_2Subscriber1Publisher(b *testing.B) {
 
 		pubC := testTopic.PublishChannel()
 
+		// delayed publishing
+		select {
+		case <-ctx.Done(): // dont even send anything.
+		case <-time.After(500 * time.Millisecond): // give some time for subscribers to be ready
+		}
+
 		publishing := true
 		for count := 0; publishing && count < b.N; count++ {
 			select {
 			case <-ctx.Done():
 				b.Errorf("publisher timed out waiting for subscriber")
 				publishing = false
-			case pubC <- count:
+			case pubC <- Metrics{"something": count}:
 			}
 		}
 

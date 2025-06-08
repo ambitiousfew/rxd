@@ -7,35 +7,45 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
+// Pipeline is an interface that defines a sequence of stages to be executed in order.
+// Each stage is a function that takes a context and returns an error.
 type Pipeline interface {
 	Add(stage Stage)
 	Run(ctx context.Context) <-chan DaemonLog
 }
 
+// StageFunc is a function type that represents a stage in the pipeline.
+// It takes a context and returns an error if the stage fails.
 type StageFunc func(ctx context.Context) error
 
+// Stage represents a single stage in the pipeline.
+// It has a name for identification and a function to execute.
 type Stage struct {
 	Name string
 	Func StageFunc
 }
 
-type prestartPipeline struct {
-	RestartOnError bool          // If true, the pipeline will restart from the beginning if an error occurs
-	RestartDelay   time.Duration // Delay between restarts
-	Stages         []Stage       // Stages to run in order
-}
-
+// PrestartConfig holds the configuration for a prestart pipeline.
 type PrestartConfig struct {
 	RestartOnError bool
 	RestartDelay   time.Duration
 }
 
+// NewPrestartPipeline creates a new prestart pipeline with the given configuration and stages.
+// The pipeline will run the stages in order and can be configured to restart on error with a delay.
+// If RestartOnError is true, the pipeline will restart from the beginning if an error occurs.
 func NewPrestartPipeline(conf PrestartConfig, stages ...Stage) Pipeline {
 	return &prestartPipeline{
 		RestartOnError: conf.RestartOnError,
 		RestartDelay:   conf.RestartDelay,
 		Stages:         stages,
 	}
+}
+
+type prestartPipeline struct {
+	RestartOnError bool          // If true, the pipeline will restart from the beginning if an error occurs
+	RestartDelay   time.Duration // Delay between restarts
+	Stages         []Stage       // Stages to run in order
 }
 
 func (p *prestartPipeline) Add(stage Stage) {

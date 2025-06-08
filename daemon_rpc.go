@@ -8,23 +8,34 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
+// RPCConfig holds the configuration for the RPC server.
+// It includes the address and port on which the server will listen.
+// The address can be an IP or a hostname, and the port is a uint16.
+// The server will listen on the specified address and port for incoming RPC requests.
 type RPCConfig struct {
 	Addr string
 	Port uint16
 }
 
+// RPCServer is a struct that represents an RPC server.
+// It contains an HTTP server that listens for incoming RPC requests.
 type RPCServer struct {
 	server *http.Server
 }
 
+// Start starts the RPC server and begins listening for incoming requests.
 func (s *RPCServer) Start() error {
 	return s.server.ListenAndServe()
 }
 
+// Stop stops the RPC server by closing the underlying HTTP server.
 func (s *RPCServer) Stop() error {
 	return s.server.Close()
 }
 
+// NewRPCHandler creates a new RPC server with the given configuration.
+// It initializes the HTTP server and registers the CommandHandler service.
+// The CommandHandler service provides methods for changing log levels and sending commands to services.
 func NewRPCHandler(cfg RPCConfig) (*RPCServer, error) {
 	mux := http.NewServeMux()
 
@@ -47,12 +58,14 @@ func NewRPCHandler(cfg RPCConfig) (*RPCServer, error) {
 	}, nil
 }
 
+// CommandHandler is a struct that implements the RPC service for handling commands.
 type CommandHandler struct {
 	sLogger log.Logger // service logger
 	iLogger log.Logger // internal logger
 }
 
-func (h CommandHandler) ChangeLogLevel(level log.Level, resp *error) error {
+// ChangeLogLevel changes the log level for the service and internal logger.
+func (h CommandHandler) ChangeLogLevel(level log.Level, _ *error) error {
 	h.sLogger.SetLevel(level)
 	h.iLogger.SetLevel(level)
 	return nil

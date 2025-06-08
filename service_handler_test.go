@@ -8,7 +8,7 @@ import (
 
 type mockServiceManager struct{}
 
-func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- StateUpdate) {
+func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, updateC chan<- ServiceStateUpdate) {
 	defer func() {
 		// if any panics occur with the users defined service runner, recover and push error out to daemon logger.
 		if r := recover(); r != nil {
@@ -16,12 +16,12 @@ func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, update
 		}
 	}()
 
-	var state State = StateInit
+	var state = StateInit
 	var hasStopped bool
 
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
-		updateC <- StateUpdate{Name: ds.Name, State: state}
+		updateC <- ServiceStateUpdate{Name: ds.Name, State: state}
 
 		if hasStopped {
 			// not entering Exit after stop was true, reset hasStopped
@@ -76,5 +76,5 @@ func (h mockServiceManager) Manage(sctx ServiceContext, ds DaemonService, update
 		}
 	}
 	// push final state to the daemon states watcher.
-	updateC <- StateUpdate{Name: ds.Name, State: StateExit}
+	updateC <- ServiceStateUpdate{Name: ds.Name, State: StateExit}
 }

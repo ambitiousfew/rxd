@@ -1,3 +1,7 @@
+// Package intracom provides a lightweight way to create topics and subscriptions
+// used for communication between different parts of an application running concurrently.
+// It allows for creating a registry of topics, subscribing to them, and removing subscriptions.
+// The intracom registry, topic, subscriptions are thread-safe and can be used concurrently.
 package intracom
 
 import (
@@ -9,8 +13,11 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
+// Option is a functional option for configuring the Intracom instance.
 type Option func(*Intracom)
 
+// WithLogger sets the logger for the Intracom instance.
+// If the logger is nil, a noopLogger is used instead.
 func WithLogger(logger log.Logger) Option {
 	return func(ic *Intracom) {
 		if logger != nil {
@@ -97,6 +104,11 @@ func CreateTopic[T any](ic *Intracom, conf TopicConfig) (Topic[T], error) {
 	return topic, nil
 }
 
+// RemoveTopic removes a topic from the Intracom registry.
+// If the topic does not exist, an error is returned.
+// If the topic is currently subscribed to, it will be closed and all subscriptions removed.
+// If the topic is closed, it will be removed from the registry.
+// If the Intracom is closed, an error is returned.
 func RemoveTopic[T any](ic *Intracom, name string) error {
 	if ic == nil {
 		return ErrTopic{Topic: name, Action: ActionRemovingTopic, Err: ErrInvalidIntracomNil}
@@ -150,6 +162,11 @@ func CreateSubscription[T any](ctx context.Context, ic *Intracom, topic string, 
 	// maxTimeout initializes to nil if maxWait is 0 so it will never trigger case <-maxTimeout.
 	var maxTimeout <-chan time.Time
 	if maxWait > 0 {
+		ic.logger.Log(log.LevelDebug, "could not create subscription to topic",
+			log.String("name", ic.name),
+			log.String("topic", topic),
+			log.String("consumer", conf.ConsumerGroup),
+			log.Int("max_wait", maxWait))
 		timer := time.NewTimer(maxWait)
 		defer timer.Stop()
 		maxTimeout = timer.C
@@ -226,6 +243,10 @@ func RemoveSubscription[T any](ic *Intracom, topic string, consumer string, ch <
 }
 
 // Close interacts with the Intracom registry and closes all topics.
+// It will close all topics and remove them from the registry.
+// If the Intracom is already closed, an error is returned.
+// If the Intracom is nil, an error is returned.
+// It is safe to call Close multiple times, it will only close the topics once.
 func Close(ic *Intracom) error {
 	if ic == nil {
 		return ErrIntracom{Action: ActionClosingTopic, Err: ErrInvalidIntracomNil}

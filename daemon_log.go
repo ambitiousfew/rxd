@@ -9,6 +9,7 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
+// DaemonLog represents a log entry for the daemon.
 type DaemonLog struct {
 	Level   log.Level
 	Message string

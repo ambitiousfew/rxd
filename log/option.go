@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// HandlerOption is a functional option type for configuring a Handler.
 type HandlerOption func(*defaultHandler)
 
 // WithWriters allows customization of the stdout and stderr writers to use for the log message.
@@ -23,7 +24,7 @@ func WithWriters(stdout, stderr io.Writer) HandlerOption {
 	}
 }
 
-// WithStdErrWriter allows customization of the stdout writer to use log levels of NOTICE or higher.
+// WithStdOutWriter allows customization of the stdout writer to use log levels of NOTICE or higher.
 // if stdout is nil it will default to os.Stdout
 func WithStdOutWriter(stdout io.Writer) HandlerOption {
 	return func(h *defaultHandler) {

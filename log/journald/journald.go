@@ -1,3 +1,7 @@
+// Package journald provides a log handler that writes logs to journald.
+// It supports severity prefixes and allows customization of the output writers.
+// It is designed to be used with the rxd logging package.
+// It is useful for logging from application running inside docker containers that use journald as the logging driver.
 package journald
 
 import (
@@ -11,15 +15,10 @@ import (
 	"github.com/ambitiousfew/rxd/log"
 )
 
-type journaldHandler struct {
-	severityPrefix bool
-	lvlMu          sync.RWMutex // mutex for level and fields
-	stdout         io.Writer
-	outMu          sync.RWMutex // mutex for stdout writer
-	stderr         io.Writer
-	errMu          sync.RWMutex // mutex for stderr writer
-}
-
+// NewHandler creates a new journald log handler.
+// It writes logs to stdout and stderr, with an optional severity prefix.
+// The severity prefix is useful when using the journald driver within a docker container.
+// The handler supports functional options for customization.
 func NewHandler(opts ...Option) log.Handler {
 	h := &journaldHandler{
 		severityPrefix: false,
@@ -35,6 +34,15 @@ func NewHandler(opts ...Option) log.Handler {
 	}
 
 	return h
+}
+
+type journaldHandler struct {
+	severityPrefix bool
+	lvlMu          sync.RWMutex // mutex for level and fields
+	stdout         io.Writer
+	outMu          sync.RWMutex // mutex for stdout writer
+	stderr         io.Writer
+	errMu          sync.RWMutex // mutex for stderr writer
 }
 
 func (h *journaldHandler) Handle(level log.Level, message string, fields []log.Field) {

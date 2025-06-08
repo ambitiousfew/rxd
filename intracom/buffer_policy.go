@@ -5,12 +5,20 @@ import (
 	"time"
 )
 
+// BufferPolicyHandler defines an interface for handling buffer policies in a channel.
+// It provides a method to handle the message sending logic based on the buffer policy.
+// The method takes a channel, a message of type T, and a stop channel to signal when to stop processing.
 type BufferPolicyHandler[T any] interface {
 	Handle(ch chan T, message T, stopC <-chan struct{}) error
 }
 
+// BufferPolicyDropNone is a buffer policy that does not drop any messages.
+// It simply attempts to send the message to the channel and blocks until it can do so.
 type BufferPolicyDropNone[T any] struct{}
 
+// Handle attempts to send the message to the channel.
+// If the stop channel is closed, it returns an error indicating that the subscriber has stopped.
+// If the message is successfully sent, it returns nil.
 func (d BufferPolicyDropNone[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
@@ -20,8 +28,14 @@ func (d BufferPolicyDropNone[T]) Handle(ch chan T, message T, stopC <-chan struc
 	}
 }
 
+// BufferPolicyDropOldest is a buffer policy that drops the oldest message in the channel
+// when the channel is full and a new message needs to be sent.
+// It attempts to send the new message, and if the channel is full, it pops the oldest message
 type BufferPolicyDropOldest[T any] struct{}
 
+// Handle attempts to send the message to the channel.
+// If the stop channel is closed, it returns an error indicating that the subscriber has stopped.
+// If the message is successfully sent, it returns nil.
 func (d BufferPolicyDropOldest[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
@@ -53,11 +67,17 @@ func (d BufferPolicyDropOldest[T]) Handle(ch chan T, message T, stopC <-chan str
 	}
 }
 
+// BufferPolicyDropOldestAfterTimeout is a buffer policy that drops the oldest message in the channel
+// after a specified timeout when the channel is full and a new message needs to be sent.
+// It uses a timer to wait for the specified duration before attempting to drop the oldest message.
 type BufferPolicyDropOldestAfterTimeout[T any] struct {
 	Timer       *time.Timer
 	DropTimeout time.Duration
 }
 
+// Handle attempts to send the message to the channel.
+// If the stop channel is closed, it returns an error indicating that the subscriber has stopped.
+// If the message is successfully sent, it returns nil.
 func (d BufferPolicyDropOldestAfterTimeout[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
@@ -102,8 +122,15 @@ func (d BufferPolicyDropOldestAfterTimeout[T]) Handle(ch chan T, message T, stop
 	}
 }
 
+// BufferPolicyDropNewest is a buffer policy that drops the newest message in the channel
+// when the channel is full and a new message needs to be sent.
+// It attempts to send the new message, and if the channel is full, it simply drops the new message.
 type BufferPolicyDropNewest[T any] struct{}
 
+// Handle attempts to send the message to the channel.
+// If the stop channel is closed, it returns an error indicating that the subscriber has stopped.
+// If the message is successfully sent, it returns nil.
+// If the channel is full, it simply drops the new message without sending it.
 func (d BufferPolicyDropNewest[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:
@@ -118,11 +145,18 @@ func (d BufferPolicyDropNewest[T]) Handle(ch chan T, message T, stopC <-chan str
 	}
 }
 
+// BufferPolicyDropNewestAfterTimeout is a buffer policy that drops the newest message in the channel
+// after a specified timeout when the channel is full and a new message needs to be sent.
+// It uses a timer to wait for the specified duration before attempting to drop the new message.
 type BufferPolicyDropNewestAfterTimeout[T any] struct {
 	Timer      *time.Timer
 	DropTimout time.Duration
 }
 
+// Handle attempts to send the message to the channel.
+// If the stop channel is closed, it returns an error indicating that the subscriber has stopped.
+// If the message is successfully sent, it returns nil.
+// If the channel is full, it waits for a specified timeout before dropping the new message.
 func (d BufferPolicyDropNewestAfterTimeout[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
 	select {
 	case <-stopC:

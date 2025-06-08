@@ -8,16 +8,10 @@ import (
 	"time"
 )
 
-type defaultHandler struct {
-	stdout   io.Writer
-	stderr   io.Writer
-	outMu    sync.RWMutex
-	errMu    sync.RWMutex
-	disabled bool
-	msgfmt   string
-	timefmt  string
-}
-
+// NewHandler creates a new default Handler with the provided options.
+// The default handler writes logs to os.Stdout and os.Stderr, with a default
+// message format of "{time} [{level}] {message}" and a time format of time.RFC3339.
+// If no options are provided, it will use these defaults.
 func NewHandler(opts ...HandlerOption) Handler {
 	h := &defaultHandler{
 		stdout:   os.Stdout,
@@ -34,6 +28,16 @@ func NewHandler(opts ...HandlerOption) Handler {
 	}
 
 	return h
+}
+
+type defaultHandler struct {
+	stdout   io.Writer
+	stderr   io.Writer
+	outMu    sync.RWMutex
+	errMu    sync.RWMutex
+	disabled bool
+	msgfmt   string
+	timefmt  string
 }
 
 func (h *defaultHandler) Handle(level Level, message string, fields []Field) {

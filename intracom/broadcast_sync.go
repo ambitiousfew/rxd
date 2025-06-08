@@ -4,10 +4,16 @@ import (
 	"errors"
 )
 
+// SyncBroadcaster is a synchronous broadcaster that broadcasts messages to subscribers.
+// It implements the Broadcaster interface and allows for subscribing and unsubscribing to a topic.
 type SyncBroadcaster[T any] struct {
 	SubscriberAware bool // if true, broadcaster wont broadcast if there are no subscribers.
 }
 
+// Broadcast method listens for incoming messages and requests.
+// It handles subscription requests, unsubscription requests, and close requests.
+// It broadcasts messages to all subscribers and manages the subscriber lifecycle.
+// If SubscriberAware is true, it will only broadcast messages if there are subscribers.
 func (b SyncBroadcaster[T]) Broadcast(requests <-chan any, broadcast chan T) {
 	subscribers := make(map[string]Channel[T])
 
