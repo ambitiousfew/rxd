@@ -39,7 +39,7 @@ func NewAPIPollingService() *APIPollingService {
 func (s *APIPollingService) Idle(ctx rxd.ServiceContext) error {
 	ctx.Log(log.LevelInfo, "entered idle state")
 
-	statesC, cancel := ctx.WatchAllServices(rxd.Entered, rxd.StateRun, ServiceHelloWorldAPI)
+	statesC, cancel := ctx.WatchAllServices(rxd.Entering, rxd.StateRun, ServiceHelloWorldAPI)
 	defer cancel()
 
 	for {

@@ -172,7 +172,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 				interestedServices := make(ServiceStates, len(services))
 				for _, name := range services {
 					switch action {
-					case Entered, Entering:
+					case Entering:
 						current, ok := states[name]
 						if !ok {
 							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
@@ -183,7 +183,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 							interestedServices[name] = current
 						}
 
-					case Exited, Exiting:
+					case Exited:
 						current, ok := states[name]
 						if !ok {
 							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
@@ -195,7 +195,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 							interestedServices[name] = current
 						}
 
-					case Changed, Changing:
+					case Changing:
 						current, ok := states[name]
 						if !ok {
 							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
@@ -285,7 +285,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 				interestedServices := make(ServiceStates, len(services))
 				for _, name := range services {
 					switch action {
-					case Entered, Entering:
+					case Entering:
 						current, ok := states[name]
 						if !ok {
 							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
@@ -296,7 +296,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 							interestedServices[name] = current
 						}
 
-					case Exited, Exiting:
+					case Exited:
 						current, ok := states[name]
 						if !ok {
 							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
@@ -308,7 +308,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 							interestedServices[name] = current
 						}
 
-					case Changed, Changing:
+					case Changing:
 						current, ok := states[name]
 						if !ok {
 							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
