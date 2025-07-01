@@ -107,28 +107,6 @@ func (d *daemon) Start(parent context.Context) error {
 	dctx, dcancel := context.WithCancel(parent)
 	defer dcancel()
 
-	// --- Service Manager Notifier ---
-	// TODO:: Future work here will be to support multiple platform service managers
-	// such as windows service manager, systemd, etc.
-	//
-	// This will require manager selection to be selected dynamically at runtime.
-	// notifier := GetSystemNotifier(ctx) --- probably...
-	// For now, we are only supporting linux - systemd.
-	notifier, err := NewSystemdNotifier(os.Getenv("NOTIFY_SOCKET"), d.reportAliveSecs)
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error creating systemd notifier", log.Error("error", err), nameField)
-		return err
-	}
-
-	d.internalLogger.Log(log.LevelDebug, "starting system notifier", nameField)
-	// Start the notifier, this will start the watchdog portion.
-	// so we can notify systemd that we have not hung.
-	err = notifier.Start(dctx, d.internalLogger)
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error starting system notifier", log.Error("error", err), nameField)
-		return err
-	}
-
 	// --- Start the Daemon Service Log Watcher ---
 	// listens for logs from services via channel and logs them to the daemon logger.
 
@@ -146,14 +124,6 @@ func (d *daemon) Start(parent context.Context) error {
 			d.internalLogger.Log(log.LevelNotice, "signal watcher received an os signal", log.String("signal", sig.String()), nameField)
 			// if we received a signal to stop, cancel the context
 			dcancel()
-		}
-
-		// inform systemd that we are stopping/cleaning up
-		// TODO: Test if this notify should happen before or after cancel()
-		// since the watchdog notify continues to until the context is cancelled.
-		err := notifier.Notify(NotifyStateStopping)
-		if err != nil {
-			d.internalLogger.Log(log.LevelError, "error sending 'stopping' notification", nameField)
 		}
 	}()
 
@@ -260,11 +230,6 @@ func (d *daemon) Start(parent context.Context) error {
 				d.internalLogger.Log(log.LevelInfo, "stopped running rpc server and exited successfully", nameField)
 			}(server)
 		}
-	}
-
-	err = notifier.Notify(NotifyStateReady)
-	if err != nil {
-		d.internalLogger.Log(log.LevelError, "error sending 'ready' notification", log.Error("error", err), nameField)
 	}
 
 	// block until all services have exited their lifecycles
