@@ -172,7 +172,7 @@ func (d *daemon) Start(parent context.Context) error {
 		dwg.Add(1)
 		// each service is handled in its own routine.
 		go func(ctx context.Context, wg *sync.WaitGroup, ds DaemonService, manager ServiceManager, stateC chan<- ServiceStateUpdate) {
-			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.serviceLogger, d.ic)
+			sctx, scancel := newServiceContextWithCancel(ctx, ds.Name, d.serviceLogger, d.internalLogger, d.ic)
 
 			defer func() {
 				// recover from any panics in the service runner

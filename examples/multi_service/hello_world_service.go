@@ -44,9 +44,10 @@ func (s *HelloWorldAPIService) Idle(ctx rxd.ServiceContext) error {
 // Run is where you want the main logic of your service to run
 // when things have been initialized and are ready, this runs the heart of your service.
 func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
+
 	ctx.Log(log.LevelInfo, "entered run state")
 	doneC := make(chan struct{})
-	go func() {
+	go func(server *http.Server) {
 		defer close(doneC)
 		// We should always watch for this signal, must use goroutine here
 		// since ListenAndServe will block and we need a way to end the
@@ -57,11 +58,11 @@ func (s *HelloWorldAPIService) Run(ctx rxd.ServiceContext) error {
 		timedCtx, timedCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer timedCancel()
 
-		err := s.server.Shutdown(timedCtx)
+		err := server.Shutdown(timedCtx)
 		if err != nil {
 			ctx.Log(log.LevelError, err.Error())
 		}
-	}()
+	}(s.server)
 
 	ctx.Log(log.LevelInfo, fmt.Sprintf("server starting at %s", s.server.Addr))
 	// ListenAndServe will block forever serving requests/responses

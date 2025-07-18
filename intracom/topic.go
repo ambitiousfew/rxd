@@ -98,13 +98,13 @@ func (t *topic[T]) Subscribe(ctx context.Context, conf SubscriberConfig[T]) (<-c
 	responseC := make(chan subscribeResponse[T], 1)
 	select {
 	case <-ctx.Done():
-		return nil, errors.New("subscribe request timed out 1")
+		return nil, errors.New("subscribe request cancelled while requesting")
 	case t.requestC <- subscribeRequest[T]{conf: conf, responseC: responseC}:
 	}
 
 	select {
 	case <-ctx.Done():
-		return nil, errors.New("subscribe response timed out 2")
+		return nil, errors.New("subscribe response cancelled while waiting for response")
 	case res := <-responseC:
 		return res.ch, res.err
 	}

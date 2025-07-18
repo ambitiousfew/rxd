@@ -117,7 +117,7 @@ func (s *HelloWorldAPIService) Run(sctx rxd.ServiceContext) error {
 	// NOTE: RxD default Manager will not allow two lifecycles to run at the same time.
 	// So we must launch a goroutine to to watch and signal the server shutdown in this case.
 	doneC := make(chan struct{})
-	go func() {
+	go func(server *http.Server) {
 		defer close(doneC)
 
 		// NOTE: Intentional cancellation timeout to showcase how the lifecycles work.
@@ -133,12 +133,12 @@ func (s *HelloWorldAPIService) Run(sctx rxd.ServiceContext) error {
 		// NOTE: because Stop and Run cannot execute at the same time, we need to stop the server here
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		if err := s.server.Shutdown(timeoutCtx); err != nil {
+		if err := server.Shutdown(timeoutCtx); err != nil {
 			sctx.Log(log.LevelError, "error shutting down server: "+err.Error())
 		} else {
 			sctx.Log(log.LevelInfo, "server shutdown")
 		}
-	}()
+	}(s.server)
 
 	sctx.Log(log.LevelInfo, "server starting with address: "+s.server.Addr)
 	// ListenAndServe will block forever serving requests/responses

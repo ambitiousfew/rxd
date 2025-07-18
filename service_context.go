@@ -38,14 +38,15 @@ type ServiceContext interface {
 
 type serviceContext struct {
 	context.Context
-	name   string             // is the name of the service, can be used for logging/debugging or subscribing.
-	fqcn   string             // useful for child contexts to have a unique name without having to modify service name when subscribing.
-	fields []log.Field        // fields is a slice of log fields that are used for logging and debugging.
-	logger log.Logger         // logger is the logger used for logging messages within the service context.
-	ic     *intracom.Intracom // ic is the shared intracom registry used between all the services.
+	name    string             // is the name of the service, can be used for logging/debugging or subscribing.
+	fqcn    string             // useful for child contexts to have a unique name without having to modify service name when subscribing.
+	fields  []log.Field        // fields is a slice of log fields that are used for logging and debugging.
+	slogger log.Logger         // service logger used to log as the running service (usually avoid this unless its the manager)
+	ilogger log.Logger         // internal logger used to log rxd internal messages (usually used by the daemon)
+	ic      *intracom.Intracom // ic is the shared intracom registry used between all the services.
 }
 
-func newServiceContextWithCancel(parent context.Context, name string, logger log.Logger, ic *intracom.Intracom) (ServiceContext, context.CancelFunc) {
+func newServiceContextWithCancel(parent context.Context, name string, slogger, ilogger log.Logger, ic *intracom.Intracom) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 
 	fields := []log.Field{}
@@ -58,7 +59,8 @@ func newServiceContextWithCancel(parent context.Context, name string, logger log
 		name:    name,
 		fqcn:    name,
 		fields:  fields,
-		logger:  logger,
+		slogger: slogger,
+		ilogger: ilogger,
 		ic:      ic,
 	}, cancel
 }
@@ -101,7 +103,7 @@ func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelF
 func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
 	allFields := make([]log.Field, 0, len(fields)+len(sc.fields))
 	allFields = append(sc.fields, fields...)
-	sc.logger.Log(level, message, allFields...)
+	sc.slogger.Log(level, message, allFields...)
 }
 
 func (sc *serviceContext) Deadline() (deadline time.Time, ok bool) {
@@ -154,7 +156,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 		})
 
 		if err != nil {
-			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
+			sc.ilogger.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
 		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
@@ -175,7 +177,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 					case Entering:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 						// if the current state matches the target state and the transition is entering, we are interested in it.
@@ -186,7 +188,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 					case Exited:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 
@@ -198,7 +200,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 					case Changing:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 
@@ -210,7 +212,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 					case NotIn:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 						// if the current state does not match the target state, we are interested in it.
@@ -225,7 +227,7 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 				if len(interestedServices) == len(services) {
 					select {
 					case <-ctx.Done():
-						sc.logger.Log(log.LevelDebug, "context done, stopping watch for interested services")
+						sc.ilogger.Log(log.LevelDebug, "context done, stopping watch for interested services")
 						return
 					case ch <- interestedServices: // send out the states to caller
 						// NOTE: we keep the channel open because we dont assume the caller is done after the first signal.
@@ -266,7 +268,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 		})
 
 		if err != nil {
-			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
+			sc.ilogger.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
 		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
@@ -288,7 +290,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 					case Entering:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 						// if the current state matches the target state and the transition is entering, we are interested in it.
@@ -299,7 +301,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 					case Exited:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 
@@ -311,7 +313,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 					case Changing:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 
@@ -323,7 +325,7 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 					case NotIn:
 						current, ok := states[name]
 						if !ok {
-							sc.logger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
+							sc.ilogger.Log(log.LevelWarning, "service not found in states", log.String("service", name), log.String("consumer", consumer))
 							continue // skip if the service is not found in the states
 						}
 						// if the current state does not match the target state, we are interested in it.
@@ -379,7 +381,7 @@ func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceSt
 		})
 
 		if err != nil {
-			sc.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
+			sc.ilogger.Log(log.LevelError, "failed to subscribe to internal states: "+err.Error())
 			return
 		}
 		defer intracom.RemoveSubscription(sc.ic, internalServiceStates, consumer, sub)
