@@ -126,6 +126,7 @@ func (s *HelloWorldAPIService) Run(sctx rxd.ServiceContext) error {
 
 		select {
 		case <-sctx.Done():
+			return
 		case <-errTimeout.C:
 			sctx.Log(log.LevelError, "timeout waiting for context to close")
 		}
@@ -149,7 +150,7 @@ func (s *HelloWorldAPIService) Run(sctx rxd.ServiceContext) error {
 
 	<-doneC // wait for signal routine to finish...
 	sctx.Log(log.LevelInfo, "server stopped")
-	return nil
+	return rxd.ErrLifecycleDone // returning this error wont be printed but will take the same error path.
 }
 
 func (s *HelloWorldAPIService) Init(sctx rxd.ServiceContext) error {

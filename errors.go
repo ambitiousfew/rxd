@@ -1,6 +1,13 @@
 package rxd
 
+import (
+	"context"
+	"errors"
+)
+
 const (
+	// ErrLifecycleDone indicates that the lifecycle has completed.
+	ErrLifecycleDone Error = Error("lifecycle done")
 	// ErrDaemonStarted indicates that the daemon has already been started.
 	ErrDaemonStarted Error = Error("daemon has already been started")
 	// ErrDuplicateServiceName indicates that a service with the same name already exists.
@@ -33,4 +40,9 @@ type ErrUninitialized struct {
 
 func (e ErrUninitialized) Error() string {
 	return e.StructName + " is nil, but uses a value receiver for '" + e.Method + "' method."
+}
+
+// IsCancelled checks if the error is a context cancellation error.
+func IsCancelled(err error) bool {
+	return err == ErrLifecycleDone || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

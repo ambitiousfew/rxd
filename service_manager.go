@@ -63,7 +63,6 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 	for state != StateExit {
 		// signal the current state we are about to enter. to the daemon states watcher.
 		updateC <- ServiceStateUpdate{Name: ds.Name, State: state, Transition: TransitionEntering}
-
 		select {
 		case <-sctx.Done():
 			// if the context is cancelled, transition to exit so we exit the loop.
@@ -79,49 +78,62 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 			switch state {
 			case StateInit:
 				if err := ds.Runner.Init(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
 					// if an error occurs in init state, transition to stop skipping idle and run.
 					state = StateStop
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
 				} else {
 					// if no error occurs in init state, transition to idle.
 					state = StateIdle
 				}
 
-				// signal the current state we have exited to the daemon states watcher.
+				// signal the current state we have exited init to the daemon states watcher.
 				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateInit, Transition: TransitionExited}
 			case StateIdle:
 				if err := ds.Runner.Idle(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
 					// if an error occurs in idle state, transition to stop skipping run.
 					state = StateStop
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
 				} else {
 					// if no error occurs in idle state, transition to run.
 					state = StateRun
 				}
-				// signal the current state we have exited to the daemon states watcher.
+				// signal the current state we have exited idle to the daemon states watcher.
 				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateIdle, Transition: TransitionExited}
 
 			case StateRun:
 				if err := ds.Runner.Run(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
 				}
-				// signal the current state we have exited to the daemon states watcher.
-				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateRun, Transition: TransitionExited}
 				// run continous manager will always go back to stop after run to perform any cleanup.
 				state = StateStop
+				// signal the current state we have exited run to the daemon states watcher.
+				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateRun, Transition: TransitionExited}
+
 			case StateStop:
 				if err := ds.Runner.Stop(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
 				}
-				// signal the current state we have exited to the daemon states watcher.
-				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionExited}
 				// run continous manager will always go back to init after stop unless context is cancelled.
 				state = StateInit
 				// flip hasStopped to true to ensure we don't run stop again if Exit is next.
 				hasStopped = true
+				// signal the current state we have exited stop to the daemon states watcher.
+				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionExited}
+
 			default:
 				sctx.Log(log.LevelError, "unknown state encountered", log.String("state", state.String()))
-				continue
 			}
 
 			// reset the timeout to the next desired state, if transition timeout not set use default.
@@ -138,9 +150,11 @@ func (m RunContinuousManager) Manage(sctx ServiceContext, ds DaemonService, upda
 	if !hasStopped {
 		// signal the current state we have exited to the daemon states watcher.
 		updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionEntering}
-		err := ds.Runner.Stop(sctx)
-		if err != nil {
-			sctx.Log(log.LevelError, err.Error())
+		if err := ds.Runner.Stop(sctx); err != nil {
+			if !IsCancelled(err) {
+				// If the lifecycle returned an error that is not a cancellation, log for the user.
+				sctx.Log(log.LevelError, err.Error())
+			}
 		}
 		updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionExited}
 	}
@@ -188,7 +202,7 @@ func (m RunUntilSuccessManager) Manage(sctx ServiceContext, ds DaemonService, up
 	ticker := time.NewTicker(m.StartupDelay)
 	defer ticker.Stop()
 
-	var hasStopped bool
+	var hasStopped = true
 
 	// run until success will always start from the init state.
 	var state = StateInit
@@ -200,8 +214,11 @@ func (m RunUntilSuccessManager) Manage(sctx ServiceContext, ds DaemonService, up
 		updateC <- ServiceStateUpdate{Name: ds.Name, State: state, Transition: TransitionEntering}
 		// startup delay has passed, we can start the service runner loop.
 		if err := ds.Runner.Init(sctx); err != nil {
-			sctx.Log(log.LevelError, err.Error())
 			state = StateStop
+			if !IsCancelled(err) {
+				// If the lifecycle returned an error that is not a cancellation, log for the user.
+				sctx.Log(log.LevelError, err.Error())
+			}
 		} else {
 			state = StateIdle
 		}
@@ -227,44 +244,57 @@ func (m RunUntilSuccessManager) Manage(sctx ServiceContext, ds DaemonService, up
 			switch state {
 			case StateInit:
 				if err := ds.Runner.Init(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
 					state = StateStop
-					continue
+				} else {
+					state = StateIdle
 				}
+				// signal the init state we have exited to the daemon states watcher.
 				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateInit, Transition: TransitionExited}
-				state = StateIdle
 
 			case StateIdle:
 				if err := ds.Runner.Idle(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
-					continue
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
+				} else {
+					state = StateRun
 				}
+				// signal the idle state we have exited to the daemon states watcher.
 				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateIdle, Transition: TransitionExited}
-				state = StateRun
 
 			case StateRun:
 				if err := ds.Runner.Run(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
 					state = StateStop
-					continue
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
+				} else {
+					// run exited successfully, we can exit the loop.
+					state = StateExit
 				}
+				// signal the run state we have exited to the daemon states watcher.
 				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateRun, Transition: TransitionExited}
-
-				// run exited successfully, we can exit the loop.
-				state = StateExit
 			case StateStop:
 				// entering stop state, inform the daemon states watcher.
 				if err := ds.Runner.Stop(sctx); err != nil {
-					sctx.Log(log.LevelError, err.Error())
+					if !IsCancelled(err) {
+						// If the lifecycle returned an error that is not a cancellation, log for the user.
+						sctx.Log(log.LevelError, err.Error())
+					}
+				} else {
+					// we have exited stop, inform the daemon states watcher.
+					state = StateInit
 				}
-
-				// we have exited stop, inform the daemon states watcher.
-				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionExited}
-
-				state = StateInit
 				hasStopped = true
-
+				// signal the stop state we have exited to the daemon states watcher.
+				updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionExited}
 			}
 		}
 
@@ -274,7 +304,10 @@ func (m RunUntilSuccessManager) Manage(sctx ServiceContext, ds DaemonService, up
 		updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionEntering}
 		// ensure that if any lifecycle ran after stop, we run stop again (for cleanup).
 		if err := ds.Runner.Stop(sctx); err != nil {
-			sctx.Log(log.LevelError, err.Error())
+			if !IsCancelled(err) {
+				// If the lifecycle returned an error that is not a cancellation, log for the user.
+				sctx.Log(log.LevelError, err.Error())
+			}
 		}
 		updateC <- ServiceStateUpdate{Name: ds.Name, State: StateStop, Transition: TransitionExited}
 	}

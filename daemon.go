@@ -344,7 +344,7 @@ func (d *daemon) statesWatcher(statesTopic intracom.Topic[ServiceStates], stateU
 
 		// states watcher routine should be closed after all services have exited.
 		for state := range stateUpdatesC {
-			d.internalLogger.Log(log.LevelDebug, "----- states transition update", log.String("service_name", state.Name), log.String("state", state.State.String()))
+			d.internalLogger.Log(log.LevelDebug, "states transition update", log.String("service_name", state.Name), log.String("state", state.State.String()))
 			// update the state of the service only if it changed.
 			states[state.Name] = StateUpdate{
 				State:      state.State,

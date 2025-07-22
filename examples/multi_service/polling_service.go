@@ -31,7 +31,7 @@ func NewAPIPollingService() *APIPollingService {
 		// We will check every 10s to see if we can establish a connection to the API when Idle retrying.
 		retryDuration: 10 * time.Second,
 		apiBase:       "http://localhost:8000",
-		maxPollCount:  5,
+		maxPollCount:  2,
 	}
 }
 
@@ -73,21 +73,23 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-statesC:
 			// Hello World API should have exited Run state, so we need to move out of run too.
 			return nil
 
 		case <-timer.C:
+			pollCount++
 			if pollCount > s.maxPollCount {
 				ctx.Log(log.LevelInfo, "reached maximum poll count, stopping")
-				return nil
+				return rxd.ErrLifecycleDone
 			}
 
 			resp, err := s.client.Get(s.apiBase + "/api")
 			if err != nil {
 				// if we error, reset timer and try again...
 				timer.Reset(s.retryDuration)
+				ctx.Log(log.LevelError, "error making request to API: "+err.Error())
 				continue
 			}
 
@@ -95,6 +97,7 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 			resp.Body.Close()
 
 			if err != nil {
+				ctx.Log(log.LevelError, "error reading response body: "+err.Error())
 				return err
 				// we could return to new state: idle or stop or just continue
 			}
@@ -102,16 +105,15 @@ func (s *APIPollingService) Run(ctx rxd.ServiceContext) error {
 			var respBody map[string]any
 			err = json.Unmarshal(respBytes, &respBody)
 			if err != nil {
+				ctx.Log(log.LevelError, "error unmarshalling response body: "+err.Error())
 				return err
 				// we could return to new state: idle or stop or just continue to keep trying.
 			}
 
 			ctx.Log(log.LevelInfo, fmt.Sprintf("received response from the API: %v", respBody))
-			// Increment polling counter
-			pollCount++
 
 			// Retry every 10s after the first time.
-			timer.Reset(10 * time.Second)
+			timer.Reset(s.retryDuration)
 		}
 	}
 }
