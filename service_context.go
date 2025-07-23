@@ -13,13 +13,44 @@ import (
 // This interface is used by the ServiceContext to log messages related to service operations.
 // It provides a way to log messages with a specific level and additional fields for context.
 type ServiceLogger interface {
+	// Log logs a message with the specified level, message, and any additional fields.
 	Log(level log.Level, message string, extra ...log.Field)
 }
 
 // ServiceWatcher is an interface for watching service states.
 type ServiceWatcher interface {
+	// WatchAllStates allows the caller to watch all service states and filter them based on the provided filter.
+	// It returns a channel that will signal every time there is a change in the states of the services.
+	// The channel will send out the current states of all services that match the filter criteria.
+	// If no filter is provided, it will send out all the states of all services for every single change.
+	// The filter can be used to include or exclude specific services based on their names.
+	// This is useful for scenarios where you want to monitor the states of all services from another reporting-like service.
+	//
+	// NOTE: The 2nd return value is a cancel function that can be used to stop watching the services.
+	// The channel will stay open until this cancel function is called or the parent context is done.
+	// The caller should always call the cancel function to avoid leaking resources.
+	// The channel will send out the states of all services that match the filter criteria.
 	WatchAllStates(ServiceFilter) (<-chan ServiceStates, context.CancelFunc)
+
+	// WatchAnyServices allows the caller to specify a list of services by unique name and their target state and action.
+	// It returns a channel that will signal when ANY of the services given match the action and target state.
+	// The moment a single service reaches the desired state, the channel will send out the states of those services as a signal.
+	// This is useful for scenarios where you want to be notified when any group of services reaches a specific state.
+	//
+	// NOTE: The 2nd return value is a cancel function that can be used to stop watching the services.
+	// The channel will stay open until this cancel function is called or the parent context is done.
+	// The caller should always call the cancel function to avoid leaking resources.
+	// This is useful for scenarios where you want to be notified when any of the services reaches a specific state.
 	WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc)
+
+	// WatchAllServices allows the caller to specify a list of services by unique name and their target state and action.
+	// It returns a channel that will only signal when ALL the services given match the action and target state.
+	// Only once all the services reach the desired state, the channel will send out the states of those services as a signal.
+	// This is useful for scenarios where you want to wait for multiple services to reach a specific state before proceeding.
+	//
+	// NOTE: The 2nd return value is a cancel function that can be used to stop watching the services.
+	// The channel will stay open until this cancel function is called or the parent context is done.
+	// The caller should always call the cancel function to avoid leaking resources.
 	WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc)
 }
 
@@ -30,10 +61,26 @@ type ServiceContext interface {
 	context.Context
 	ServiceWatcher
 	ServiceLogger
-	WithFields(fields ...log.Field) ServiceContext
+	// WithParent replaces the original context with the provided parent context.
+	// It returns the original ServiceContext with the new context and a cancel function.
+	// This allows for detaching the service context from its parent and allowing the caller to
+	// cancel the context at an earlier time if needed.
 	WithParent(ctx context.Context) (ServiceContext, context.CancelFunc)
+	// WithName allows the caller to create a new CHILD service context with a specific name.
+	// This is useful for creating child contexts to be used for services launches additional
+	// worker goroutines where the parent service is managing its own lifecycles of those workers.
+	// The returned ServiceContext is composed from the original parent context, therefore it has
+	// if the parent is cancelled, the child context will also be cancelled when the daemon is shutting down.
 	WithName(name string) (ServiceContext, context.CancelFunc)
+	// IntracomRegistry returns the embedded intracom registry used by the daemon for all services.
+	// The caller can use this to register new topics, create subscriptions, and publish messages
+	// between services.
+	// NOTE: Avoid using topics with an _rxd prefix as these are reserved for internal use by the daemon.
+	// overlapping this topic name may cause unexpected behavior with internal states tracking by the daemon.
 	IntracomRegistry() *intracom.Intracom
+	// Logger returns the service logger used to log messages related to the service.
+	// This logger should be prefixed with its original service=<service_name> field.
+	Logger() log.Logger
 }
 
 type serviceContext struct {
@@ -58,17 +105,12 @@ func newServiceContextWithCancel(parent context.Context, name string, slogger, i
 		Context: ctx,
 		name:    name,
 		fqcn:    name,
-		fields:  fields,
-		slogger: slogger,
-		ilogger: ilogger,
+		slogger: slogger.With(fields...),
+		ilogger: ilogger.With(fields...),
 		ic:      ic,
 	}, cancel
 }
 
-// WithParent replaces the original context with the provided parent context.
-// It returns the original ServiceContext with the new context and a cancel function.
-// This allows for detaching the service context from its parent and allowing the caller to
-// cancel the context at an earlier time if needed.
 func (sc *serviceContext) WithParent(parent context.Context) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(parent)
 
@@ -77,19 +119,6 @@ func (sc *serviceContext) WithParent(parent context.Context) (ServiceContext, co
 	return &newCtx, cancel
 }
 
-// WithFields allows the caller to add additional fields to the service context
-// so when logging messages, these fields are always attached to all log messages.
-func (sc *serviceContext) WithFields(fields ...log.Field) ServiceContext {
-	newCtx := *sc
-	newCtx.fields = append(sc.fields, fields...)
-	return &newCtx
-}
-
-// WithName allows the caller to create a new CHILD service context with a specific name.
-// This is useful for creating child contexts to be used for services launches additional
-// worker goroutines where the parent service is managing its own lifecycles of those workers.
-// The returned ServiceContext is composed from the original parent context, therefore it has
-// if the parent is cancelled, the child context will also be cancelled when the daemon is shutting down.
 func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(sc.Context)
 	newCtx := *sc
@@ -99,7 +128,6 @@ func (sc *serviceContext) WithName(name string) (ServiceContext, context.CancelF
 	return &newCtx, cancel
 }
 
-// Log logs a message with the specified level, message, and any additional fields.
 func (sc *serviceContext) Log(level log.Level, message string, fields ...log.Field) {
 	allFields := make([]log.Field, 0, len(fields)+len(sc.fields))
 	allFields = append(sc.fields, fields...)
@@ -122,23 +150,14 @@ func (sc *serviceContext) Value(key interface{}) interface{} {
 	return sc.Context.Value(key)
 }
 
-// IntracomRegistry returns the embedded intracom registry used by the daemon for all services.
-// The caller can use this to register new topics, create subscriptions, and publish messages
-// between services.
-// NOTE: Avoid using topics with an _rxd prefix as these are reserved for internal use by the daemon.
-// overlapping this topic name may cause unexpected behavior with internal states tracking by the daemon.
+func (sc *serviceContext) Logger() log.Logger {
+	return sc.slogger
+}
+
 func (sc *serviceContext) IntracomRegistry() *intracom.Intracom {
 	return sc.ic
 }
 
-// WatchAllServices allows the caller to specify a list of services by unique name and their target state and action.
-// It returns a channel that will only signal when ALL the services given match the action and target state.
-// Only once all the services reach the desired state, the channel will send out the states of those services as a signal.
-// This is useful for scenarios where you want to wait for multiple services to reach a specific state before proceeding.
-//
-// NOTE: The 2nd return value is a cancel function that can be used to stop watching the services.
-// The channel will stay open until this cancel function is called or the parent context is done.
-// The caller should always call the cancel function to avoid leaking resources.
 func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
@@ -242,15 +261,6 @@ func (sc *serviceContext) WatchAllServices(action ServiceAction, target State, s
 	return ch, cancel
 }
 
-// WatchAnyServices allows the caller to specify a list of services by unique name and their target state and action.
-// It returns a channel that will signal when ANY of the services given match the action and target state.
-// The moment a single service reaches the desired state, the channel will send out the states of those services as a signal.
-// This is useful for scenarios where you want to be notified when any group of services reaches a specific state.
-//
-// NOTE: The 2nd return value is a cancel function that can be used to stop watching the services.
-// The channel will stay open until this cancel function is called or the parent context is done.
-// The caller should always call the cancel function to avoid leaking resources.
-// This is useful for scenarios where you want to be notified when any of the services reaches a specific state.
 func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, services ...string) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)
@@ -354,17 +364,6 @@ func (sc *serviceContext) WatchAnyServices(action ServiceAction, target State, s
 	return ch, cancel
 }
 
-// WatchAllStates allows the caller to watch all service states and filter them based on the provided filter.
-// It returns a channel that will signal every time there is a change in the states of the services.
-// The channel will send out the current states of all services that match the filter criteria.
-// If no filter is provided, it will send out all the states of all services for every single change.
-// The filter can be used to include or exclude specific services based on their names.
-// This is useful for scenarios where you want to monitor the states of all services from another reporting-like service.
-//
-// NOTE: The 2nd return value is a cancel function that can be used to stop watching the services.
-// The channel will stay open until this cancel function is called or the parent context is done.
-// The caller should always call the cancel function to avoid leaking resources.
-// The channel will send out the states of all services that match the filter criteria.
 func (sc *serviceContext) WatchAllStates(filter ServiceFilter) (<-chan ServiceStates, context.CancelFunc) {
 	ch := make(chan ServiceStates, 1)
 	watchCtx, cancel := context.WithCancel(sc)

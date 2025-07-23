@@ -36,7 +36,12 @@ func (l *logger) Log(level Level, message string, fields ...Field) {
 		return
 	}
 
-	l.handler.Handle(level, message, fields)
+	// Combine the logger's fields with the provided log fields
+	allFields := make([]Field, len(l.fields)+len(fields))
+	copy(allFields, l.fields)
+	copy(allFields[len(l.fields):], fields)
+
+	l.handler.Handle(level, message, allFields)
 }
 
 func (l *logger) With(fields ...Field) Logger {

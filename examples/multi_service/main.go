@@ -31,6 +31,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	handler := log.NewHandler(log.WithWriters(os.Stdout, os.Stderr))
+	logger := log.NewLogger(log.LevelInfo, handler)
+
 	// Create Poll Service config with RunPolicy option.
 	// Pass config to instance of service struct
 	pollClient := NewAPIPollingService()
@@ -47,10 +50,6 @@ func main() {
 			Runner: pollClient,
 		},
 	}
-
-	// 1st run
-	handler := log.NewHandler(log.WithWriters(os.Stdout, os.Stderr))
-	logger := log.NewLogger(log.LevelInfo, handler)
 
 	// 2nd run
 	// logger := journald.NewLogger(log.LevelDebug)
