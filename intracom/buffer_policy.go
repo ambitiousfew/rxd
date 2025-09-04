@@ -37,6 +37,17 @@ type BufferPolicyDropOldest[T any] struct{}
 // If the stop channel is closed, it returns an error indicating that the subscriber has stopped.
 // If the message is successfully sent, it returns nil.
 func (d BufferPolicyDropOldest[T]) Handle(ch chan T, message T, stopC <-chan struct{}) error {
+	// Always attempt to  drop first before pushing one in.
+	select {
+	case <-stopC:
+		// subscriber stopped dont try to send the message
+		return errors.New("subscriber stopped")
+	case <-ch:
+		// dropped 1
+	default:
+		// no message to drop, continue...
+	}
+
 	select {
 	case <-stopC:
 		// subscriber stopped dont try to send the message
@@ -46,24 +57,7 @@ func (d BufferPolicyDropOldest[T]) Handle(ch chan T, message T, stopC <-chan str
 		return nil
 	default:
 		// we failed to push the message buffer is full
-	}
-
-	select {
-	case <-stopC:
-		// subscriber stopped dont try to send the message
-		return errors.New("subscriber stopped")
-	case <-ch:
-		// dropped the oldest message
-		select {
-		case <-stopC:
-			return errors.New("subscriber stopped")
-		case ch <- message:
-			// we succeeded at pushing the new message
-			return nil
-		default:
-			// we failed to push the message buffer is still full
-			return errors.New("failed to push message")
-		}
+		return errors.New("buffer full, failed to push message")
 	}
 }
 
